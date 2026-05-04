@@ -1,0 +1,54 @@
+# Environments
+venv/
+env/
+.env
+.venv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# NLP & Deep Learning Models
+models/
+!models/.gitkeep
+*.pt
+*.bin
+*.ckpt
+*.safetensors
+*.h5
+*.onnx
+
+# Data & Logs
+data/*.csv
+data/*.json
+data/*.txt
+!data/.gitkeep
+logs/
+*.log
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

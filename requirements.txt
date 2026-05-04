@@ -1,0 +1,40 @@
+# ==============================================================================
+# NLP Vietnamese Text Summarization System - Requirements
+# ==============================================================================
+
+# --- Core Deep Learning & NLP ---
+torch>=2.1.0
+transformers>=4.38.0
+datasets>=2.18.0
+evaluate>=0.4.1
+sentencepiece>=0.1.99
+accelerate>=0.27.0
+
+# --- Extractive Summarization ---
+sumy>=0.11.0
+nltk>=3.8.1
+
+# --- Vietnamese NLP ---
+underthesea>=6.8.0
+
+# --- Web Crawling ---
+newspaper3k>=0.2.8
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+requests>=2.31.0
+lxml_html_clean>=0.1.0
+
+# --- API ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+pydantic>=2.6.0
+
+# --- Evaluation ---
+rouge-score>=0.1.2
+
+# --- Utilities ---
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+pandas>=2.2.0

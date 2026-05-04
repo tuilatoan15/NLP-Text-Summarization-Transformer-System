@@ -1,0 +1,4 @@
+# Placeholder — thư mục chứa dataset (CSV/JSON)
+# Đặt file dữ liệu của bạn vào đây theo format:
+#   - article: văn bản đầy đủ
+#   - title:   tiêu đề / tóm tắt ngắn
