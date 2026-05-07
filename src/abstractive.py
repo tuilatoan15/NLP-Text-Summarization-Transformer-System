@@ -13,6 +13,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
+
 import torch
 from transformers import (
     AutoTokenizer,
@@ -29,15 +32,21 @@ from src.utils import logger, truncate_text
 
 # Model mặc định: ViT5 base của VietAI
 DEFAULT_MODEL_NAME = "VietAI/vit5-base"
+BART_MODEL_NAME = "facebook/bart-large-cnn"
+SUPPORTED_MODEL_NAMES = {
+    "vit5": DEFAULT_MODEL_NAME,
+    "t5": DEFAULT_MODEL_NAME,
+    "bart": BART_MODEL_NAME,
+}
 
 # Thư mục lưu model đã fine-tune
 LOCAL_MODEL_DIR = Path("./models/vit5-finetuned")
 
 # Cấu hình sinh văn bản
 DEFAULT_MAX_INPUT_TOKENS = 512      # Giới hạn token đầu vào
-DEFAULT_MAX_OUTPUT_LENGTH = 150     # Độ dài tối đa bản tóm tắt
-DEFAULT_MIN_OUTPUT_LENGTH = 30      # Độ dài tối thiểu bản tóm tắt
-DEFAULT_NUM_BEAMS = 4               # Beam search (tăng chất lượng, giảm tốc độ)
+DEFAULT_MAX_OUTPUT_LENGTH = 110     # Ngắn hơn để suy luận nhanh hơn
+DEFAULT_MIN_OUTPUT_LENGTH = 20      # Độ dài tối thiểu bản tóm tắt
+DEFAULT_NUM_BEAMS = 2               # Tối ưu tốc độ cho API demo
 DEFAULT_NO_REPEAT_NGRAM_SIZE = 3    # Tránh lặp n-gram trong output
 
 
@@ -86,7 +95,8 @@ class AbstractiveSummarizer:
         Quyết định dùng model local hay Hugging Face Hub.
         Ưu tiên: local fine-tuned > Hugging Face Hub
         """
-        if self.local_model_dir.exists() and any(self.local_model_dir.iterdir()):
+        should_use_local = self.model_name == DEFAULT_MODEL_NAME or self.local_model_dir != LOCAL_MODEL_DIR
+        if should_use_local and self.local_model_dir.exists() and any(self.local_model_dir.iterdir()):
             logger.info(f"Dùng model local: {self.local_model_dir}")
             return str(self.local_model_dir)
         else:
@@ -130,6 +140,7 @@ class AbstractiveSummarizer:
         max_output_length: Optional[int] = None,
         min_output_length: Optional[int] = None,
         num_beams: Optional[int] = None,
+        chunk_long_text: bool = True,
     ) -> str:
         """
         Sinh bản tóm tắt diễn giải từ văn bản đầu vào.
@@ -163,6 +174,9 @@ class AbstractiveSummarizer:
         _min_len = min_output_length or self.min_output_length
         _beams = num_beams or self.num_beams
 
+        if chunk_long_text and len(text.split()) > max_words:
+            return self._summarize_chunks(text, _max_len, _min_len, _beams, max_words)
+
         try:
             results = self._pipeline(
                 text,
@@ -182,6 +196,46 @@ class AbstractiveSummarizer:
             logger.error(f"Lỗi sinh tóm tắt: {e}")
             return ""
 
+    def _summarize_chunks(
+        self,
+        text: str,
+        max_length: int,
+        min_length: int,
+        num_beams: int,
+        max_words: int,
+    ) -> str:
+        words = text.split()
+        chunk_size = max(120, max_words)
+        overlap = 40
+        chunks = []
+        start = 0
+        while start < len(words):
+            chunks.append(" ".join(words[start:start + chunk_size]))
+            start += max(1, chunk_size - overlap)
+
+        partials = []
+        for chunk in chunks[:6]:
+            partial = self.summarize(
+                chunk,
+                max_output_length=max(40, int(max_length / 2)),
+                min_output_length=min(min_length, 20),
+                num_beams=num_beams,
+                chunk_long_text=False,
+            )
+            if partial:
+                partials.append(partial)
+
+        merged = " ".join(partials)
+        if len(merged.split()) <= max_words:
+            return merged
+        return self.summarize(
+            merged,
+            max_output_length=max_length,
+            min_output_length=min_length,
+            num_beams=num_beams,
+            chunk_long_text=False,
+        )
+
     def is_loaded(self) -> bool:
         """Kiểm tra model đã được load chưa."""
         return self._pipeline is not None
@@ -191,7 +245,14 @@ class AbstractiveSummarizer:
 # SINGLETON INSTANCE (Dùng chung trong API để tránh load model nhiều lần)
 # ==============================================================================
 
-_global_summarizer: Optional[AbstractiveSummarizer] = None
+_global_summarizers: dict[str, AbstractiveSummarizer] = {}
+
+
+def resolve_model_name(model_name: str | None = None) -> str:
+    if not model_name:
+        return DEFAULT_MODEL_NAME
+    key = model_name.strip().lower()
+    return SUPPORTED_MODEL_NAMES.get(key, model_name)
 
 
 def get_summarizer(
@@ -202,17 +263,18 @@ def get_summarizer(
     Lấy instance AbstractiveSummarizer toàn cục (singleton pattern).
     Đảm bảo model chỉ được load một lần duy nhất trong quá trình chạy.
     """
-    global _global_summarizer
+    resolved_model_name = resolve_model_name(model_name)
+    cache_key = f"{resolved_model_name}|{local_model_dir or LOCAL_MODEL_DIR}"
 
-    if _global_summarizer is None:
+    if cache_key not in _global_summarizers:
         logger.info("Khởi tạo AbstractiveSummarizer lần đầu...")
-        _global_summarizer = AbstractiveSummarizer(
-            model_name=model_name,
+        _global_summarizers[cache_key] = AbstractiveSummarizer(
+            model_name=resolved_model_name,
             local_model_dir=local_model_dir,
         )
-        _global_summarizer.load()
+        _global_summarizers[cache_key].load()
 
-    return _global_summarizer
+    return _global_summarizers[cache_key]
 
 
 def abstractive_summarize(
@@ -221,13 +283,14 @@ def abstractive_summarize(
     min_output_length: int = DEFAULT_MIN_OUTPUT_LENGTH,
     num_beams: int = DEFAULT_NUM_BEAMS,
     local_model_dir: Optional[str] = None,
+    model_name: str = DEFAULT_MODEL_NAME,
 ) -> str:
     """
     Hàm tiện ích: tóm tắt diễn giải, dùng singleton summarizer.
 
     Dùng khi muốn gọi trực tiếp mà không cần khởi tạo class.
     """
-    summarizer = get_summarizer(local_model_dir=local_model_dir)
+    summarizer = get_summarizer(model_name=model_name, local_model_dir=local_model_dir)
     return summarizer.summarize(
         text,
         max_output_length=max_output_length,

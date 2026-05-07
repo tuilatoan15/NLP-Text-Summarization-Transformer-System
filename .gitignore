@@ -44,6 +44,9 @@ data/*.txt
 !data/.gitkeep
 logs/
 *.log
+storage/
+frontend/node_modules/
+frontend/dist/
 
 # IDE & OS
 .idea/

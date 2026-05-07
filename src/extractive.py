@@ -16,6 +16,7 @@ from sumy.nlp.stemmers import Stemmer
 from sumy.utils import get_stop_words
 
 from src.utils import logger
+from src.preprocess import split_sentences
 
 
 def _get_tokenizer(language: str) -> Tokenizer:
@@ -128,6 +129,106 @@ def extractive_summarize(
         return _fallback_extractive(text, sentence_count)
 
 
+def extractive_summarize_with_details(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    language: str = LANGUAGE,
+) -> dict:
+    """Return TextRank summary with selected sentence indexes and scores.
+
+    Use embedding-based TextRank scoring when possible for more interpretable
+    sentence_score values. Falls back to centroid-based scoring if embedding
+    model is unavailable.
+    """
+    summary = extractive_summarize(text, sentence_count=sentence_count, language=language)
+    source_sentences = split_sentences(text)
+    selected_sentences = split_sentences(summary)
+    # Try embedding-based TextRank scoring; fallback to centroid
+    ranked = _textrank_scores(source_sentences) if source_sentences else {}
+    selected = []
+    used_indexes = set()
+
+    for selected_sentence in selected_sentences:
+        index, source_sentence, similarity = _best_sentence_match(
+            selected_sentence,
+            source_sentences,
+            used_indexes,
+        )
+        if index >= 0:
+            used_indexes.add(index)
+        selected.append({
+            "sentence": source_sentence or selected_sentence,
+            "sentence_index": index,
+            "sentence_score": round(ranked.get(index, 0.0), 4),
+            "match_similarity": round(similarity, 4),
+        })
+
+    return {
+        "summary": summary,
+        "selected_sentences": selected,
+        "highlighted_sentence_indexes": [
+            item["sentence_index"] for item in selected if item["sentence_index"] >= 0
+        ],
+    }
+
+
+def _textrank_scores(sentences: list[str], model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> dict[int, float]:
+    """
+    Compute TextRank-like sentence importance scores using sentence embeddings.
+
+    Steps:
+      - Encode sentences to dense vectors (SentenceTransformer)
+      - Compute cosine similarity matrix (embedding vectors are L2-normalized)
+      - Remove self-similarity and run PageRank via power iteration
+      - Normalize scores to [0, 1] by dividing by max
+
+    Falls back to _rank_by_centroid if sentence-transformers is unavailable.
+    """
+    if not sentences:
+        return {}
+    try:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+    except Exception as e:
+        logger.warning(f"Không thể tải sentence-transformers cho TextRank scores: {e}. Dùng centroid fallback.")
+        return _rank_by_centroid(sentences)
+
+    try:
+        model = SentenceTransformer(model_name)
+        embeddings = model.encode(sentences, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
+        sim = embeddings @ embeddings.T
+        # remove self similarity
+        np.fill_diagonal(sim, 0.0)
+
+        # Build column-stochastic matrix for PageRank
+        A = np.where(sim < 0, 0.0, sim)  # ensure non-negative
+        col_sum = A.sum(axis=0)
+        # avoid division by zero
+        col_sum[col_sum == 0] = 1.0
+        M = A / col_sum
+
+        # power iteration
+        n = A.shape[0]
+        p = np.ones(n) / n
+        d = 0.85
+        tol = 1e-6
+        for _ in range(1000):
+            p_new = d * (M @ p) + (1.0 - d) / n
+            if np.linalg.norm(p_new - p, ord=1) < tol:
+                p = p_new
+                break
+            p = p_new
+
+        scores = {i: float(p[i]) for i in range(n)}
+        max_score = max(scores.values()) if scores else 1.0
+        if max_score:
+            scores = {i: scores[i] / max_score for i in scores}
+        return scores
+    except Exception as e:
+        logger.warning(f"Lỗi khi tính TextRank scores: {e}. Dùng centroid fallback.")
+        return _rank_by_centroid(sentences)
+
+
 def _remove_duplicate_sentences(sentences: list[str], threshold: float = 0.8) -> list[str]:
     """
     Loại bỏ các câu quá giống nhau (trùng lặp thông tin).
@@ -179,6 +280,51 @@ def _fallback_extractive(text: str, sentence_count: int) -> str:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
     selected = sentences[:sentence_count]
     return " ".join(selected)
+
+
+def _rank_by_centroid(sentences: list[str]) -> dict[int, float]:
+    if not sentences:
+        return {}
+    token_sets = [_token_set(sentence) for sentence in sentences]
+    centroid = set().union(*token_sets) if token_sets else set()
+    scores = {}
+    for index, tokens in enumerate(token_sets):
+        scores[index] = _jaccard(tokens, centroid)
+    max_score = max(scores.values()) if scores else 1.0
+    if max_score:
+        scores = {index: score / max_score for index, score in scores.items()}
+    return scores
+
+
+def _best_sentence_match(
+    sentence: str,
+    candidates: list[str],
+    used_indexes: set[int],
+) -> tuple[int, str, float]:
+    sentence_tokens = _token_set(sentence)
+    best = (-1, "", 0.0)
+    for index, candidate in enumerate(candidates):
+        if index in used_indexes:
+            continue
+        candidate_tokens = _token_set(candidate)
+        similarity = _jaccard(sentence_tokens, candidate_tokens)
+        if similarity > best[2]:
+            best = (index, candidate, similarity)
+    return best
+
+
+def _token_set(text: str) -> set[str]:
+    return {
+        token.lower()
+        for token in re.findall(r"\w+", text, flags=re.UNICODE)
+        if len(token) > 1
+    }
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
 
 
 # ==============================================================================

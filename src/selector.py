@@ -1,111 +1,86 @@
 """
-selector.py — Chọn bản tóm tắt tốt nhất dựa trên điểm số tổng hợp.
-
-Công thức điểm:
-    Score = 0.4 * ROUGE-L + 0.3 * ROUGE-1 + 0.2 * ROUGE-2 + 0.1 * length_score
-
-Trong đó length_score phạt các bản tóm tắt quá ngắn hoặc quá dài so với
-khoảng lý tưởng được cấu hình (mặc định: 30 - 150 từ).
+selector.py - Select the best summary using quality signals beyond ROUGE.
 """
 
-from typing import Optional
+import re
+
 from src.evaluate import compute_rouge
-from src.utils import logger, count_words
+from src.preprocess import split_sentences
+from src.utils import count_words, logger
 
 
-# ==============================================================================
-# CẤU HÌNH ĐIỂM
-# ==============================================================================
-
-# Trọng số điểm ROUGE trong công thức tổng hợp
-WEIGHT_ROUGE_L = 0.4
-WEIGHT_ROUGE_1 = 0.3
-WEIGHT_ROUGE_2 = 0.2
-WEIGHT_LENGTH  = 0.1
-
-# Khoảng độ dài lý tưởng (số từ) của bản tóm tắt
 IDEAL_MIN_WORDS = 30
 IDEAL_MAX_WORDS = 150
 
 
-# ==============================================================================
-# TÍNH LENGTH SCORE
-# ==============================================================================
-
-def compute_length_score(
-    summary: str,
-    ideal_min: int = IDEAL_MIN_WORDS,
-    ideal_max: int = IDEAL_MAX_WORDS,
-) -> float:
-    """
-    Tính điểm dựa trên độ dài bản tóm tắt.
-
-    - Nếu nằm trong khoảng [ideal_min, ideal_max]: điểm 1.0
-    - Nếu quá ngắn (< ideal_min): phạt tuyến tính về 0 khi về 0 từ
-    - Nếu quá dài  (> ideal_max): phạt tuyến tính, giảm dần khi dài thêm
-
-    Args:
-        summary:   Bản tóm tắt
-        ideal_min: Số từ tối thiểu lý tưởng
-        ideal_max: Số từ tối đa lý tưởng
-
-    Returns:
-        Điểm từ 0.0 đến 1.0
-    """
+def compute_length_score(summary: str, ideal_min: int = IDEAL_MIN_WORDS, ideal_max: int = IDEAL_MAX_WORDS) -> float:
     word_count = count_words(summary)
-
     if word_count == 0:
         return 0.0
-
+    if ideal_min <= word_count <= ideal_max:
+        return 1.0
     if word_count < ideal_min:
-        # Phạt khi quá ngắn: điểm tỷ lệ thuận với số từ/ideal_min
-        score = word_count / ideal_min
-    elif word_count > ideal_max:
-        # Phạt khi quá dài: giảm 5% cho mỗi 10 từ vượt quá
-        excess = word_count - ideal_max
-        penalty = excess / (ideal_max * 2)  # Penalty tăng dần
-        score = max(0.0, 1.0 - penalty)
+        return round(word_count / ideal_min, 4)
+    excess = word_count - ideal_max
+    return round(max(0.0, 1.0 - excess / (ideal_max * 2)), 4)
+
+
+def compute_readability_score(summary: str) -> float:
+    sentences = split_sentences(summary)
+    words = count_words(summary)
+    if not sentences or words == 0:
+        return 0.0
+    avg_sentence_len = words / len(sentences)
+    if 12 <= avg_sentence_len <= 28:
+        sentence_score = 1.0
     else:
-        score = 1.0
+        sentence_score = max(0.0, 1.0 - abs(avg_sentence_len - 20) / 40)
+    noisy_chars = len(re.findall(r"[^0-9A-Za-zÀ-ỹ\s.,;:!?%()\\/-]", summary))
+    noise_penalty = min(0.35, noisy_chars / max(1, len(summary)))
+    return round(max(0.0, sentence_score - noise_penalty), 4)
 
-    logger.debug(f"Length score: {score:.3f} ({word_count} từ, range [{ideal_min}-{ideal_max}])")
-    return round(score, 4)
+
+def compute_compression_score(summary: str, reference: str) -> float:
+    source_words = max(1, count_words(reference))
+    summary_words = count_words(summary)
+    ratio = summary_words / source_words
+    if 0.08 <= ratio <= 0.35:
+        return 1.0
+    if ratio < 0.08:
+        return round(max(0.0, ratio / 0.08), 4)
+    return round(max(0.0, 1.0 - (ratio - 0.35) / 0.65), 4)
 
 
-# ==============================================================================
-# TÍNH ĐIỂM TỔNG HỢP
-# ==============================================================================
+def compute_redundancy_penalty(summary: str) -> float:
+    sentences = split_sentences(summary)
+    if len(sentences) <= 1:
+        return 0.0
+    token_sets = [_token_set(sentence) for sentence in sentences]
+    similarities = []
+    for i in range(len(token_sets)):
+        for j in range(i + 1, len(token_sets)):
+            similarities.append(_jaccard(token_sets[i], token_sets[j]))
+    if not similarities:
+        return 0.0
+    high_overlap = [score for score in similarities if score > 0.55]
+    return round(min(0.35, sum(high_overlap) / max(1, len(similarities))), 4)
 
-def compute_combined_score(rouge_scores: dict, length_score: float) -> float:
-    """
-    Tính điểm tổng hợp theo công thức có trọng số.
 
-    Score = 0.4 * rougeL + 0.3 * rouge1 + 0.2 * rouge2 + 0.1 * length_score
-
-    Args:
-        rouge_scores: Dict chứa rouge1, rouge2, rougeL (F1 scores)
-        length_score: Điểm độ dài (0.0 - 1.0)
-
-    Returns:
-        Điểm tổng hợp (0.0 - 1.0)
-    """
-    rouge1 = rouge_scores.get("rouge1", 0.0)
-    rouge2 = rouge_scores.get("rouge2", 0.0)
-    rougeL = rouge_scores.get("rougeL", 0.0)
-
-    score = (
-        WEIGHT_ROUGE_L * rougeL +
-        WEIGHT_ROUGE_1 * rouge1 +
-        WEIGHT_ROUGE_2 * rouge2 +
-        WEIGHT_LENGTH  * length_score
+def compute_combined_score(rouge_scores: dict, length_score: float, readability: float, compression: float, redundancy: float) -> float:
+    rouge_quality = (
+        0.45 * rouge_scores.get("rougeL", 0.0)
+        + 0.35 * rouge_scores.get("rouge1", 0.0)
+        + 0.20 * rouge_scores.get("rouge2", 0.0)
     )
+    score = (
+        0.38 * rouge_quality
+        + 0.24 * readability
+        + 0.20 * compression
+        + 0.18 * length_score
+        - redundancy
+    )
+    return round(max(0.0, min(1.0, score)), 4)
 
-    return round(score, 4)
-
-
-# ==============================================================================
-# HÀM CHÍNH: CHỌN BẢN TÓM TẮT TỐT NHẤT
-# ==============================================================================
 
 def select_best_summary(
     extractive_summary: str,
@@ -114,88 +89,72 @@ def select_best_summary(
     ideal_min_words: int = IDEAL_MIN_WORDS,
     ideal_max_words: int = IDEAL_MAX_WORDS,
 ) -> dict:
-    """
-    So sánh và chọn bản tóm tắt tốt nhất giữa extractive và abstractive.
+    logger.info("Selecting best summary with ROUGE/readability/compression/redundancy signals...")
 
-    Args:
-        extractive_summary:  Bản tóm tắt trích xuất
-        abstractive_summary: Bản tóm tắt diễn giải
-        reference: Văn bản tham chiếu để tính ROUGE
-                   (nếu không có reference thực, dùng văn bản gốc)
-        ideal_min_words: Số từ tối thiểu lý tưởng
-        ideal_max_words: Số từ tối đa lý tưởng
+    ext_scores = _score_summary(extractive_summary, reference, ideal_min_words, ideal_max_words)
+    abs_scores = _score_summary(abstractive_summary, reference, ideal_min_words, ideal_max_words)
 
-    Returns:
-        Dict chứa:
-          - best_summary: Bản tóm tắt được chọn
-          - best_type: 'extractive' hoặc 'abstractive'
-          - scores: Dict điểm chi tiết cho cả hai bản
-    """
-    logger.info("Đang đánh giá và chọn bản tóm tắt tốt nhất...")
+    abstractive_bonus = 0.0
+    if (
+        abs_scores["readability_score"] >= ext_scores["readability_score"]
+        and abs_scores["compression_score"] >= ext_scores["compression_score"]
+        and abs_scores["redundancy_penalty"] <= ext_scores["redundancy_penalty"]
+    ):
+        abstractive_bonus = 0.035
 
-    # --- Đánh giá bản trích xuất ---
-    ext_rouge = compute_rouge(extractive_summary, reference)
-    ext_length = compute_length_score(extractive_summary, ideal_min_words, ideal_max_words)
-    ext_combined = compute_combined_score(ext_rouge, ext_length)
-
-    # --- Đánh giá bản diễn giải ---
-    abs_rouge = compute_rouge(abstractive_summary, reference)
-    abs_length = compute_length_score(abstractive_summary, ideal_min_words, ideal_max_words)
-    abs_combined = compute_combined_score(abs_rouge, abs_length)
-
-    # --- Chọn bản tốt hơn ---
-    if ext_combined >= abs_combined:
-        best_type = "extractive"
-        best_summary = extractive_summary
-    else:
+    adjusted_abs = min(1.0, abs_scores["combined_score"] + abstractive_bonus)
+    if adjusted_abs > ext_scores["combined_score"]:
         best_type = "abstractive"
         best_summary = abstractive_summary
+        abs_scores["selection_bonus"] = abstractive_bonus
+        abs_scores["adjusted_score"] = round(adjusted_abs, 4)
+    else:
+        best_type = "extractive"
+        best_summary = extractive_summary
+        ext_scores["adjusted_score"] = ext_scores["combined_score"]
+        abs_scores["selection_bonus"] = abstractive_bonus
+        abs_scores["adjusted_score"] = round(adjusted_abs, 4)
 
     logger.info(
-        f"Kết quả: {best_type} thắng "
-        f"(extractive={ext_combined:.4f} vs abstractive={abs_combined:.4f})"
+        "Selector result: %s (extractive=%.4f, abstractive=%.4f, bonus=%.3f)",
+        best_type,
+        ext_scores.get("adjusted_score", ext_scores["combined_score"]),
+        abs_scores["adjusted_score"],
+        abstractive_bonus,
     )
 
-    result = {
+    return {
         "best_summary": best_summary,
         "best_type": best_type,
         "scores": {
-            "extractive": {
-                **ext_rouge,
-                "length_score": ext_length,
-                "combined_score": ext_combined,
-            },
-            "abstractive": {
-                **abs_rouge,
-                "length_score": abs_length,
-                "combined_score": abs_combined,
-            },
+            "extractive": ext_scores,
+            "abstractive": abs_scores,
         },
     }
 
-    return result
+
+def _score_summary(summary: str, reference: str, ideal_min_words: int, ideal_max_words: int) -> dict:
+    rouge = compute_rouge(summary, reference)
+    length_score = compute_length_score(summary, ideal_min_words, ideal_max_words)
+    readability = compute_readability_score(summary)
+    compression = compute_compression_score(summary, reference)
+    redundancy = compute_redundancy_penalty(summary)
+    combined = compute_combined_score(rouge, length_score, readability, compression, redundancy)
+    return {
+        **rouge,
+        "length_score": length_score,
+        "readability_score": readability,
+        "compression_score": compression,
+        "redundancy_penalty": redundancy,
+        "combined_score": combined,
+    }
 
 
-# ==============================================================================
-# CHẠY THỬ TRỰC TIẾP
-# ==============================================================================
+def _token_set(text: str) -> set[str]:
+    return {token.lower() for token in re.findall(r"\w+", text, flags=re.UNICODE) if len(token) > 1}
 
-if __name__ == "__main__":
-    reference_text = """
-    Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp về tình hình leo thang căng thẳng
-    ở Trung Đông. Nhiều quốc gia kêu gọi ngừng bắn ngay lập tức và mở hành lang nhân đạo.
-    Cuộc khủng hoảng nhân đạo ngày càng nghiêm trọng với hàng nghìn thường dân phải di tản.
-    """
 
-    ext = "Hội đồng Bảo an họp khẩn về Trung Đông. Nhiều nước kêu gọi ngừng bắn và hành lang nhân đạo."
-    abs_ = "Liên Hợp Quốc tổ chức cuộc họp khẩn để giải quyết khủng hoảng nhân đạo tại Trung Đông."
-
-    result = select_best_summary(ext, abs_, reference_text)
-
-    print(f"\n🏆 Bản tốt nhất: [{result['best_type'].upper()}]")
-    print(f"   {result['best_summary']}")
-    print("\n📊 Điểm chi tiết:")
-    for stype, s in result["scores"].items():
-        print(f"  {stype}:")
-        for k, v in s.items():
-            print(f"    {k}: {v:.4f}")
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)

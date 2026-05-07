@@ -118,7 +118,7 @@ def load_from_csv(
 # ==============================================================================
 
 def load_from_huggingface(
-    dataset_name: str = "vietgpt/binhvq-news-vi",
+    dataset_name: str = "thanhnew2001/vnexpress",
     article_col: str = "text",
     title_col:   str = "title",
     max_samples: int = DEFAULT_MAX_SAMPLES,
@@ -126,7 +126,7 @@ def load_from_huggingface(
     """
     Tải dataset tiếng Việt từ Hugging Face Hub.
 
-    Dataset mặc định: vietgpt/binhvq-news-vi (tin tức tiếng Việt)
+    Dataset mặc định: thanhnew2001/vnexpress (tin tức VnExpress tiếng Việt)
     Bạn có thể thay thế bằng bất kỳ dataset nào có cấu trúc article/title.
 
     Args:
@@ -141,7 +141,7 @@ def load_from_huggingface(
     logger.info(f"Đang tải dataset từ Hugging Face: {dataset_name}")
 
     try:
-        raw_ds = load_dataset(dataset_name, split="train", trust_remote_code=True)
+        raw_ds = load_dataset(dataset_name, split="train")
     except Exception as e:
         logger.error(f"Lỗi tải dataset {dataset_name}: {e}")
         raise
@@ -155,8 +155,8 @@ def load_from_huggingface(
             f"Các cột hiện có: {raw_ds.column_names}"
         )
         # Thử detect tự động
-        text_candidates = ["text", "article", "content", "body"]
-        title_candidates = ["title", "headline", "summary", "label"]
+        text_candidates = ["text", "article", "content", "body", "description", "document"]
+        title_candidates = ["summary", "title", "headline", "abstract", "label"]
 
         for col in text_candidates:
             if col in raw_ds.column_names:
@@ -213,6 +213,7 @@ def load_vnexpress_dataset(
     local_csv_path: Optional[str] = None,
     max_samples: int = DEFAULT_MAX_SAMPLES,
     use_cache: bool = True,
+    dataset_name: str = "thanhnew2001/vnexpress",
 ) -> DatasetDict:
     """
     Hàm tải dataset chính cho pipeline huấn luyện.
@@ -231,7 +232,8 @@ def load_vnexpress_dataset(
         DatasetDict với 'train' và 'validation'
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = CACHE_DIR / f"dataset_{max_samples}"
+    safe_dataset_name = dataset_name.replace("/", "_")
+    cache_path = CACHE_DIR / f"{safe_dataset_name}_{max_samples}"
 
     # 1. Thử load từ cache
     if use_cache and cache_path.exists():
@@ -252,7 +254,7 @@ def load_vnexpress_dataset(
         dataset = load_from_csv(local_csv_path, max_samples=max_samples)
     else:
         # 3. Load từ Hugging Face Hub
-        dataset = load_from_huggingface(max_samples=max_samples)
+        dataset = load_from_huggingface(dataset_name=dataset_name, max_samples=max_samples)
 
     # Lưu cache để lần sau load nhanh hơn
     if use_cache:

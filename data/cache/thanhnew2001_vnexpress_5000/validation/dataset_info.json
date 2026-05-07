@@ -1,0 +1,42 @@
+{
+  "builder_name": "json",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "vnexpress",
+  "dataset_size": 53893263,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/thanhnew2001/vnexpress@e340b71205d9fc7e8b5f87237cf3bfc3115bf523/output_vnexpress_all_add_space.jsonl": {
+      "num_bytes": 54612923,
+      "checksum": null
+    }
+  },
+  "download_size": 54612923,
+  "features": {
+    "article": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "title": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 108506186,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 53893263,
+      "num_examples": 14740,
+      "dataset_name": "vnexpress"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}

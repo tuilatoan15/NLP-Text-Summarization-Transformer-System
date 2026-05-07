@@ -46,9 +46,10 @@ def normalize_whitespace(text: str) -> str:
       - Thay thế nhiều khoảng trắng/tab/newline liên tiếp bằng một khoảng trắng
       - Loại bỏ khoảng trắng đầu/cuối dòng
     """
-    # Thay newline, tab thành khoảng trắng
-    text = re.sub(r"[\r\n\t]+", " ", text)
-    # Gộp nhiều khoảng trắng liên tiếp thành một
+    text = re.sub(r"[\r\t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"([.,;:!?])([^\s])", r"\1 \2", text)
+    text = re.sub(r"([a-zà-ỹ])([A-ZÀ-Ỹ])", r"\1 \2", text)
     text = re.sub(r" {2,}", " ", text)
     return text.strip()
 
@@ -69,6 +70,16 @@ def remove_special_chars(text: str, keep_punctuation: bool = True) -> str:
         text = re.sub(r"[^\w\s.,!?;:\"'\-–—()[\]{}%@#/\\]", " ", text)
     else:
         text = re.sub(r"[^\w\s]", " ", text)
+    return text
+
+
+def remove_pdf_artifacts(text: str) -> str:
+    """Loại bỏ nhiễu thường gặp khi trích xuất PDF nhưng vẫn giữ dấu tiếng Việt."""
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+    text = re.sub(r"[\u200b-\u200f\u202a-\u202e]", "", text)
+    text = re.sub(r"([A-Za-zÀ-ỹ])-\s+([A-Za-zÀ-ỹ])", r"\1\2", text)
+    text = re.sub(r"([A-Za-zÀ-ỹ])(\d)", r"\1 \2", text)
+    text = re.sub(r"(\d)([A-Za-zÀ-ỹ])", r"\1 \2", text)
     return text
 
 
@@ -101,6 +112,7 @@ def clean_text(text: str, aggressive: bool = False) -> str:
 
     # 2. Chuẩn hóa Unicode NFC (quan trọng với tiếng Việt)
     text = normalize_unicode(text)
+    text = remove_pdf_artifacts(text)
 
     # 3. Loại bỏ URL và email nếu cần
     if aggressive:

@@ -19,17 +19,21 @@ from typing import Optional
 # Thêm project root vào Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 
 from src.utils import logger
-from src.crawler import crawl_articles, merge_texts
+from src.crawler import crawl_article, merge_texts
 from src.preprocess import preprocess
-from src.extractive import extractive_summarize
-from src.abstractive import get_summarizer
+from src.extractive import extractive_summarize_with_details
+from src.abstractive import get_summarizer, resolve_model_name
 from src.selector import select_best_summary
+from src.file_parser import extract_text_from_file
+from src.explainability import build_extractive_explanations
+from src.fact_check import check_consistency
+from src.summary_control import enforce_word_limit, resolve_summary_controls
+from src.storage import persist_result, save_upload_file
 
 
 # ==============================================================================
@@ -68,13 +72,29 @@ class SummarizeRequest(BaseModel):
         le=512,
         description="Độ dài tối đa bản tóm tắt diễn giải (số token)",
     )
+    length_control: str = Field(
+        default="auto",
+        description="auto | 20_percent | 50_percent | 100_words | 200_words",
+    )
+    model_name: str = Field(
+        default="vit5",
+        description="vit5/t5 hoặc bart. Có thể truyền tên model Hugging Face bất kỳ.",
+    )
+    save_result: bool = Field(
+        default=True,
+        description="Lưu kết quả ra storage JSON và MongoDB nếu MONGO_URI được cấu hình.",
+    )
+    analysis_mode: str = Field(
+        default="fast",
+        description="fast hoặc full. Fast chỉ kiểm chứng top summary sentences để giảm thời gian.",
+    )
 
     @validator("text", "reference", pre=True)
     def strip_string(cls, v):
         return v.strip() if isinstance(v, str) else v
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "text": "Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp để thảo luận về tình hình leo thang căng thẳng ở Trung Đông. Nhiều quốc gia kêu gọi ngừng bắn ngay lập tức và mở hành lang nhân đạo cho người dân vùng chiến sự.",
                 "urls": [],
@@ -102,6 +122,11 @@ class SummarizeResponse(BaseModel):
     scores: dict      = Field(description="Điểm ROUGE chi tiết cho cả hai bản tóm tắt")
     word_count: dict  = Field(description="Số từ của mỗi bản tóm tắt")
     processing_time_seconds: float = Field(description="Thời gian xử lý (giây)")
+    consistency: dict = Field(default_factory=dict)
+    explainability: dict = Field(default_factory=dict)
+    documents: list[dict] = Field(default_factory=list)
+    storage: dict = Field(default_factory=dict)
+    controls: dict = Field(default_factory=dict)
 
 
 # ==============================================================================
@@ -179,6 +204,177 @@ async def log_requests(request: Request, call_next):
 
 
 # ==============================================================================
+# PIPELINE HELPERS
+# ==============================================================================
+
+def _summarize_clean_text(
+    clean: str,
+    request: Request,
+    extractive_sentences: int,
+    max_abstractive_length: int,
+    length_control: str,
+    model_name: str,
+    reference: Optional[str] = None,
+    analysis_mode: str = "fast",
+) -> dict:
+    step_start = time.time()
+    controls = resolve_summary_controls(
+        clean,
+        length_control=length_control,
+        extractive_sentences=extractive_sentences,
+        max_abstractive_length=max_abstractive_length,
+    )
+
+    extractive_details = extractive_summarize_with_details(
+        clean,
+        sentence_count=controls["extractive_sentences"],
+    )
+    extractive = extractive_details["summary"]
+    extractive = enforce_word_limit(extractive, controls["target_words"])
+
+    resolved_model_name = resolve_model_name(model_name)
+    summarizer = getattr(request.app.state, "summarizer", None)
+    if resolved_model_name != "VietAI/vit5-base":
+        try:
+            summarizer = get_summarizer(model_name=resolved_model_name)
+        except Exception as exc:
+            logger.warning(f"Không load được model {resolved_model_name}: {exc}")
+            summarizer = None
+
+    if summarizer and summarizer.is_loaded():
+        abstractive = summarizer.summarize(
+            clean,
+            max_output_length=controls["max_abstractive_length"],
+            num_beams=2,
+        )
+    else:
+        logger.warning("Model không khả dụng, dùng extractive làm fallback cho abstractive.")
+        abstractive = extractive
+
+    if not abstractive:
+        abstractive = extractive
+    abstractive = enforce_word_limit(abstractive, controls["target_words"])
+
+    reference_text = reference if reference else clean
+    selection = select_best_summary(
+        extractive_summary=extractive,
+        abstractive_summary=abstractive,
+        reference=reference_text,
+    )
+    best = enforce_word_limit(selection["best_summary"], controls["target_words"])
+
+    consistency = check_consistency(best, clean, mode=analysis_mode if analysis_mode in {"fast", "full"} else "fast")
+    explainability = build_extractive_explanations(clean, extractive)
+    explainability["extractive_details"] = extractive_details
+
+    logger.info(
+        "Summary pipeline done: model=%s mode=%s best=%s consistency=%s time=%.2fs",
+        resolved_model_name,
+        analysis_mode,
+        selection["best_type"],
+        consistency.get("consistency_percent"),
+        time.time() - step_start,
+    )
+
+    return {
+        "extractive": extractive,
+        "abstractive": abstractive,
+        "best": best,
+        "best_type": selection["best_type"],
+        "scores": selection["scores"],
+        "word_count": {
+            "input": len(clean.split()),
+            "extractive": len(extractive.split()),
+            "abstractive": len(abstractive.split()),
+            "best": len(best.split()),
+        },
+        "consistency": consistency,
+        "explainability": explainability,
+        "controls": {
+            **controls,
+            "model_name": resolved_model_name,
+            "analysis_mode": analysis_mode,
+        },
+    }
+
+
+def _summarize_documents(
+    documents: list[dict],
+    request: Request,
+    extractive_sentences: int,
+    max_abstractive_length: int,
+    length_control: str,
+    model_name: str,
+    reference: Optional[str] = None,
+    save_result: bool = True,
+    analysis_mode: str = "fast",
+) -> dict:
+    start_time = time.time()
+
+    valid_documents = []
+    for doc in documents:
+        processed = preprocess(doc["text"], aggressive=True)
+        clean = processed["cleaned"]
+        if clean and len(clean.split()) >= 10:
+            valid_documents.append({**doc, "clean_text": clean})
+
+    if not valid_documents:
+        raise HTTPException(
+            status_code=400,
+            detail="Không thu thập được nội dung hợp lệ. Văn bản cần tối thiểu 10 từ sau tiền xử lý.",
+        )
+
+    document_results = []
+    for doc in valid_documents:
+        result = _summarize_clean_text(
+            doc["clean_text"],
+            request=request,
+            extractive_sentences=extractive_sentences,
+            max_abstractive_length=max_abstractive_length,
+            length_control=length_control,
+            model_name=model_name,
+            reference=reference,
+            analysis_mode=analysis_mode,
+        )
+        document_results.append({
+            "name": doc["name"],
+            "source_type": doc["source_type"],
+            "word_count": len(doc["clean_text"].split()),
+            "summary": result["best"],
+            "summary_type": result["best_type"],
+            "consistency_score": result["consistency"]["consistency_score"],
+            "consistency_status": result["consistency"]["status"],
+            "explainability": result["explainability"],
+            "consistency": result["consistency"],
+            "storage_path": doc.get("storage_path"),
+        })
+
+    raw_text = merge_texts([doc["clean_text"] for doc in valid_documents])
+    combined = _summarize_clean_text(
+        raw_text,
+        request=request,
+        extractive_sentences=extractive_sentences,
+        max_abstractive_length=max_abstractive_length,
+        length_control=length_control,
+        model_name=model_name,
+        reference=reference,
+        analysis_mode=analysis_mode,
+    )
+
+    response = {
+        **combined,
+        "documents": document_results,
+        "processing_time_seconds": round(time.time() - start_time, 2),
+        "storage": {},
+    }
+
+    if save_result:
+        response["storage"] = persist_result(response)
+
+    return response
+
+
+# ==============================================================================
 # ENDPOINTS
 # ==============================================================================
 
@@ -231,107 +427,96 @@ async def summarize(request_body: SummarizeRequest, request: Request):
 
     **Lưu ý**: Cần ít nhất một trong hai: `text` hoặc `urls`.
     """
-    start_time = time.time()
-
-    # --- Kiểm tra input ---
     if not request_body.text and not request_body.urls:
         raise HTTPException(
             status_code=422,
             detail="Cần cung cấp ít nhất một trong hai: 'text' hoặc 'urls'.",
         )
 
-    # --- Bước 1: Thu thập văn bản ---
-    all_texts = []
-
-    # Crawl URLs nếu có
+    documents = []
     if request_body.urls:
         logger.info(f"Crawling {len(request_body.urls)} URL(s)...")
-        crawled_texts = crawl_articles(request_body.urls)
-        all_texts.extend(crawled_texts)
+        for url in request_body.urls:
+            text = crawl_article(url)
+            if text:
+                documents.append({
+                    "name": url,
+                    "source_type": "url",
+                    "text": text,
+                })
 
-    # Thêm text trực tiếp
     if request_body.text:
-        all_texts.append(request_body.text)
+        documents.append({
+            "name": "direct_text",
+            "source_type": "text",
+            "text": request_body.text,
+        })
 
-    if not all_texts:
-        raise HTTPException(
-            status_code=400,
-            detail="Không thu thập được nội dung từ các nguồn đã cung cấp. "
-                   "Kiểm tra lại URLs hoặc nội dung text.",
-        )
-
-    # Gộp tất cả văn bản lại
-    raw_text = merge_texts(all_texts)
-
-    # --- Bước 2: Tiền xử lý ---
-    logger.info("Tiền xử lý văn bản...")
-    processed = preprocess(raw_text, aggressive=True)
-    clean = processed["cleaned"]
-
-    if not clean or len(clean.split()) < 10:
-        raise HTTPException(
-            status_code=400,
-            detail="Văn bản sau khi xử lý quá ngắn (< 10 từ). Vui lòng cung cấp nội dung dài hơn.",
-        )
-
-    # --- Bước 3: Tóm tắt trích xuất ---
-    logger.info("Tóm tắt trích xuất (TextRank)...")
-    extractive = extractive_summarize(
-        clean,
-        sentence_count=request_body.extractive_sentences,
+    return _summarize_documents(
+        documents,
+        request=request,
+        extractive_sentences=request_body.extractive_sentences,
+        max_abstractive_length=request_body.max_abstractive_length,
+        length_control=request_body.length_control,
+        model_name=request_body.model_name,
+        reference=request_body.reference,
+        save_result=request_body.save_result,
+        analysis_mode=request_body.analysis_mode,
     )
 
-    # --- Bước 4: Tóm tắt diễn giải ---
-    logger.info("Tóm tắt diễn giải (ViT5)...")
-    summarizer = getattr(request.app.state, "summarizer", None)
 
-    if summarizer and summarizer.is_loaded():
-        abstractive = summarizer.summarize(
-            clean,
-            max_output_length=request_body.max_abstractive_length,
-        )
-    else:
-        logger.warning("Model không khả dụng, dùng extractive làm fallback cho abstractive.")
-        abstractive = extractive
+@app.post(
+    "/summarize/files",
+    response_model=SummarizeResponse,
+    tags=["Summarization"],
+    summary="Upload TXT/PDF/DOCX và tóm tắt nhiều tài liệu",
+)
+async def summarize_files(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    reference: Optional[str] = Form(default=None),
+    extractive_sentences: int = Form(default=5, ge=1, le=20),
+    max_abstractive_length: int = Form(default=150, ge=30, le=512),
+    length_control: str = Form(default="auto"),
+    model_name: str = Form(default="vit5"),
+    analysis_mode: str = Form(default="fast"),
+    save_result: bool = Form(default=True),
+):
+    if not files:
+        raise HTTPException(status_code=422, detail="Cần upload ít nhất một file.")
 
-    # Fallback nếu abstractive trống
-    if not abstractive:
-        abstractive = extractive
+    documents = []
+    for upload in files:
+        try:
+            await upload.seek(0)
+            saved_path = save_upload_file(upload.file, upload.filename)
+            text = extract_text_from_file(saved_path)
+            documents.append({
+                "name": upload.filename,
+                "source_type": saved_path.suffix.lower().lstrip("."),
+                "text": text,
+                "storage_path": str(saved_path),
+            })
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error(f"Không xử lý được file {upload.filename}: {exc}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Không xử lý được file {upload.filename}: {exc}",
+            ) from exc
 
-    # --- Bước 5: Đánh giá và chọn bản tốt nhất ---
-    logger.info("Đánh giá và chọn bản tóm tắt tốt nhất...")
-    reference = request_body.reference if request_body.reference else clean
-
-    selection = select_best_summary(
-        extractive_summary=extractive,
-        abstractive_summary=abstractive,
+    return _summarize_documents(
+        documents,
+        request=request,
+        extractive_sentences=extractive_sentences,
+        max_abstractive_length=max_abstractive_length,
+        length_control=length_control,
+        model_name=model_name,
         reference=reference,
+        save_result=save_result,
+        analysis_mode=analysis_mode,
     )
-
-    # --- Kết quả ---
-    processing_time = round(time.time() - start_time, 2)
-
-    response = {
-        "extractive":  extractive,
-        "abstractive": abstractive,
-        "best":        selection["best_summary"],
-        "best_type":   selection["best_type"],
-        "scores":      selection["scores"],
-        "word_count": {
-            "input":       len(clean.split()),
-            "extractive":  len(extractive.split()),
-            "abstractive": len(abstractive.split()),
-            "best":        len(selection["best_summary"].split()),
-        },
-        "processing_time_seconds": processing_time,
-    }
-
-    logger.info(
-        f"✅ Hoàn tất: input={len(clean.split())} từ, "
-        f"best={selection['best_type']} ({processing_time}s)"
-    )
-
-    return response
 
 
 # ==============================================================================

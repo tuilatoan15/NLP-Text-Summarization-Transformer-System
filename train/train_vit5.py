@@ -15,7 +15,11 @@ import argparse
 import os
 import sys
 import warnings
+from datetime import datetime
 from pathlib import Path
+
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
 
 # Thêm project root vào Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,7 +37,7 @@ from transformers import (
 import evaluate as hf_evaluate
 
 from train.dataset_loader import load_vnexpress_dataset
-from src.utils import logger, ensure_dir
+from src.utils import logger, ensure_dir, save_json
 
 
 # ==============================================================================
@@ -159,6 +163,7 @@ def build_compute_metrics(tokenizer):
 
 def train(
     local_data: str = None,
+    dataset_name: str = "thanhnew2001/vnexpress",
     max_samples: int = 5000,
     num_epochs: int = NUM_EPOCHS,
     batch_size: int = TRAIN_BATCH_SIZE,
@@ -204,6 +209,7 @@ def train(
     dataset = load_vnexpress_dataset(
         local_csv_path=local_data,
         max_samples=max_samples,
+        dataset_name=dataset_name,
     )
     logger.info(f"Train: {len(dataset['train'])} | Validation: {len(dataset['validation'])}")
 
@@ -243,7 +249,7 @@ def train(
         weight_decay=WEIGHT_DECAY,
 
         # Evaluation & Saving
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         eval_steps=EVAL_STEPS,
         save_strategy="steps",
         save_steps=SAVE_STEPS,
@@ -305,6 +311,23 @@ def train(
     eval_results = trainer.evaluate()
     logger.info(f"Kết quả đánh giá: {eval_results}")
 
+    metrics_path = Path(output_dir) / "eval_results.json"
+    save_json(
+        {
+            "model_name": MODEL_NAME,
+            "dataset_name": dataset_name,
+            "output_dir": output_dir,
+            "max_samples": max_samples,
+            "epochs": num_epochs,
+            "batch_size": batch_size,
+            "learning_rate": learning_rate,
+            "trained_at": datetime.now().isoformat(timespec="seconds"),
+            "metrics": eval_results,
+        },
+        str(metrics_path),
+    )
+    logger.info(f"Đã lưu kết quả đánh giá tại: {metrics_path}")
+
     return eval_results
 
 
@@ -321,6 +344,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Đường dẫn file CSV/JSON nội bộ (nếu không set sẽ dùng Hugging Face Hub)",
+    )
+    parser.add_argument(
+        "--dataset_name",
+        type=str,
+        default="thanhnew2001/vnexpress",
+        help="Dataset Hugging Face dùng để train nếu không truyền --local_data",
     )
     parser.add_argument(
         "--max_samples",
@@ -357,6 +386,7 @@ if __name__ == "__main__":
 
     train(
         local_data=args.local_data,
+        dataset_name=args.dataset_name,
         max_samples=args.max_samples,
         num_epochs=args.epochs,
         batch_size=args.batch_size,

@@ -87,7 +87,16 @@ python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 
 ## 🧠 Fine-tune Model (Training)
 
-### Option 1: Dùng dataset từ Hugging Face Hub (tự động tải)
+### Option 1: Dùng dataset VnExpress từ Hugging Face Hub (tự động tải)
+
+Mặc định script dùng dataset:
+
+```python
+from datasets import load_dataset
+ds = load_dataset("thanhnew2001/vnexpress")
+```
+
+Dataset này có cột `content/title`; loader sẽ tự map thành `article/title` để fine-tune ViT5.
 
 ```bash
 # Huấn luyện với 5000 samples, 3 epochs, batch size 2 (phù hợp CPU/máy yếu)
@@ -95,6 +104,9 @@ python -m train.train_vit5 --max_samples 5000 --epochs 3 --batch_size 2
 
 # Test nhanh với 100 samples (để kiểm tra pipeline hoạt động)
 python -m train.train_vit5 --max_samples 100 --epochs 1 --batch_size 2
+
+# Chỉ định rõ dataset nếu cần
+python -m train.train_vit5 --dataset_name thanhnew2001/vnexpress --max_samples 5000 --epochs 3 --batch_size 2
 ```
 
 ### Option 2: Dùng dataset CSV nội bộ
@@ -123,6 +135,7 @@ python -m train.train_vit5 --local_data data/your_dataset.csv --max_samples 5000
 | `--output_dir` | `./models/vit5-finetuned` | Thư mục lưu model |
 
 Model sẽ được lưu vào `./models/vit5-finetuned/` sau khi hoàn tất.
+Kết quả đánh giá sau train được lưu tại `./models/vit5-finetuned/eval_results.json`.
 
 ---
 
@@ -145,6 +158,65 @@ Sau khi khởi động, truy cập:
 - 💚 **Health check**: http://localhost:8000/health
 
 > 💡 **Lần đầu chạy** sẽ cần tải model ViT5 từ Hugging Face (~1.2GB). Đảm bảo có kết nối internet tốt.
+
+---
+
+## 🖥️ Chạy Frontend React
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend mặc định gọi API tại `http://localhost:8000`. Nếu backend chạy port khác:
+
+```bash
+set VITE_API_BASE=http://localhost:8001
+npm run dev
+```
+
+Màn hình chính hỗ trợ:
+- Upload nhiều file `.txt`, `.pdf`, `.docx`
+- Chọn độ dài `20%`, `50%`, `100 từ`, `200 từ`
+- Chọn model `ViT5/T5` hoặc `BART`
+- Xem summary tổng hợp, summary từng tài liệu
+- Highlight câu nguồn được chọn và lý do chọn câu
+- Highlight câu summary nghi vấn theo consistency checker
+
+---
+
+## 📁 Upload nhiều file
+
+Endpoint: `POST /summarize/files`
+
+Form fields:
+- `files`: danh sách file TXT/PDF/DOCX
+- `length_control`: `auto`, `20_percent`, `50_percent`, `100_words`, `200_words`
+- `model_name`: `vit5`, `t5`, `bart`, hoặc tên model Hugging Face
+- `save_result`: lưu kết quả vào `storage/results`, và lưu MongoDB nếu có `MONGO_URI`
+
+Ví dụ:
+
+```bash
+curl -X POST "http://localhost:8000/summarize/files" \
+  -F "files=@data/report.txt" \
+  -F "files=@data/article.pdf" \
+  -F "length_control=100_words" \
+  -F "model_name=vit5"
+```
+
+---
+
+## 🔎 Consistency Score & Explainability
+
+Response mới có thêm:
+- `consistency.consistency_score`: điểm nhất quán 0-1
+- `consistency.suspicious_spans`: các câu nghi vấn cần review
+- `consistency.checks`: bằng chứng gần nhất từ văn bản gốc cho từng câu summary
+- `explainability.highlights`: câu nguồn được chọn, keyword và lý do chọn
+- `documents`: kết quả summary/fact-check riêng cho từng file
+- `storage`: đường dẫn JSON đã lưu và `_id` MongoDB nếu cấu hình
 
 ---
 
