@@ -12,6 +12,7 @@ from typing import Optional
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.text_rank import TextRankSummarizer
+from sumy.summarizers.lex_rank import LexRankSummarizer
 from sumy.nlp.stemmers import Stemmer
 from sumy.utils import get_stop_words
 
@@ -126,6 +127,54 @@ def extractive_summarize(
 
     except Exception as e:
         logger.error(f"Lỗi TextRank: {e}. Dùng fallback.")
+        return _fallback_extractive(text, sentence_count)
+
+
+def lexrank_summarize(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    language: str = LANGUAGE,
+    remove_duplicates: bool = True,
+) -> str:
+    """
+    Thực hiện tóm tắt bằng LexRank (sumy).
+    """
+    if not text or not text.strip():
+        logger.warning("Văn bản đầu vào rỗng, không thể tóm tắt.")
+        return ""
+
+    # Kiểm tra số câu
+    sentences_raw = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
+    if len(sentences_raw) <= sentence_count:
+        logger.info(f"Văn bản chỉ có {len(sentences_raw)} câu, trả về toàn bộ.")
+        return text.strip()
+
+    try:
+        tokenizer = _get_tokenizer(language)
+        parser = PlaintextParser.from_string(text, tokenizer)
+
+        # LexRank không cần stemmer nhưng chúng ta giữ cấu hình stop words
+        summarizer = LexRankSummarizer()
+        try:
+            summarizer.stop_words = get_stop_words(language)
+        except LookupError:
+            logger.warning("Không tìm thấy stop words cho LexRank, bỏ qua.")
+
+        summary_sentences = summarizer(parser.document, sentence_count)
+        sentences = [str(s) for s in summary_sentences]
+
+        if not sentences:
+            logger.warning("LexRank không trả về câu nào, dùng fallback.")
+            return _fallback_extractive(text, sentence_count)
+
+        if remove_duplicates:
+            sentences = _remove_duplicate_sentences(sentences)
+
+        summary = " ".join(sentences)
+        logger.info(f"LexRank xong: {len(sentences)} câu, {len(summary.split())} từ.")
+        return summary
+    except Exception as e:
+        logger.error(f"Lỗi LexRank: {e}. Dùng fallback.")
         return _fallback_extractive(text, sentence_count)
 
 

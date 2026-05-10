@@ -89,7 +89,17 @@ def tokenize_function(examples, tokenizer, max_input_len, max_target_len):
     )
 
     # Tokenize target (labels)
-    with tokenizer.as_target_tokenizer():
+    # Support both tokenizers that provide `as_target_tokenizer()` and ones that don't.
+    try:
+        with tokenizer.as_target_tokenizer():
+            labels = tokenizer(
+                targets,
+                max_length=max_target_len,
+                truncation=True,
+                padding=False,
+            )
+    except AttributeError:
+        # Fallback: call tokenizer directly on targets
         labels = tokenizer(
             targets,
             max_length=max_target_len,
@@ -196,11 +206,20 @@ def train(
         )
 
     # --- Bước 1: Tải tokenizer & model ---
-    logger.info(f"Đang load tokenizer: {MODEL_NAME}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    # Nếu có bản model local (đã tải/saved trước đó), ưu tiên load local để tránh vấn đề tokenizer HF
+    local_model_dir = Path("./models/vit5-finetuned")
+    if local_model_dir.exists() and any(local_model_dir.iterdir()):
+        logger.info(f"Tìm thấy model local: {local_model_dir}. Load tokenizer và model từ local.")
+        # use_fast=False để tránh các incompatibility với tokenizer.json
+        tokenizer = AutoTokenizer.from_pretrained(str(local_model_dir), use_fast=False)
+        logger.info(f"Đang load model từ local: {local_model_dir}")
+        model = AutoModelForSeq2SeqLM.from_pretrained(str(local_model_dir))
+    else:
+        logger.info(f"Đang load tokenizer: {MODEL_NAME}")
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-    logger.info(f"Đang load model: {MODEL_NAME}")
-    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+        logger.info(f"Đang load model: {MODEL_NAME}")
+        model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
     model_params = sum(p.numel() for p in model.parameters()) / 1e6
     logger.info(f"Model có {model_params:.1f}M tham số.")
 
@@ -251,10 +270,12 @@ def train(
         # Evaluation & Saving
         eval_strategy="steps",
         eval_steps=EVAL_STEPS,
-        save_strategy="steps",
+        # Trên CPU nhỏ (smoke-test) có thể gây lỗi khi lưu optimizer lớn -> tắt auto-save
+        save_strategy=("no" if device == "cpu" else "steps"),
         save_steps=SAVE_STEPS,
         save_total_limit=2,           # Chỉ giữ 2 checkpoint gần nhất
-        load_best_model_at_end=True,  # Load checkpoint tốt nhất khi kết thúc
+        # Nếu tắt save (ví dụ trên CPU smoke-test), không thể load best model at end
+        load_best_model_at_end=(False if device == "cpu" else True),
         metric_for_best_model="rougeL",
         greater_is_better=True,
 
@@ -270,7 +291,7 @@ def train(
         # Hiệu suất
         fp16=use_fp16,
         dataloader_num_workers=0,      # 0 để tránh lỗi multiprocessing trên Windows
-        no_cuda=(device == "cpu"),
+        
     )
 
     # --- Bước 6: Khởi tạo Trainer ---
@@ -279,7 +300,6 @@ def train(
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["validation"],
-        tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=build_compute_metrics(tokenizer),
         callbacks=[

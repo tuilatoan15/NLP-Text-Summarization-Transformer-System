@@ -79,6 +79,41 @@ def compute_rouge(
     return scores
 
 
+def compute_bleu(prediction: str, reference: str) -> float:
+    """
+    Compute BLEU score (corpus-level style for a single pair using HF evaluate wrapper).
+    Returns a float BLEU score (0-100 scale) as returned by the metric.
+    """
+    try:
+        bleu = hf_evaluate.load("bleu")
+        results = bleu.compute(predictions=[prediction], references=[[reference]])
+        # sacrebleu returns 'bleu' key
+        score = float(results.get("bleu", 0.0))
+        return round(score, 4)
+    except Exception as e:
+        logger.warning(f"Không thể tính BLEU: {e}")
+        return 0.0
+
+
+def compute_semantic_similarity(prediction: str, reference: str, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> float:
+    """
+    Tính similarity cosine giữa embedding của prediction và reference.
+    Trả về giá trị [-1, 1] (chuẩn hóa sang 0..1 nếu cần).
+    """
+    try:
+        from sentence_transformers import SentenceTransformer, util
+        model = SentenceTransformer(model_name)
+        emb1 = model.encode(prediction, convert_to_tensor=True)
+        emb2 = model.encode(reference, convert_to_tensor=True)
+        sim = util.cos_sim(emb1, emb2).item()
+        # Giá trị cosine similarity trong [-1,1], chuyển về [0,1]
+        sim01 = (sim + 1.0) / 2.0
+        return round(float(sim01), 4)
+    except Exception as e:
+        logger.warning(f"Không thể tính semantic similarity: {e}")
+        return 0.0
+
+
 # ==============================================================================
 # ĐÁNH GIÁ HÀNG LOẠT (BATCH)
 # ==============================================================================

@@ -35,8 +35,10 @@ DEFAULT_MODEL_NAME = "VietAI/vit5-base"
 BART_MODEL_NAME = "facebook/bart-large-cnn"
 SUPPORTED_MODEL_NAMES = {
     "vit5": DEFAULT_MODEL_NAME,
-    "t5": DEFAULT_MODEL_NAME,
+    "t5": "t5-small",
+    "t5-small": "t5-small",
     "bart": BART_MODEL_NAME,
+    "pegasus": "google/pegasus-xsum",
 }
 
 # Thư mục lưu model đã fine-tune
@@ -118,17 +120,21 @@ class AbstractiveSummarizer:
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
             logger.info(f"Đang load model từ: {model_path}")
+            # Load weights (PT) — không phụ thuộc vào pipeline để tránh breaking changes
             self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
 
-            # Tạo pipeline cho việc sinh văn bản
-            self._pipeline = pipeline(
-                task="summarization",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=self.device,
-                framework="pt",
-            )
-            logger.info("✅ Load model thành công!")
+            # Move model to device (GPU nếu có, CPU nếu không)
+            try:
+                device_pt = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+                self.model.to(device_pt)
+            except Exception:
+                # Nếu việc di chuyển thất bại thì tiếp tục — vẫn có thể generate trên CPU
+                pass
+
+            # Không tạo pipeline mặc định để tránh lỗi với các version transformers khác nhau.
+            # Thay vào đó, dùng fallback `model.generate()` trong `summarize()` nếu cần.
+            self._pipeline = None
+            logger.info("✅ Load model thành công (sẵn sàng dùng model.generate())")
 
         except Exception as e:
             logger.error(f"❌ Lỗi load model: {e}")
@@ -161,7 +167,8 @@ class AbstractiveSummarizer:
             return ""
 
         # Lazy load model nếu chưa có
-        if self._pipeline is None:
+        if self._pipeline is None and self.model is None:
+            # Nếu model chưa được load thì load.
             self.load()
 
         # Truncate input nếu quá dài (tính theo từ, ước lượng token)
@@ -177,23 +184,48 @@ class AbstractiveSummarizer:
         if chunk_long_text and len(text.split()) > max_words:
             return self._summarize_chunks(text, _max_len, _min_len, _beams, max_words)
 
+        # Nếu pipeline có sẵn, ưu tiên dùng pipeline (ít khi xảy ra với các release mới)
+        if self._pipeline is not None:
+            try:
+                results = self._pipeline(
+                    text,
+                    max_length=_max_len,
+                    min_length=_min_len,
+                    num_beams=_beams,
+                    no_repeat_ngram_size=self.no_repeat_ngram_size,
+                    early_stopping=True,
+                    do_sample=False,    # Deterministic output
+                )
+                summary = results[0]["summary_text"].strip()
+                logger.info(f"Abstractive OK: {len(summary.split())} từ.")
+                return summary
+            except Exception as e:
+                logger.error(f"Pipeline summarization failed: {e}")
+
+        # Fallback: dùng trực tiếp model.generate() + tokenizer.decode()
         try:
-            results = self._pipeline(
-                text,
+            device = next(self.model.parameters()).device if self.model is not None and any(True for _ in self.model.parameters()) else torch.device("cpu")
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_input_tokens)
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs.get("attention_mask")
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(device)
+
+            outputs = self.model.generate(
+                input_ids,
+                attention_mask=attention_mask,
                 max_length=_max_len,
                 min_length=_min_len,
                 num_beams=_beams,
                 no_repeat_ngram_size=self.no_repeat_ngram_size,
                 early_stopping=True,
-                do_sample=False,    # Deterministic output
+                do_sample=False,
             )
-
-            summary = results[0]["summary_text"].strip()
-            logger.info(f"Abstractive OK: {len(summary.split())} từ.")
+            summary = self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+            logger.info(f"Abstractive OK (generate): {len(summary.split())} từ.")
             return summary
-
         except Exception as e:
-            logger.error(f"Lỗi sinh tóm tắt: {e}")
+            logger.error(f"Lỗi sinh tóm tắt bằng model.generate(): {e}")
             return ""
 
     def _summarize_chunks(
@@ -238,7 +270,7 @@ class AbstractiveSummarizer:
 
     def is_loaded(self) -> bool:
         """Kiểm tra model đã được load chưa."""
-        return self._pipeline is not None
+        return (self._pipeline is not None) or (self.model is not None)
 
 
 # ==============================================================================

@@ -34,6 +34,9 @@ from src.explainability import build_extractive_explanations
 from src.fact_check import check_consistency
 from src.summary_control import enforce_word_limit, resolve_summary_controls
 from src.storage import persist_result, save_upload_file
+from src.dashboard import summarize_all, stream_compare
+from fastapi.responses import StreamingResponse
+from src.analytics import compute_dashboard_metrics, get_visualization_data, list_recent_results
 
 
 # ==============================================================================
@@ -127,6 +130,19 @@ class SummarizeResponse(BaseModel):
     documents: list[dict] = Field(default_factory=list)
     storage: dict = Field(default_factory=dict)
     controls: dict = Field(default_factory=dict)
+
+
+
+class MultiSummarizeRequest(BaseModel):
+    text: Optional[str] = Field(default=None)
+    urls: Optional[list[str]] = Field(default=None)
+    reference: Optional[str] = Field(default=None)
+    algorithms: Optional[list[str]] = Field(
+        default_factory=lambda: ["textrank", "lsa", "lexrank", "vit5", "t5", "bart", "pegasus"]
+    )
+    extractive_sentences: int = Field(default=5)
+    max_abstractive_length: int = Field(default=150)
+    save_result: bool = Field(default=True)
 
 
 # ==============================================================================
@@ -391,7 +407,7 @@ async def root():
             "GET /docs":       "Tài liệu Swagger UI",
         },
         "model": "VietAI/vit5-base",
-        "methods": ["TextRank (Extractive)", "ViT5 (Abstractive)"],
+        "methods": ["TextRank", "LSA", "LexRank", "ViT5 (Abstractive)"],
     }
 
 
@@ -517,6 +533,112 @@ async def summarize_files(
         save_result=save_result,
         analysis_mode=analysis_mode,
     )
+
+
+@app.post(
+    "/summarize/compare",
+    tags=["Summarization"],
+    summary="So sánh nhiều thuật toán tóm tắt",
+)
+async def summarize_compare(request_body: MultiSummarizeRequest, request: Request):
+    """Chạy nhiều thuật toán đồng thời và trả về kết quả so sánh."""
+    if not request_body.text and not request_body.urls:
+        raise HTTPException(status_code=422, detail="Cần cung cấp 'text' hoặc 'urls'.")
+
+    documents = []
+    if request_body.urls:
+        for url in request_body.urls:
+            text = crawl_article(url)
+            if text:
+                documents.append({"name": url, "source_type": "url", "text": text})
+
+    if request_body.text:
+        documents.append({"name": "direct_text", "source_type": "text", "text": request_body.text})
+
+    # Gộp mọi văn bản lại để so sánh chung
+    raw_text = merge_texts([d["text"] for d in documents])
+
+    result = summarize_all(
+        raw_text,
+        reference=request_body.reference,
+        algorithms=request_body.algorithms,
+        sentence_count=request_body.extractive_sentences,
+        max_output_length=request_body.max_abstractive_length,
+        use_cache=True,
+    )
+
+    if request_body.save_result:
+        try:
+            persist_result(result)
+        except Exception:
+            logger.warning("Không lưu được kết quả compare vào storage.")
+
+    return result
+
+
+@app.post("/summarize/compare/stream", tags=["Summarization"], summary="Stream progress khi chạy nhiều thuật toán")
+async def summarize_compare_stream(
+    request_body: MultiSummarizeRequest,
+    request: Request,
+):
+    if not request_body.text and not request_body.urls:
+        raise HTTPException(status_code=422, detail="Cần cung cấp 'text' hoặc 'urls'.")
+
+    documents = []
+    if request_body.urls:
+        for url in request_body.urls:
+            text = crawl_article(url)
+            if text:
+                documents.append({"name": url, "source_type": "url", "text": text})
+
+    if request_body.text:
+        documents.append({"name": "direct_text", "source_type": "text", "text": request_body.text})
+
+    raw_text = merge_texts([d["text"] for d in documents])
+
+    gen = stream_compare(raw_text, request_body.reference, algorithms=request_body.algorithms, sentence_count=request_body.extractive_sentences, max_output_length=request_body.max_abstractive_length)
+    return StreamingResponse(gen, media_type="text/event-stream")
+
+@app.get('/dashboard/metrics', tags=['Dashboard'], summary='Tổng hợp metrics cho dashboard')
+async def dashboard_metrics():
+    """Trả về các chỉ số tổng quan phục vụ UI dashboard."""
+    try:
+        metrics = compute_dashboard_metrics()
+        return metrics
+    except Exception as e:
+        logger.error(f"Lỗi lấy metrics dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/dashboard/visualization', tags=['Dashboard'], summary='Dữ liệu cho visualization charts')
+async def dashboard_visualization():
+    try:
+        data = get_visualization_data()
+        return data
+    except Exception as e:
+        logger.error(f"Lỗi lấy dữ liệu visualization: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/results', tags=['Dashboard'], summary='Liệt kê kết quả đã lưu (metadata)')
+async def list_results(limit: int = 20):
+    try:
+        items = list_recent_results(limit=limit)
+        return {"results": items}
+    except Exception as e:
+        logger.error(f"Không thể liệt kê results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/models', tags=['Info'], summary='Danh sách models hỗ trợ')
+async def list_models():
+    # Minimal list based on abstractive.SUPPORTED_MODEL_NAMES
+    try:
+        from src.abstractive import SUPPORTED_MODEL_NAMES, DEFAULT_MODEL_NAME
+        models = [{"key": k, "hf_name": v} for k, v in SUPPORTED_MODEL_NAMES.items()]
+        # include default explicit
+        models.append({"key": "default", "hf_name": DEFAULT_MODEL_NAME})
+        return {"models": models}
+    except Exception as e:
+        logger.warning(f"Không thể tải danh sách models: {e}")
+        return {"models": []}
 
 
 # ==============================================================================

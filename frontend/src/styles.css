@@ -245,27 +245,53 @@ mark.suspicious {
   background: #ffe8cc;
   outline: 1px solid #ffad5c;
 }
+.statusPill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 700; }
 
-.statusPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 5px 9px;
-  font-size: 12px;
-  font-weight: 700;
+/* Dark theme variables */
+:root.dark {
+  --bg: #0b1020;
+  --panel: rgba(255,255,255,0.03);
+  --card: rgba(255,255,255,0.04);
+  --muted: #9aa4b2;
+  --text: #e6eef8;
+  --accent: #65a7ff;
+  --glass: rgba(255,255,255,0.04);
 }
 
-.statusPill.ok {
-  color: #18704b;
-  background: #e7f5ec;
-}
+.statusPill { background: linear-gradient(180deg, #071029 0%, #081226 100%); color: var(--text, #20242c); }
+.statusPill.ok { color: #18704b; background: #e7f5ec; }
+.statusPill.warn { color: #9a4f00; background: #fff0d9; border: 1px solid rgba(255,255,255,0.04); }
 
-.statusPill.warn {
-  color: #9a4f00;
-  background: #fff0d9;
-}
+/* Sidebar layout */
+.sidebar { width: 220px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.navItem { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 10px; cursor: pointer; color: var(--text, #20242c); }
+.navItem.active { background: rgba(255,255,255,0.03); box-shadow: 0 6px 18px rgba(8,12,24,0.2); }
 
+/* Secondary button style + interactions */
+.secondaryButton { background: transparent; border: 1px solid rgba(0,0,0,0.06); padding:8px 10px; border-radius:8px; cursor:pointer; transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.secondaryButton:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(2,6,23,0.06); }
+
+/* Toasts */
+.toastWrap { position: fixed; right: 18px; bottom: 18px; display:flex; flex-direction:column; gap:8px; z-index:9999 }
+.toast { background: #111827; color: #fff; padding:10px 12px; border-radius:8px; box-shadow: 0 8px 24px rgba(2,6,23,0.6); opacity:0; transform: translateY(8px); animation: toastIn .28s cubic-bezier(.2,.9,.3,1) forwards; }
+.toast.success { background: #065f46 }
+.toast.error { background: #7f1d1d }
+
+/* Cards animation */
+.cardsRow .card { opacity: 0; transform: translateY(10px) scale(.995); animation: cardIn .4s cubic-bezier(.2,.9,.3,1) forwards; }
+.cardsRow .card:nth-child(odd) { animation-delay: 40ms; }
+.cardsRow .card:nth-child(even) { animation-delay: 80ms; }
+@keyframes cardIn { to { opacity: 1; transform: none; } }
+
+/* Toast animation */
+@keyframes toastIn { to { opacity: 1; transform: none; } }
+
+/* Chart & panel */
+.chartCard { opacity: 0; transform: translateY(8px); animation: fadeIn .42s ease forwards; }
+.chartCard:nth-child(1) { animation-delay: 60ms; }
+.chartCard:nth-child(2) { animation-delay: 120ms; }
+.chartCard:nth-child(3) { animation-delay: 180ms; }
+@keyframes fadeIn { to { opacity: 1; transform: none; } }
 .checkList,
 .sourceSentences {
   display: grid;
@@ -287,6 +313,9 @@ mark.suspicious {
 
 .checkItem summary::marker {
   color: #617083;
+    border-color: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.02);
+    color: var(--muted);
 }
 
 .checkItem.suspicious,
@@ -300,12 +329,30 @@ mark.suspicious {
   display: block;
   margin-top: 6px;
   color: #6c7480;
+  }
+
+  .secondaryButton { background: transparent; border: 1px solid rgba(0,0,0,0.06); padding:8px 10px; border-radius:8px; cursor:pointer }
+
+  /* Toasts */
+  .toastWrap { position: fixed; right: 18px; bottom: 18px; display:flex; flex-direction:column; gap:8px; z-index:9999 }
+  .toast { background: #111827; color: #fff; padding:10px 12px; border-radius:8px; box-shadow: 0 8px 24px rgba(2,6,23,0.6); }
+  .toast.success { background: #065f46 }
+  .toast.error { background: #7f1d1d }
+
+  /* Skeleton */
+  .skeleton { background: linear-gradient(90deg,#f0f0f0 25%, #e6e6e6 37%, #f0f0f0 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius:6px }
+  @keyframes shimmer { 0%{ background-position: 100% 0 } 100%{ background-position: -100% 0 } }
+
+  .skeleton.text { height: 16px; width: 100%; margin-bottom:8px }
+  .skeleton.line { height: 12px; width: 60%; margin-bottom:8px }
 }
 
 .docTabs {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,0.04);
   padding-bottom: 4px;
   margin-bottom: 14px;
 }

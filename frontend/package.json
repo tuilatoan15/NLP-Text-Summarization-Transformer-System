@@ -13,7 +13,10 @@
     "vite": "^7.2.7",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^0.562.0",
+    "axios": "^1.4.0",
+    "chart.js": "^4.4.0",
+    "react-chartjs-2": "^5.2.0"
   },
   "devDependencies": {}
 }
