@@ -273,57 +273,70 @@ def preprocess(text: str, aggressive: bool = False) -> dict:
 def fix_spaced_letters(text: str) -> str:
     """
     Ghép lại các ký tự/chuỗi bị tách bởi khoảng trắng bất thường.
-
-    Ví dụ: "U B N D" -> "UBND"; "C h u ỷ" -> "Chuỷ" (cố gắng sửa).
-
-    Thuật toán đơn giản:
-      - Tìm các dãy token liên tiếp có độ dài <= 2 ký tự và chỉ gồm chữ
-      - Nếu có >= 3 token liên tiếp thỏa điều kiện, ghép chúng lại
+    Đặc biệt xử lý các văn bản tiếng Việt bị lỗi tách chữ từ PDF.
+    
+    Ví dụ: "t ương t ác" -> "tương tác", "ch ức n ăng" -> "chức năng"
     """
     if not text or " " not in text:
         return text
 
+    # Nếu văn bản không có dấu hiệu bị garbled thì không xử lý tránh làm hỏng văn bản chuẩn
+    if not detect_garbled_text(text):
+        return text
+
+    # Bước 1: Ghép các từ bị tách bởi 1 khoảng trắng (nếu word_segmentation hỗ trợ)
+    # Nhưng trước hết dùng heuristic đơn giản: 
+    # Nếu một chuỗi các token ngắn đứng cạnh nhau, khả năng cao là chúng bị tách.
     tokens = text.split()
-    out_tokens = []
-    i = 0
-    letter_pattern = re.compile(r"^[^\W\d_]+$", flags=re.UNICODE)
+    if not tokens:
+        return text
 
-    while i < len(tokens):
-        # Bắt đầu một run các token ngắn toàn chữ
-        if len(tokens[i]) <= 2 and letter_pattern.match(tokens[i]):
-            j = i
-            run = []
-            while j < len(tokens) and len(tokens[j]) <= 2 and letter_pattern.match(tokens[j]):
-                run.append(tokens[j])
-                j += 1
+    new_tokens = []
+    buffer = []
+    
+    def flush_buffer():
+        if not buffer:
+            return
+        combined = "".join(buffer)
+        # Thử dùng underthesea để tách từ lại cho chuẩn nếu là tiếng Việt
+        try:
+            from underthesea import word_tokenize
+            # Chỉ dùng word_tokenize nếu chuỗi ghép lại đủ dài
+            if len(combined) > 3:
+                tokenized = word_tokenize(combined)
+                new_tokens.extend(tokenized)
+            else:
+                new_tokens.append(combined)
+        except Exception:
+            new_tokens.append(combined)
+        buffer.clear()
 
-            if len(run) >= 3:
-                # Toàn chữ hoa đơn ký tự => acronym (VD: U B N D -> UBND)
-                if all(len(t) == 1 and t.isupper() for t in run):
-                    out_tokens.append("".join(run))
-                else:
-                    merged = "".join(run)
-                    # Thử dùng underthesea để tách lại từ nếu có
-                    try:
-                        from underthesea import word_tokenize as vi_word_tokenize
-                        tokenized = vi_word_tokenize(merged)
-                        if isinstance(tokenized, list):
-                            out_tokens.extend([t for t in tokenized if t.strip()])
-                        elif isinstance(tokenized, str):
-                            out_tokens.extend([t for t in tokenized.split() if t.strip()])
-                        else:
-                            out_tokens.append(merged)
-                    except Exception:
-                        # Nếu underthesea không có -> fallback ghép đơn giản
-                        out_tokens.append(merged)
-
-                i = j
-                continue
-
-        out_tokens.append(tokens[i])
-        i += 1
-
-    return " ".join(out_tokens)
+    for t in tokens:
+        # Heuristic: Token có độ dài <= 3 hoặc chứa các ký tự đơn lẻ (n, t, h, ...)
+        # Hoặc token chỉ gồm 1 nguyên âm có dấu (ú, ồ, ...)
+        is_fragment = len(t) <= 3 or re.match(r"^[a-zA-ZÀ-ỹ]$|^(ch|nh|th|ph|gi|tr|qu|kh|ng|gh)$", t, re.I)
+        
+        if is_fragment:
+            buffer.append(t)
+            # Nếu buffer quá lớn (ví cả đoạn bị tách), ta vẫn để trong buffer
+        else:
+            # Gặp một từ "bình thường" (dài > 3), flush buffer cũ
+            if buffer:
+                flush_buffer()
+            new_tokens.append(t)
+            
+    flush_buffer()
+    
+    result = " ".join(new_tokens)
+    
+    # Bước 2: Xử lý các trường hợp đặc biệt như "Xửl ý" -> "Xử lý"
+    # Thêm dấu cách vào giữa chữ thường và chữ hoa nếu dính nhau (đã có trong clean_text nhưng làm lại cho chắc)
+    result = re.sub(r"([a-zà-ỹ])([A-ZÀ-Ỹ])", r"\1 \2", result)
+    
+    # Bước 3: Chuẩn hóa lại khoảng trắng
+    result = re.sub(r" {2,}", " ", result).strip()
+    
+    return result
 
 
 def detect_garbled_text(text: str, single_letter_threshold: float = 0.15) -> bool:

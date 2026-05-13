@@ -1,518 +1,500 @@
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  AlertTriangle,
-  BarChart3,
-  CheckCircle2,
-  FileText,
-  Gauge,
-  Highlighter,
-  Loader2,
-  UploadCloud,
-  Copy,
-  Download,
-  Moon,
-  Sun,
-  Home,
-  X,
-  Info,
-} from 'lucide-react';
+import { BarChart3, CheckCircle2, AlertTriangle, FileText, Loader2,
+  UploadCloud, Copy, Download, Moon, Sun, Home, Star, Zap, Brain, BookOpen } from 'lucide-react';
+import { Bar, Radar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement,
+  RadialLinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import './styles.css';
 
-import axios from 'axios';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  ArcElement,
-  RadialLinearScale,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { Bar, Line, Pie, Radar } from 'react-chartjs-2';
+ChartJS.register(CategoryScale, LinearScale, BarElement, RadialLinearScale,
+  PointElement, LineElement, Title, Tooltip, Legend);
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, RadialLinearScale, Title, Tooltip, Legend);
+const API = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const ALG_META = {
+  textrank: { label: 'TextRank', type: 'ext', color: '#10b981' },
+  lsa:      { label: 'LSA',      type: 'ext', color: '#06b6d4' },
+  lexrank:  { label: 'LexRank',  type: 'ext', color: '#3b82f6' },
+  vit5:     { label: 'ViT5',     type: 'abs', color: '#8b5cf6' },
+  t5:       { label: 'T5',       type: 'abs', color: '#6366f1' },
+  bart:     { label: 'BART',     type: 'abs', color: '#ec4899' },
+  pegasus:  { label: 'Pegasus',  type: 'abs', color: '#f59e0b' },
+};
 
-function App() {
-  const [files, setFiles] = useState([]);
-  const [text, setText] = useState('');
-  const [urls, setUrls] = useState('');
-  const [algorithms, setAlgorithms] = useState(['textrank', 'lsa', 'lexrank', 'vit5', 't5', 'bart', 'pegasus']);
-  const [lengthControl, setLengthControl] = useState('100_words');
-  const [modelName, setModelName] = useState('vit5');
-  const [analysisMode, setAnalysisMode] = useState('fast');
-  const [compareResults, setCompareResults] = useState({});
-  const [progress, setProgress] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [chartsData, setChartsData] = useState(null);
-  const streamController = useRef(null);
-  const [dark, setDark] = useState(() => localStorage.getItem('dark') === '1');
-  const [view, setView] = useState('summarize'); // or 'dashboard'
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function useToasts() {
   const [toasts, setToasts] = useState([]);
-
-  useEffect(() => {
-    try {
-      if (dark) {
-        document.documentElement.classList.add('dark');
-        document.body.classList.add('dark');
-        localStorage.setItem('dark', '1');
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.body.classList.remove('dark');
-        localStorage.removeItem('dark');
-      }
-    } catch (e) {}
-  }, [dark]);
-
-  const pushToast = useCallback((msg, type = 'default', ms = 3000) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
+  const push = useCallback((msg, type = 'default', ms = 3000) => {
+    const id = Date.now();
+    setToasts(t => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), ms);
   }, []);
+  return { toasts, push };
+}
 
-  const hasFiles = files.length > 0;
+// ─── Algorithm selector ───────────────────────────────────────────────────────
+function AlgSelector({ selected, onChange }) {
+  const toggle = key => onChange(
+    selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key]
+  );
+  return (
+    <div className="algGrid">
+      {Object.entries(ALG_META).map(([key, m]) => (
+        <label key={key} className={`algCheck ${selected.includes(key) ? 'selected' : ''}`}
+          onClick={() => toggle(key)}>
+          <span className="algDot" />
+          <span>{m.label}</span>
+          <span className={`badge badge-${m.type}`} style={{ marginLeft: 'auto' }}>
+            {m.type === 'ext' ? 'Ext' : 'Abs'}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
-  async function submit(event) {
-    event.preventDefault();
-    setError('');
-    setCompareResults({});
-    setChartsData(null);
-    setProgress([]);
-    setLoading(true);
+// ─── Metric bar ───────────────────────────────────────────────────────────────
+function MetricBar({ value, max = 1, green = false }) {
+  const pct = Math.round((value || 0) * 100);
+  return (
+    <div className="metricBar">
+      <span className="metricVal">{pct}%</span>
+      <div className="bar">
+        <div className={`barFill ${green ? 'green' : ''}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
 
-    try {
-      if (hasFiles) {
-        await submitFilesStream(files);
-      } else {
-        await submitTextStream(text, urls);
-      }
-    } catch (err) {
-      setError(err.message || String(err));
-    } finally {
-      setLoading(false);
-      streamController.current = null;
-    }
+// ─── Comparison Table ─────────────────────────────────────────────────────────
+function CompareTable({ results }) {
+  const rows = Object.values(results).filter(r => r && r.summary);
+  if (!rows.length) return null;
+  const best = rows.reduce((a, b) =>
+    (b.rouge?.rougeL || 0) > (a.rouge?.rougeL || 0) ? b : a, rows[0]);
+
+  return (
+    <div className="tableWrap fadeIn">
+      <div className="tableHeader">
+        <h3>📊 Bảng So Sánh Metrics</h3>
+        <span className="tag tag-best"><Star size={11} /> Best: {best.algorithm}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="metricsTable">
+          <thead>
+            <tr>
+              <th>Thuật toán</th>
+              <th>ROUGE-1</th>
+              <th>ROUGE-2</th>
+              <th>ROUGE-L</th>
+              <th>BLEU</th>
+              <th>BERTScore F1</th>
+              <th>Sem. Sim</th>
+              <th>Thời gian</th>
+              <th>Số từ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const m = ALG_META[r.algorithm?.toLowerCase()] || {};
+              const isBest = r.algorithm === best.algorithm;
+              return (
+                <tr key={r.algorithm} className={isBest ? 'best-row' : ''}>
+                  <td>
+                    <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600 }}>
+                      <span style={{ width:10, height:10, borderRadius:'50%',
+                        background: m.color || '#888', display:'inline-block' }} />
+                      {m.label || r.algorithm}
+                      {isBest && <span className="tag tag-best" style={{fontSize:'0.65rem'}}>★ Best</span>}
+                    </span>
+                  </td>
+                  <td><MetricBar value={r.rouge?.rouge1} /></td>
+                  <td><MetricBar value={r.rouge?.rouge2} /></td>
+                  <td><MetricBar value={r.rouge?.rougeL} green /></td>
+                  <td><span className="metricVal">{r.bleu?.toFixed?.(4) ?? '—'}</span></td>
+                  <td><MetricBar value={r.bertscore?.f1} green /></td>
+                  <td><MetricBar value={r.semantic_similarity} /></td>
+                  <td><span className="metricVal">{r.time_seconds}s</span></td>
+                  <td><span className="metricVal">{r.length_words}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ResultCards({ results, push }) {
+  const rows = Object.values(results).filter(r => r?.summary);
+  const best = rows.reduce((a, b) =>
+    (b.rouge?.rougeL || 0) > (a.rouge?.rougeL || 0) ? b : a, rows[0] || {});
+
+  function copy(text) {
+    navigator.clipboard?.writeText(text)
+      .then(() => push('Đã copy!', 'success'))
+      .catch(() => push('Copy thất bại', 'error'));
   }
-
-  // Streaming POST helper: read text/event-stream styled chunks
-  async function fetchStream(url, options) {
-    const res = await fetch(url, options);
-    if (!res.ok) throw new Error(`Server error ${res.status}`);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    streamController.current = reader;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let parts = buffer.split('\n\n');
-      buffer = parts.pop();
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        // we expect lines like: data: {json}\n
-        const m = part.match(/data:\s*(.*)/s);
-        if (!m) continue;
-        try {
-          const obj = JSON.parse(m[1]);
-          handleEvent(obj);
-        } catch (e) {
-          console.warn('Invalid event payload', e, part);
-        }
-      }
-    }
-    // process leftover
-    if (buffer.trim()) {
-      const m = buffer.match(/data:\s*(.*)/s);
-      if (m) {
-        try {
-          const obj = JSON.parse(m[1]);
-          handleEvent(obj);
-        } catch (e) {
-          console.warn('Invalid final payload', e);
-        }
-      }
-    }
-  }
-
-  function handleEvent(obj) {
-    if (!obj || !obj.event) return;
-    setProgress((p) => [...p, obj]);
-
-    // Running status for an algorithm
-    if (obj.event === 'running') {
-      if (obj.algorithm) pushToast(`Đang chạy ${obj.algorithm}…`, 'default', 2000);
-      return;
-    }
-
-    // Single algorithm finished
-    if (obj.event === 'done') {
-      const data = obj.result || obj.data || obj;
-      if (obj.algorithm) {
-        setCompareResults((prev) => ({ ...prev, [obj.algorithm]: obj.result || obj.data }));
-        const t = data?.time_seconds ? ` (${data.time_seconds}s)` : '';
-        pushToast(`${obj.algorithm} hoàn thành${t}`, 'success', 2800);
-      } else {
-        pushToast('Một thuật toán hoàn thành', 'success', 2000);
-      }
-      return;
-    }
-
-    // Final aggregated results
-    if (obj.event === 'finished') {
-      const data = obj.result || obj.data || obj;
-      const all = data.results || [];
-      const map = {};
-      all.forEach((r) => { map[r.algorithm] = r; });
-      setCompareResults(map);
-      buildCharts(all);
-      pushToast('So sánh hoàn tất', 'success', 3500);
-      return;
-    }
-
-    // Error events
-    if (obj.event === 'error') {
-      const msg = obj.error || 'Lỗi khi chạy thuật toán';
-      setError(msg);
-      pushToast(`Lỗi: ${msg}`, 'error', 6000);
-      return;
-    }
-  }
-
-  function buildCharts(results) {
-    if (!results || !results.length) return;
-    const labels = results.map((r) => r.algorithm);
-    const rouge = results.map((r) => (r.rouge?.rougeL ? r.rouge.rougeL * 100 : 0));
-    const times = results.map((r) => r.time_seconds || 0);
-    const lengths = results.map((r) => r.length_words || 0);
-    setChartsData({ labels, rouge, times, lengths });
-  }
-
-  async function submitTextStream(textValue, urlsValue) {
-    const payload = {
-      text: textValue.trim() || null,
-      urls: urlsValue.split('\n').map((u) => u.trim()).filter(Boolean),
-      algorithms,
-      extractive_sentences: 5,
-      max_abstractive_length: 150,
-      save_result: true,
-    };
-
-    await fetchStream(`${API_BASE}/summarize/compare/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+  function dl(text, name) {
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([text], { type: 'text/plain' })),
+      download: name,
     });
-    pushToast('Streaming started', 'success');
-  }
-
-  async function submitFilesStream(files) {
-    const form = new FormData();
-    files.forEach((f) => form.append('files', f));
-    form.append('algorithms', JSON.stringify(algorithms));
-    // note: backend streaming for files uses the same compare/stream route
-    await fetchStream(`${API_BASE}/summarize/compare/stream`, {
-      method: 'POST',
-      body: form,
-    });
-    pushToast('Files uploaded; streaming started', 'success');
-  }
-
-  function copyToClipboard(text) {
-    if (!text) return pushToast('Không có nội dung để copy', 'error');
-    navigator.clipboard?.writeText(text).then(() => pushToast('Đã copy vào clipboard', 'success')).catch(() => pushToast('Copy thất bại', 'error'));
-  }
-
-  function downloadText(text, filename = 'summary.txt') {
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
     a.click();
-    URL.revokeObjectURL(url);
-    pushToast('Download started', 'success');
-  }
-
-  function exportJSON(obj, filename = 'summary.json') {
-    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    pushToast('Exported JSON', 'success');
+    push('Đã tải xuống', 'success');
   }
 
   return (
-    <main className="app">
-      <section className="workspace">
-        <aside className="inputPane">
-          <div className="brand">
-            <div className="brandMark"><FileText size={22} /></div>
-            <div>
-              <div className="brandHeader">
-                <h1>AI Summarization Dashboard</h1>
-                <div style={{ marginLeft: 8 }}>
-                  <button className="secondaryButton" onClick={() => setDark((d) => !d)} title="Toggle dark mode">
-                    {dark ? <Sun size={14} /> : <Moon size={14} />}
-                  </button>
-                </div>
+    <div className="cardsGrid fadeIn">
+      {rows.map(r => {
+        const m = ALG_META[r.algorithm?.toLowerCase()] || {};
+        const isBest = r.algorithm === best.algorithm;
+        return (
+          <div key={r.algorithm} 
+               className={`resultCard ${isBest ? 'best-card' : ''}`}
+               onClick={() => push && push('detail', r)}
+               style={{ cursor: 'pointer' }}>
+            <div className="cardTop">
+              <span className="cardAlgo">
+                <span style={{ width:10, height:10, borderRadius:'50%',
+                  background: m.color || '#888', display:'inline-block' }} />
+                {m.label || r.algorithm}
+                <span className={`badge badge-${m.type || 'ext'}`}>
+                  {m.type === 'abs' ? 'Abstractive' : 'Extractive'}
+                </span>
+              </span>
+              {isBest && <span className="tag tag-best"><Star size={10} /> Tốt nhất</span>}
+            </div>
+            <div className="cardBody">
+              <p className="summaryText">{r.summary || '—'}</p>
+            </div>
+            <div className="cardFooter" onClick={e => e.stopPropagation()}>
+              <div className="miniMetrics">
+                <span>R-L <strong>{Math.round((r.rouge?.rougeL||0)*100)}%</strong></span>
+                <span>BS <strong>{Math.round((r.bertscore?.f1||0)*100)}%</strong></span>
+                <span><strong>{r.time_seconds}s</strong></span>
               </div>
-              <p>So sánh nhiều thuật toán. Thực thi song song, realtime progress.</p>
+              <div className="cardActions">
+                <button className="btn-icon" title="Copy" onClick={() => copy(r.summary)}><Copy size={13}/></button>
+                <button className="btn-icon" title="Tải TXT" onClick={() => dl(r.summary, `${r.algorithm}.txt`)}><Download size={13}/></button>
+              </div>
             </div>
           </div>
+        );
+      })}
+    </div>
+  );
+}
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <button className={`secondaryButton ${view === 'summarize' ? 'active' : ''}`} onClick={() => setView('summarize')}><Home size={14} /> Summarize</button>
-            <button className={`secondaryButton ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><BarChart3 size={14} /> Dashboard</button>
-          </div>
+// ─── Sentence Highlight ────────────────────────────────────────────────────────
+function SentenceHighlight({ result, onClose }) {
+  if (!result) return null;
+  const m = ALG_META[result.algorithm?.toLowerCase()] || { label: result.algorithm };
+  const sourceSents = result.source_sentences || [];
+  const selectedIdx = result.details?.highlighted_sentence_indexes || [];
 
-          {view === 'summarize' && (
-            <form onSubmit={submit} className="controlStack">
-              <label className="dropZone">
-                <UploadCloud size={28} />
-                <span>{hasFiles ? `${files.length} file đã chọn` : 'Upload TXT, PDF, DOCX'}</span>
-                <input
-                  type="file"
-                  multiple
-                  accept=".txt,.pdf,.docx"
-                  onChange={(event) => setFiles(Array.from(event.target.files || []))}
-                />
-              </label>
-
-              <textarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder="Hoặc nhập văn bản trực tiếp tại đây"
-                rows={7}
-                disabled={hasFiles}
-              />
-
-              <textarea
-                value={urls}
-                onChange={(event) => setUrls(event.target.value)}
-                placeholder="URL bài viết, mỗi dòng một URL"
-                rows={4}
-                disabled={hasFiles}
-              />
-
-              <div className="fieldGrid">
-                <label>
-                  Algorithms
-                  <select value={algorithms.join(',')} onChange={(e) => setAlgorithms(e.target.value.split(',').map(s => s.trim()))}>
-                    <option value={["textrank","lsa","lexrank","vit5","t5","bart","pegasus"]}>All (TextRank, LSA, LexRank, ViT5, T5, BART, Pegasus)</option>
-                  </select>
-                </label>
-              </div>
-
-              <button className="primaryButton" disabled={loading || (!hasFiles && !text.trim() && !urls.trim())}>
-                {loading ? <Loader2 className="spin" size={18} /> : <Gauge size={18} />}
-                <span>{loading ? 'Đang xử lý...' : 'Chạy & So sánh thuật toán'}</span>
-              </button>
-
-              {error && <div className="errorBox">{error}</div>}
-            </form>
-          )}
-        </aside>
-
-        <section className="resultPane">
-          {view === 'dashboard' && <Dashboard pushToast={pushToast} />}
-
-          {view === 'summarize' && (
-            <>
-              {!loading && !Object.keys(compareResults).length && <EmptyState />}
-              {loading && <LoadingState />}
-
-              {Object.keys(compareResults).length > 0 && (
-                <div>
-                  <div className="cardsRow">
-                    {Object.entries(compareResults).map(([alg, data]) => (
-                      <div key={alg} className="card">
-                        <div className="cardHeader">
-                          <h3>{alg.toUpperCase()}</h3>
-                          <span className="time">{(data.time_seconds || 0) + 's'}</span>
-                        </div>
-                        <div className="cardBody">
-                          <p className="summaryText">{data.summary || '—'}</p>
-                        </div>
-                        <div className="cardFooter" style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <small>ROUGE-L: {data.rouge?.rougeL ? Math.round(data.rouge.rougeL * 100) + '%' : '—'}</small>
-                            <small style={{ marginLeft: 8 }}>BLEU: {data.bleu ?? '—'}</small>
-                            <small style={{ marginLeft: 8 }}>Sim: {data.semantic_similarity ?? '—'}</small>
-                          </div>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button className="secondaryButton" onClick={() => copyToClipboard(data.summary)} title="Copy summary"><Copy size={14} /></button>
-                            <button className="secondaryButton" onClick={() => exportJSON(data, `${alg}_summary.json`)} title="Export JSON"><FileText size={14} /></button>
-                            <button className="secondaryButton" onClick={() => downloadText(data.summary || '', `${alg}_summary.txt`)} title="Download"><Download size={14} /></button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {chartsData && (
-                    <div className="chartsRow">
-                      <div className="chartCard">
-                        <h4>ROUGE-L Comparison</h4>
-                        <Bar data={{ labels: chartsData.labels, datasets: [{ label: 'ROUGE-L %', data: chartsData.rouge }] }} />
-                      </div>
-
-                      <div className="chartCard">
-                        <h4>Processing Time (s)</h4>
-                        <Line data={{ labels: chartsData.labels, datasets: [{ label: 'Time (s)', data: chartsData.times, borderColor: '#3b82f6' }] }} />
-                      </div>
-
-                      <div className="chartCard">
-                        <h4>Summary Length</h4>
-                        <Pie data={{ labels: chartsData.labels, datasets: [{ data: chartsData.lengths }] }} />
-                      </div>
+  return (
+    <div className="highlightPanel fadeIn">
+      <div className="highlightHeader">
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ width:12, height:12, borderRadius:'50%', background: m.color || '#888' }} />
+          <h4>{m.label} — Chi tiết trích xuất</h4>
+          <span className="badge badge-ext" style={{fontSize:'0.6rem'}}>Explainability</span>
+        </div>
+        <button className="btn-icon" onClick={onClose}>✕</button>
+      </div>
+      <div className="sentenceList">
+        {sourceSents.length > 0 ? (
+          sourceSents.map((s, i) => {
+            const isSelected = selectedIdx.includes(i);
+            const detail = result.details?.selected_sentences?.find(d => d.sentence_index === i);
+            return (
+              <div key={i} className={`sentence ${isSelected ? 'highlighted' : ''}`}>
+                <div className="sentNum">{i + 1}</div>
+                <div className="sentContent">
+                  {s}
+                  {isSelected && detail && (
+                    <div className="sentReason">
+                      Score: <strong>{detail.sentence_score}</strong> · 
+                      Match: <strong>{Math.round(detail.match_similarity*100)}%</strong>
                     </div>
                   )}
                 </div>
-              )}
-            </>
-          )}
-
-          <div className="toastWrap">
-            {toasts.map((t) => (
-              <div key={t.id} className={`toast ${t.type}`}>
-                {t.msg}
               </div>
-            ))}
-          </div>
-        </section>
-      </section>
-    </main>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="emptyState">
-      <Highlighter size={34} />
-      <h2>Upload nhiều tài liệu để bắt đầu</h2>
-      <p>Kết quả sẽ có summary tổng hợp, summary từng file, câu nguồn được highlight và các nhận định nghi vấn.</p>
+            );
+          })
+        ) : (
+          <div className="emptyState" style={{padding:'20px'}}>Không có dữ liệu câu nguồn để hiển thị highlight.</div>
+        )}
+      </div>
     </div>
   );
 }
 
-function LoadingState() {
+// ─── Progress Panel ────────────────────────────────────────────────────────────
+function ProgressPanel({ progress, algs }) {
+  const statusOf = alg => {
+    const events = progress.filter(e => e.algorithm === alg.toLowerCase());
+    if (events.some(e => e.event === 'error')) return 'error';
+    if (events.some(e => e.event === 'done')) return 'done';
+    if (events.some(e => e.event === 'running')) return 'running';
+    return 'waiting';
+  };
+  const timeOf = alg => {
+    const done = progress.find(e => e.algorithm === alg.toLowerCase() && e.event === 'done');
+    return done?.result?.time_seconds ? `${done.result.time_seconds}s` : '';
+  };
   return (
-    <div className="emptyState">
-      <Loader2 className="spin" size={34} />
-      <h2>Đang chạy pipeline NLP</h2>
-      <p>Hệ thống đang trích xuất, tóm tắt, so sánh ROUGE và kiểm chứng consistency.</p>
+    <div className="progressPanel fadeIn">
+      <div className="progressTitle">⚡ Tiến trình xử lý</div>
+      <div className="progressList">
+        {algs.map(alg => {
+          const m = ALG_META[alg] || { label: alg };
+          const st = statusOf(alg);
+          return (
+            <div key={alg} className="progressItem">
+              <span className={`pStatus ${st}`} />
+              <span className="pName">{m.label}</span>
+              <span className="tag tag-info" style={{fontSize:'0.65rem'}}>
+                {st === 'running' ? '🔄 Đang chạy...' :
+                 st === 'done'    ? '✅ Hoàn thành' :
+                 st === 'error'   ? '❌ Lỗi' : '⏳ Chờ'}
+              </span>
+              <span className="pTime">{timeOf(alg)}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function Dashboard({ pushToast }) {
+// ─── Charts ────────────────────────────────────────────────────────────────────
+function Charts({ results }) {
+  const rows = Object.values(results).filter(r => r?.summary);
+  if (rows.length < 2) return null;
+  const labels = rows.map(r => ALG_META[r.algorithm?.toLowerCase()]?.label || r.algorithm);
+  const isDark = document.documentElement.classList.contains('dark');
+  const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+  const textColor = isDark ? '#94a3b8' : '#6b7280';
+
+  const barData = {
+    labels,
+    datasets: [
+      { label: 'ROUGE-1',    data: rows.map(r => Math.round((r.rouge?.rouge1||0)*100)), backgroundColor: 'rgba(99,102,241,.7)' },
+      { label: 'ROUGE-2',    data: rows.map(r => Math.round((r.rouge?.rouge2||0)*100)), backgroundColor: 'rgba(139,92,246,.7)' },
+      { label: 'ROUGE-L',    data: rows.map(r => Math.round((r.rouge?.rougeL||0)*100)), backgroundColor: 'rgba(16,185,129,.7)' },
+      { label: 'BERTScore',  data: rows.map(r => Math.round((r.bertscore?.f1||0)*100)), backgroundColor: 'rgba(245,158,11,.7)' },
+    ],
+  };
+  const opts = {
+    responsive: true,
+    plugins: { legend: { labels: { color: textColor, font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: textColor }, grid: { color: gridColor } },
+      y: { ticks: { color: textColor }, grid: { color: gridColor }, max: 100 },
+    },
+  };
+
+  const radarData = {
+    labels: ['ROUGE-1','ROUGE-2','ROUGE-L','BERTScore','Sem.Sim','Speed'],
+    datasets: rows.slice(0,4).map((r, i) => {
+      const colors = ['#6366f1','#10b981','#f59e0b','#ec4899'];
+      return {
+        label: ALG_META[r.algorithm?.toLowerCase()]?.label || r.algorithm,
+        data: [
+          Math.round((r.rouge?.rouge1||0)*100),
+          Math.round((r.rouge?.rouge2||0)*100),
+          Math.round((r.rouge?.rougeL||0)*100),
+          Math.round((r.bertscore?.f1||0)*100),
+          Math.round((r.semantic_similarity||0)*100),
+          Math.max(0, 100 - Math.round((r.time_seconds||0)*10)),
+        ],
+        borderColor: colors[i],
+        backgroundColor: colors[i]+'22',
+        pointBackgroundColor: colors[i],
+      };
+    }),
+  };
+  const radarOpts = {
+    responsive: true,
+    scales: { r: { ticks: { color: textColor, font:{size:9}, backdropColor:'transparent' }, grid: { color: gridColor }, pointLabels: { color: textColor, font:{size:11} } } },
+    plugins: { legend: { labels: { color: textColor, font:{size:11} } } },
+  };
+
+  return (
+    <div className="chartsGrid fadeIn">
+      <div className="chartCard" style={{ gridColumn: 'span 2' }}>
+        <h4>Comparison — ROUGE + BERTScore (%)</h4>
+        <Bar data={barData} options={opts} />
+      </div>
+      <div className="chartCard">
+        <h4>Radar — Đánh giá tổng hợp</h4>
+        <Radar data={radarData} options={radarOpts} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ push }) {
   const [metrics, setMetrics] = useState(null);
   const [viz, setViz] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchAll = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [mRes, vRes] = await Promise.all([
-        axios.get(`${API_BASE}/dashboard/metrics`),
-        axios.get(`${API_BASE}/dashboard/visualization`),
+      const [m, v] = await Promise.all([
+        fetch(`${API}/dashboard/metrics`).then(r => r.json()),
+        fetch(`${API}/dashboard/visualization`).then(r => r.json()),
       ]);
-      setMetrics(mRes.data || {});
-      setViz(vRes.data || {});
-      pushToast('Dashboard updated', 'success');
-    } catch (e) {
-      pushToast('Không thể tải dashboard', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [pushToast]);
+      setMetrics(m); setViz(v);
+      push('Dashboard đã cập nhật', 'success');
+    } catch { push('Không tải được dashboard', 'error'); }
+    finally { setLoading(false); }
+  }, [push]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { load(); }, [load]);
 
-  if (loading) {
-    return (
-      <div className="panel">
-        <div className="metricRow">
-          <div className="metric glassCard">
-            <div className="skeleton text" style={{ height: 22, width: '50%' }} />
-            <div className="skeleton line" />
-          </div>
-          <div className="metric glassCard">
-            <div className="skeleton text" style={{ height: 22, width: '40%' }} />
-            <div className="skeleton line" />
-          </div>
-          <div className="metric glassCard">
-            <div className="skeleton text" style={{ height: 22, width: '30%' }} />
-            <div className="skeleton line" />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="emptyState"><Loader2 className="spin" size={32}/><p>Đang tải...</p></div>;
 
-  const top = metrics?.top_models || [];
   return (
-    <div className="panel">
-      <div className="panelHeader">
-        <h2>Dashboard</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="secondaryButton" onClick={fetchAll}>Refresh</button>
-        </div>
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <h2 style={{ fontSize:'1rem', fontWeight:700 }}>📈 Dashboard Thống kê</h2>
+        <button className="btn btn-ghost" onClick={load} style={{ padding:'6px 12px', fontSize:'0.8rem' }}>Refresh</button>
       </div>
-
-      <div className="metricRow">
-        <div className="metric">
-          <span>Tổng văn bản</span>
-          <div className="counter">{metrics.total_summaries}</div>
-        </div>
-        <div className="metric">
-          <span>Tổng thời gian (s)</span>
-          <div className="counter">{metrics.total_processing_time_seconds}</div>
-        </div>
-        <div className="metric">
-          <span>Avg ROUGE-L</span>
-          <div className="counter">{Math.round((metrics.avg_rouge?.rougeL || 0) * 100)}%</div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <h4>Top models</h4>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {top.map((m) => (
-            <div key={m.model} className="card" style={{ padding: 8 }}>
-              <strong>{m.model}</strong>
-              <div style={{ fontSize: 12, color: '#6c7480' }}>{m.count} runs</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {viz && viz.labels && (
-        <div className="chartsRow" style={{ marginTop: 20 }}>
-          <div className="chartCard">
-            <h4>ROUGE-L by Model</h4>
-            <Bar data={{ labels: viz.labels, datasets: [{ label: 'ROUGE-L', data: viz.rougeL_avg.map(v => v * 100) }] }} />
+      <div className="statGrid">
+        {[
+          { label: 'Tổng văn bản', value: metrics?.total_summaries ?? 0, icon: <FileText size={16}/> },
+          { label: 'Thời gian (s)', value: metrics?.total_processing_time_seconds ?? 0, icon: <Zap size={16}/> },
+          { label: 'Avg ROUGE-L', value: `${Math.round((metrics?.avg_rouge?.rougeL||0)*100)}%`, icon: <Brain size={16}/> },
+        ].map(s => (
+          <div key={s.label} className="statCard">
+            <div style={{ color:'var(--accent)', marginBottom:4 }}>{s.icon}</div>
+            <div className="statLabel">{s.label}</div>
+            <div className="statValue">{s.value}</div>
           </div>
-          <div className="chartCard">
-            <h4>Processing Time</h4>
-            <Line data={{ labels: viz.labels, datasets: [{ label: 'Time (s)', data: viz.time_avg }] }} />
-          </div>
-          <div className="chartCard">
-            <h4>Summary Length</h4>
-            <Pie data={{ labels: viz.labels, datasets: [{ data: viz.length_avg }] }} />
+        ))}
+      </div>
+      {viz?.labels && (
+        <div className="chartCard">
+          <h4>ROUGE-L theo Model</h4>
+          <Bar data={{
+            labels: viz.labels,
+            datasets: [{ label:'ROUGE-L %', data: viz.rougeL_avg?.map(v=>Math.round(v*100)), backgroundColor:'rgba(99,102,241,.7)' }]
+          }} options={{ responsive:true, plugins:{ legend:{display:false} } }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Benchmark View ────────────────────────────────────────────────────────────
+function BenchmarkView({ push }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API}/benchmark/results`)
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => { push('Không tải được benchmark', 'error'); setLoading(false); });
+  }, [push]);
+
+  if (loading) return <div className="emptyState"><Loader2 className="spin" size={28}/><p>Đang tải...</p></div>;
+  if (!data?.benchmark_results?.length)
+    return <div className="emptyState"><BookOpen size={36} strokeWidth={1.2}/><h2>Chưa có kết quả benchmark</h2><p>Chạy: <code>python -m src.benchmark --samples 100</code></p></div>;
+
+  const bench = data.benchmark_results[0];
+  const rows  = bench.comparison || [];
+  const isDark = document.documentElement.classList.contains('dark');
+  const gc     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+  const tc     = isDark ? '#94a3b8' : '#6b7280';
+
+  const barData = {
+    labels: rows.map(r => r.algorithm.replace(' (fine-tuned, 5000 samples)', '*').replace(' (pretrained)','').replace('BART-large-CNN','BART')),
+    datasets: [
+      { label:'ROUGE-1',   data: rows.map(r => Math.round(r.avg_rouge1*100)),      backgroundColor:'rgba(99,102,241,.75)' },
+      { label:'ROUGE-2',   data: rows.map(r => Math.round(r.avg_rouge2*100)),      backgroundColor:'rgba(139,92,246,.75)' },
+      { label:'ROUGE-L',   data: rows.map(r => Math.round(r.avg_rougeL*100)),      backgroundColor:'rgba(16,185,129,.75)' },
+      { label:'BERTScore', data: rows.map(r => Math.round(r.avg_bertscore_f1*100)),backgroundColor:'rgba(245,158,11,.75)' },
+    ],
+  };
+  const opts = {
+    responsive:true,
+    plugins:{ legend:{ labels:{ color:tc, font:{size:11} } }, title:{display:true, text:'Benchmark — VnExpress 100 samples', color:tc} },
+    scales:{ x:{ticks:{color:tc},grid:{color:gc}}, y:{ticks:{color:tc},grid:{color:gc},max:100,title:{display:true,text:'Score (%)',color:tc}} },
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <h2 style={{ fontSize:'1rem', fontWeight:700 }}>📋 Kết quả Benchmark</h2>
+        <div style={{ fontSize:'0.75rem', color:'var(--text3)' }}>
+          Dataset: <strong>{bench.dataset}</strong> · Samples: <strong>{bench.samples}</strong>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="chartCard">
+        <Bar data={barData} options={opts}/>
+      </div>
+
+      {/* Table */}
+      <div className="tableWrap">
+        <div className="tableHeader"><h3>So sánh chi tiết</h3></div>
+        <div style={{ overflowX:'auto' }}>
+          <table className="metricsTable">
+            <thead>
+              <tr>
+                <th>Thuật toán</th><th>Loại</th>
+                <th>ROUGE-1</th><th>ROUGE-2</th><th>ROUGE-L</th>
+                <th>BLEU</th><th>BERTScore F1</th><th>Sem.Sim</th>
+                <th>Time avg</th><th>Len avg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const bestRl = Math.max(...rows.map(x => x.avg_rougeL));
+                const isBest = r.avg_rougeL === bestRl;
+                return (
+                  <tr key={i} className={isBest ? 'best-row' : ''}>
+                    <td style={{ fontWeight:600 }}>
+                      {r.algorithm.replace(' (fine-tuned, 5000 samples)','*').replace(' (pretrained)','')}
+                      {isBest && <span className="tag tag-best" style={{marginLeft:6,fontSize:'0.65rem'}}>★ Best</span>}
+                    </td>
+                    <td><span className={`badge badge-${r.type==='abstractive'?'abs':'ext'}`}>{r.type==='abstractive'?'Abstractive':'Extractive'}</span></td>
+                    <td><MetricBar value={r.avg_rouge1}/></td>
+                    <td><MetricBar value={r.avg_rouge2}/></td>
+                    <td><MetricBar value={r.avg_rougeL} green/></td>
+                    <td><span className="metricVal">{r.avg_bleu?.toFixed(4)??'—'}</span></td>
+                    <td><MetricBar value={r.avg_bertscore_f1} green/></td>
+                    <td><MetricBar value={r.avg_semantic_sim}/></td>
+                    <td><span className="metricVal">{r.avg_time_seconds}s</span></td>
+                    <td><span className="metricVal">{r.avg_length_words} từ</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Key findings */}
+      {bench.key_findings?.length > 0 && (
+        <div className="highlightPanel">
+          <div className="highlightHeader"><h4>💡 Nhận xét chính</h4></div>
+          <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:6 }}>
+            {bench.key_findings.map((f, i) => (
+              <div key={i} style={{ display:'flex', gap:8, fontSize:'0.83rem', lineHeight:1.55 }}>
+                <span style={{ color:'var(--green)', fontWeight:700, flexShrink:0 }}>✓</span>
+                <span>{f}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -520,79 +502,240 @@ function Dashboard({ pushToast }) {
   );
 }
 
-function Metric({ icon, label, value }) {
-  return (
-    <div className="metric">
-      {icon}
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
 
-function StatusPill({ status }) {
-  const ok = status === 'consistent';
-  return (
-    <span className={`statusPill ${ok ? 'ok' : 'warn'}`}>
-      {ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-      {status}
-    </span>
-  );
-}
+// ─── App ───────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [files, setFiles]           = useState([]);
+  const [text, setText]             = useState('');
+  const [urls, setUrls]             = useState('');
+  const [algs, setAlgs]             = useState(['textrank','lsa','lexrank','vit5']);
+  const [results, setResults]       = useState({});
+  const [progress, setProgress]     = useState([]);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState('');
+  const [dark, setDark]             = useState(() => localStorage.getItem('dark')==='1');
+  const [view, setView]             = useState('summarize'); // 'summarize' | 'dashboard' | 'benchmark'
+  const [selectedResult, setSelectedResult] = useState(null);
+  const { toasts, push }            = useToasts();
+  const ctrl                        = useRef(null);
 
-function HighlightedSummary({ summary, spans = [] }) {
-  if (!spans.length) return <p className="summaryText">{summary}</p>;
-  const suspicious = new Set(spans.map((span) => span.text));
-  const sentences = splitSentences(summary);
-  return (
-    <p className="summaryText">
-      {sentences.map((sentence, index) => (
-        suspicious.has(sentence)
-          ? <mark key={`${sentence}-${index}`} className="suspicious">{sentence}</mark>
-          : <span key={`${sentence}-${index}`}>{sentence} </span>
-      ))}
-    </p>
-  );
-}
+  useEffect(() => {
+    if (dark) { document.documentElement.classList.add('dark'); localStorage.setItem('dark','1'); }
+    else      { document.documentElement.classList.remove('dark'); localStorage.removeItem('dark'); }
+  }, [dark]);
 
-function ConsistencyList({ checks = [] }) {
-  return (
-    <div className="checkList">
-      {checks.map((check, index) => (
-        <details key={`${check.summary_sentence}-${index}`} className={`checkItem ${check.status}`}>
-          <summary>
-            <strong>{check.summary_sentence}</strong>
-            <span>{check.support_percent ?? Math.round(check.support_score * 100)}%</span>
-          </summary>
-          <p>{check.reason}</p>
-          {(check.evidence || []).map((item) => (
-            <small key={`${item.index}-${item.score}`}>Evidence {item.index + 1} ({Math.round(item.score * 100)}%): {item.sentence}</small>
-          ))}
-        </details>
-      ))}
-    </div>
-  );
-}
+  function handleEvent(obj) {
+    if (!obj?.event) return;
+    setProgress(p => [...p, obj]);
+    if (obj.event === 'done' && obj.algorithm && obj.result)
+      setResults(prev => ({ ...prev, [obj.algorithm]: obj.result }));
+    if (obj.event === 'finished') {
+      (obj.data?.results || obj.result?.results || []).forEach(r => {
+        setResults(prev => ({ ...prev, [r.algorithm]: r }));
+      });
+      push('So sánh hoàn tất! 🎉', 'success', 4000);
+    }
+    if (obj.event === 'error') push(`Lỗi: ${obj.error}`, 'error', 6000);
+  }
 
-function DocumentDetail({ document }) {
-  const highlighted = new Set(document.explainability?.highlighted_sentence_indexes || []);
-  const sentences = document.explainability?.sentences || [];
-  const highlights = document.explainability?.highlights || [];
-  const reasons = useMemo(() => new Map(highlights.map((item) => [item.source_index, item.reason])), [highlights]);
+  async function stream(url, init) {
+    const res = await fetch(url, init);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${body}`);
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    ctrl.current = reader;
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const m = part.match(/data:\s*(.*)/s);
+        if (m) { try { handleEvent(JSON.parse(m[1])); } catch {} }
+      }
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(''); setResults({}); setProgress([]); setLoading(true);
+    try {
+      if (files.length > 0) {
+        const fd = new FormData();
+        files.forEach(f => fd.append('files', f));
+        fd.append('algorithms', JSON.stringify(algs));
+        await stream(`${API}/summarize/files/compare/stream`, { method:'POST', body: fd });
+      } else {
+        await stream(`${API}/summarize/compare/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            text: text.trim() || null,
+            urls: urls.split('\n').map(u=>u.trim()).filter(Boolean),
+            algorithms: algs,
+            extractive_sentences: 5,
+            max_abstractive_length: 150,
+          }),
+        });
+      }
+    } catch (err) { setError(err.message || String(err)); }
+    finally { setLoading(false); ctrl.current = null; }
+  }
+
+  const hasInput = files.length > 0 || text.trim() || urls.trim();
 
   return (
-    <div className="documentDetail">
-      <div className="documentSummary">
-        <h3>{document.summary_type} summary</h3>
-        <p>{document.summary}</p>
-        <StatusPill status={document.consistency_status === 'consistent' ? 'consistent' : 'needs_review'} />
+    <div className="app">
+      {/* Top Bar */}
+      <header className="topbar">
+        <div className="topbar-brand">
+          <div className="topbar-logo">NLP</div>
+          <div>
+            <div className="topbar-title">Vietnamese Text Summarization</div>
+            <div className="topbar-sub">So sánh 7 thuật toán · ROUGE · BERTScore · Realtime Streaming</div>
+          </div>
+        </div>
+        <div className="topbar-nav">
+          <button className={`btn btn-ghost ${view==='summarize'?'active':''}`}
+            onClick={() => setView('summarize')} style={{gap:5}}>
+            <Home size={14}/> Tóm tắt
+          </button>
+          <button className={`btn btn-ghost ${view==='dashboard'?'active':''}`}
+            onClick={() => setView('dashboard')} style={{gap:5}}>
+            <BarChart3 size={14}/> Dashboard
+          </button>
+          <button className={`btn btn-ghost ${view==='benchmark'?'active':''}`}
+            onClick={() => setView('benchmark')} style={{gap:5}}>
+            <BookOpen size={14}/> Benchmark
+          </button>
+          <button className="btn btn-ghost" onClick={() => setDark(d=>!d)} style={{width:36,padding:0}}>
+            {dark ? <Sun size={14}/> : <Moon size={14}/>}
+          </button>
+        </div>
+      </header>
+
+      <div className="workspace">
+        {/* Sidebar */}
+        <aside className="sidePanel">
+          {view === 'summarize' && (
+            <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+              {/* Upload */}
+              <div className="panelSection">
+                <span className="sectionLabel">📂 Upload tài liệu</span>
+                <label className={`dropZone ${files.length ? 'active' : ''}`}>
+                  <UploadCloud size={22}/>
+                  <span>{files.length ? `${files.length} file đã chọn` : 'TXT / PDF / DOCX'}</span>
+                  <span style={{fontSize:'0.72rem', color:'var(--text3)'}}>Kéo thả hoặc click để chọn</span>
+                  <input type="file" multiple accept=".txt,.pdf,.docx"
+                    onChange={e => setFiles(Array.from(e.target.files||[]))}/>
+                </label>
+                {files.length > 0 && (
+                  <button type="button" className="btn btn-ghost" style={{fontSize:'0.78rem',padding:'5px'}}
+                    onClick={() => setFiles([])}>✕ Xóa files</button>
+                )}
+              </div>
+
+              <div className="divider"/>
+
+              {/* Text / URLs */}
+              <div className="panelSection">
+                <span className="sectionLabel">✍️ Hoặc nhập văn bản</span>
+                <textarea value={text} onChange={e=>setText(e.target.value)}
+                  placeholder="Dán văn bản tiếng Việt vào đây..." rows={6}
+                  disabled={files.length > 0}/>
+              </div>
+
+              <div className="panelSection">
+                <span className="sectionLabel">🔗 Hoặc URL bài báo</span>
+                <textarea value={urls} onChange={e=>setUrls(e.target.value)}
+                  placeholder="Mỗi dòng một URL..." rows={3}
+                  disabled={files.length > 0}/>
+              </div>
+
+              <div className="divider"/>
+
+              {/* Algorithm selector */}
+              <div className="panelSection">
+                <span className="sectionLabel">⚙️ Chọn thuật toán ({algs.length}/7)</span>
+                <AlgSelector selected={algs} onChange={setAlgs}/>
+                <div style={{display:'flex',gap:6,marginTop:4}}>
+                  <button type="button" className="btn btn-ghost" style={{flex:1,fontSize:'0.75rem',padding:'5px'}}
+                    onClick={()=>setAlgs(Object.keys(ALG_META))}>Tất cả</button>
+                  <button type="button" className="btn btn-ghost" style={{flex:1,fontSize:'0.75rem',padding:'5px'}}
+                    onClick={()=>setAlgs(['textrank','vit5'])}>Mặc định</button>
+                </div>
+              </div>
+
+              <div className="divider"/>
+
+              <button className="btn btn-primary" disabled={loading || !hasInput || algs.length===0}>
+                {loading ? <><Loader2 className="spin" size={16}/> Đang xử lý...</> : <><Zap size={16}/> Chạy & So sánh</>}
+              </button>
+
+              {error && <div className="errorBox">⚠️ {error}</div>}
+            </form>
+          )}
+
+          {view === 'dashboard' && (
+            <div style={{padding:'4px 0', color:'var(--text3)', fontSize:'0.82rem'}}>
+              Thống kê lịch sử các lần tóm tắt
+            </div>
+          )}
+        </aside>
+
+        {/* Result Pane */}
+        <main className="resultPane">
+          {view === 'dashboard' && <Dashboard push={push}/>}
+          {view === 'benchmark' && <BenchmarkView push={push}/>}
+
+          {view === 'summarize' && (
+            <>
+              {!loading && !Object.keys(results).length && !progress.length && (
+                <div className="emptyState">
+                  <Brain size={40} strokeWidth={1.2}/>
+                  <h2>Sẵn sàng phân tích văn bản</h2>
+                  <p>Upload file, nhập văn bản hoặc URL. Chọn thuật toán rồi nhấn "Chạy & So sánh" để xem kết quả ROUGE, BERTScore và so sánh trực quan.</p>
+                </div>
+              )}
+
+              {(loading || progress.length > 0) && (
+                <ProgressPanel progress={progress} algs={algs}/>
+              )}
+
+              {Object.keys(results).length > 0 && (
+                <>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <h3 style={{ fontSize:'0.9rem', fontWeight:700 }}>✨ Kết quả phân tích</h3>
+                    <button className="btn btn-ghost" style={{padding:'4px 10px', fontSize:'0.75rem'}} 
+                            onClick={() => { setResults({}); setProgress([]); }}>Xóa kết quả</button>
+                  </div>
+                  <CompareTable results={results}/>
+                  <Charts results={results}/>
+                  <ResultCards results={results} push={(type, data) => {
+                    if (type === 'detail') setSelectedResult(data);
+                    else push(type, data);
+                  }}/>
+                  {selectedResult && (
+                    <SentenceHighlight result={selectedResult} onClose={() => setSelectedResult(null)} />
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </main>
       </div>
-      <div className="sourceSentences">
-        {sentences.map((sentence, index) => (
-          <div key={`${sentence}-${index}`} className={highlighted.has(index) ? 'sourceSentence selected' : 'sourceSentence'}>
-            <span>{index + 1}</span>
-            <p>{sentence}</p>
-            {highlighted.has(index) && <small>{reasons.get(index)}</small>}
+
+      {/* Toasts */}
+      <div className="toastWrap">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast ${t.type}`}>
+            {t.type==='success' ? <CheckCircle2 size={13}/> : t.type==='error' ? <AlertTriangle size={13}/> : null}
+            {t.msg}
           </div>
         ))}
       </div>
@@ -600,14 +743,4 @@ function DocumentDetail({ document }) {
   );
 }
 
-function splitSentences(text) {
-  return (text.match(/[^.!?]+[.!?]?/g) || [text]).map((item) => item.trim()).filter(Boolean);
-}
-
-function getBestRouge(result) {
-  const best = result?.scores?.[result.best_type];
-  if (!best || (best.rougeL !== 0 && !best.rougeL)) return result.best_type;
-  return `${Math.round(best.rougeL * 100)}%`;
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<App/>);

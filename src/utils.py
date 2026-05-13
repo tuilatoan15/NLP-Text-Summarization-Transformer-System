@@ -8,13 +8,14 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
+from src import config
 
 
 # ==============================================================================
 # LOGGING SETUP
 # ==============================================================================
 
-def setup_logger(name: str = "nlp_summarizer", level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = "nlp_summarizer", level: str = None) -> logging.Logger:
     """
     Tạo và cấu hình logger có định dạng rõ ràng cho toàn hệ thống.
     
@@ -31,6 +32,10 @@ def setup_logger(name: str = "nlp_summarizer", level: int = logging.INFO) -> log
     if logger.handlers:
         return logger
 
+    if level is None:
+        level_str = config.LOG_LEVEL.upper()
+        level = getattr(logging, level_str, logging.INFO)
+    
     logger.setLevel(level)
 
     # Định dạng log: thời gian | tên | cấp độ | nội dung
@@ -133,3 +138,17 @@ def ensure_dir(path: str) -> str:
     """Tạo thư mục nếu chưa tồn tại, trả về path."""
     Path(path).mkdir(parents=True, exist_ok=True)
     return path
+
+
+def clear_cache():
+    """Xóa toàn bộ file cache trong thư mục cache/."""
+    cache_path = Path(config.CACHE_DIR)
+    if not cache_path.exists():
+        return
+    count = 0
+    for f in cache_path.glob("**/*"):
+        if f.is_file():
+            f.unlink()
+            count += 1
+    logger.info(f"Đã dọn dẹp cache: {count} files bị xóa.")
+    return count

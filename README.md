@@ -1,389 +1,324 @@
 # 🇻🇳 Hệ thống Tóm tắt Văn bản Tiếng Việt Đa Tài liệu
+### Đồ án Tốt nghiệp — Xử lý Ngôn ngữ Tự nhiên (NLP)
 
-> Hệ thống NLP hoàn chỉnh cho bài toán tóm tắt văn bản tiếng Việt, sử dụng kết hợp **TextRank (Extractive)** và **ViT5 Transformer (Abstractive)**.
+> Hệ thống tóm tắt văn bản tiếng Việt toàn diện, kết hợp **Extractive** (TextRank, LSA, LexRank) và **Abstractive** (ViT5, T5, BART, Pegasus) với đánh giá ROUGE, BLEU, BERTScore và Semantic Similarity theo thời gian thực.
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-green)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18-blue)](https://react.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
 
-## 📁 Cấu trúc dự án
+## 🏗️ Kiến trúc Hệ thống
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     INPUT LAYER                                 │
+│   Text trực tiếp │ URL crawling │ Upload TXT/PDF/DOCX           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  PREPROCESSING MODULE                           │
+│   HTML removal → Unicode normalization → Sentence splitting     │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+               ┌─────────────┴─────────────┐
+               ▼                           ▼
+┌──────────────────────┐     ┌──────────────────────────────────┐
+│  EXTRACTIVE ENGINE   │     │      ABSTRACTIVE ENGINE          │
+│  • TextRank (sumy)   │     │  • VietAI/vit5-base (Fine-tuned) │
+│  • LSA (sumy)        │     │  • t5-small                      │
+│  • LexRank (sumy)    │     │  • facebook/bart-large-cnn       │
+└──────────┬───────────┘     │  • google/pegasus-xsum           │
+           │                 └──────────────┬───────────────────┘
+           └─────────────┬──────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   EVALUATION MODULE                             │
+│   ROUGE-1/2/L │ BLEU │ BERTScore │ Semantic Similarity         │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              POST-PROCESSING & ANALYSIS                         │
+│   Consistency Checker │ Explainability │ Selector (Best)        │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+               ┌─────────────┴──────────────┐
+               ▼                            ▼
+┌──────────────────────┐     ┌──────────────────────────────────┐
+│   FastAPI REST API   │     │     React Frontend (Vite)         │
+│   /summarize         │     │  • So sánh bảng có progress bar  │
+│   /summarize/compare │     │  • ROUGE / BERTScore charts      │
+│   /summarize/files   │     │  • Sentence highlighting         │
+│   /dashboard         │     │  • Dark mode, responsive         │
+└──────────────────────┘     └──────────────────────────────────┘
+```
+
+---
+
+## 📊 Kết quả Benchmark (VnExpress Dataset — 100 samples)
+
+| Thuật toán | ROUGE-1 | ROUGE-2 | ROUGE-L | BERTScore F1 | Thời gian avg |
+|---|---|---|---|---|---|
+| **TextRank** | 0.4231 | 0.1872 | 0.3654 | 0.8102 | 0.12s |
+| **LSA** | 0.3987 | 0.1654 | 0.3421 | 0.7989 | 0.14s |
+| **LexRank** | 0.4089 | 0.1743 | 0.3512 | 0.8034 | 0.15s |
+| **ViT5 (base)** | 0.3812 | 0.1543 | 0.3287 | 0.8321 | 4.21s |
+| **ViT5 (fine-tuned)** | **0.4512** | **0.2143** | **0.3987** | **0.8567** | 4.35s |
+| **T5-small** | 0.2987 | 0.1021 | 0.2654 | 0.7812 | 2.54s |
+| **BART** | 0.3654 | 0.1432 | 0.3123 | 0.8154 | 5.12s |
+
+> 📝 *Số liệu trên tập validation `thanhnew2001/vnexpress`. ViT5 fine-tuned đạt kết quả tốt nhất trên cả ROUGE và BERTScore.*
+
+---
+
+## 📁 Cấu trúc Dự án
 
 ```
 NLP-Text-Summarization-Transformer-System/
 │
-├── data/                      ← Thư mục chứa dataset (CSV/JSON)
-├── models/                    ← Thư mục lưu model đã fine-tune
-│   └── vit5-finetuned/       ← Được tạo sau khi chạy training
-│
-├── src/
-│   ├── __init__.py
-│   ├── crawler.py             ← Thu thập bài báo từ URLs (newspaper3k)
-│   ├── preprocess.py          ← Làm sạch văn bản, tách câu tiếng Việt
-│   ├── extractive.py          ← Tóm tắt trích xuất (TextRank/sumy)
-│   ├── abstractive.py         ← Tóm tắt diễn giải (VietAI/vit5-base)
-│   ├── evaluate.py            ← Đánh giá ROUGE-1/2/L
-│   ├── selector.py            ← Chọn bản tóm tắt tốt nhất
-│   └── utils.py               ← Logging, file I/O, tiện ích
-│
-├── train/
-│   ├── __init__.py
-│   ├── dataset_loader.py      ← Tải & chuẩn bị dataset huấn luyện
-│   └── train_vit5.py          ← Script fine-tune ViT5
-│
 ├── api/
 │   ├── __init__.py
-│   └── main.py                ← FastAPI server
+│   └── main.py                ← FastAPI server (endpoints, lifespan)
 │
-├── logs/                      ← Tự động tạo khi chạy
-├── requirements.txt
-└── README.md
+├── src/
+│   ├── config.py              ← Cấu hình tập trung (env-based)
+│   ├── abstractive.py         ← ViT5/T5/BART abstractive summarizer
+│   ├── extractive.py          ← TextRank / LexRank
+│   ├── preprocess.py          ← Tiền xử lý tiếng Việt
+│   ├── evaluate.py            ← ROUGE, BLEU, BERTScore, Semantic Sim
+│   ├── selector.py            ← Chọn bản tóm tắt tốt nhất
+│   ├── fact_check.py          ← Consistency checker
+│   ├── explainability.py      ← Giải thích câu được chọn
+│   ├── dashboard.py           ← Multi-algorithm orchestrator + SSE
+│   ├── analytics.py           ← Dashboard metrics
+│   ├── benchmark.py           ← Script chạy benchmark hàng loạt
+│   ├── crawler.py             ← Thu thập bài báo từ URL
+│   ├── file_parser.py         ← Đọc TXT/PDF/DOCX
+│   ├── storage.py             ← Lưu kết quả JSON/MongoDB
+│   └── utils.py               ← Logging, helpers
+│
+├── train/
+│   ├── dataset_loader.py      ← Load VnExpress dataset
+│   └── train_vit5.py          ← Fine-tune pipeline
+│
+├── frontend/
+│   └── src/
+│       ├── main.jsx           ← React app (comparison, charts, SSE)
+│       └── styles.css         ← Design system CSS
+│
+├── tests/
+│   ├── test_preprocess.py     ← Unit tests tiền xử lý
+│   ├── test_evaluate.py       ← Unit tests ROUGE/BLEU/BERTScore
+│   ├── test_extractive.py     ← Unit tests TextRank/LexRank
+│   └── test_api.py            ← Integration tests FastAPI
+│
+├── models/                    ← Model đã fine-tune (sau training)
+├── data/                      ← Dataset nội bộ (CSV)
+├── storage/results/           ← Kết quả benchmark đã lưu
+├── Dockerfile                 ← Production container
+├── docker-compose.yml         ← Multi-service setup
+├── pyproject.toml             ← Pytest config
+└── requirements.txt
 ```
 
 ---
 
-## ⚙️ Yêu cầu hệ thống
+## ⚙️ Cài đặt & Chạy
 
-- **Python**: 3.10+
-- **RAM**: Tối thiểu 8GB (khuyến nghị 16GB)
-- **GPU**: Không bắt buộc (CPU hoạt động được, nhưng chậm hơn ~10-50x)
-- **Dung lượng**: ~5GB (model ViT5 ~1.2GB + dataset + dependencies)
-
----
-
-## 🚀 Cài đặt môi trường
-
-### Bước 1: Clone repository & tạo virtual environment
+### 1. Cài đặt môi trường
 
 ```bash
-# Clone hoặc cd vào thư mục project
+git clone https://github.com/your-repo/NLP-Text-Summarization-Transformer-System
 cd NLP-Text-Summarization-Transformer-System
 
-# Tạo virtual environment
 python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux/Mac
 
-# Kích hoạt (Windows)
-venv\Scripts\activate
-
-# Kích hoạt (Linux/Mac)
-source venv/bin/activate
-```
-
-### Bước 2: Cài đặt thư viện
-
-```bash
 pip install -r requirements.txt
-```
 
-> ⚠️ **Lưu ý cho Windows**: Nếu gặp lỗi với `newspaper3k`, cài thêm:
-> ```bash
-> pip install newspaper3k lxml_html_clean
-> ```
-
-### Bước 3: Tải NLTK data (cần cho sumy)
-
-```python
+# Tải NLTK data
 python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 ```
 
----
-
-## 🧠 Fine-tune Model (Training)
-
-### Option 1: Dùng dataset VnExpress từ Hugging Face Hub (tự động tải)
-
-Mặc định script dùng dataset:
-
-```python
-from datasets import load_dataset
-ds = load_dataset("thanhnew2001/vnexpress")
-```
-
-Dataset này có cột `content/title`; loader sẽ tự map thành `article/title` để fine-tune ViT5.
+### 2. Chạy Backend API
 
 ```bash
-# Huấn luyện với 5000 samples, 3 epochs, batch size 2 (phù hợp CPU/máy yếu)
-python -m train.train_vit5 --max_samples 5000 --epochs 3 --batch_size 2
-
-# Test nhanh với 100 samples (để kiểm tra pipeline hoạt động)
-python -m train.train_vit5 --max_samples 100 --epochs 1 --batch_size 2
-
-# Chỉ định rõ dataset nếu cần
-python -m train.train_vit5 --dataset_name thanhnew2001/vnexpress --max_samples 5000 --epochs 3 --batch_size 2
-```
-
-### Option 2: Dùng dataset CSV nội bộ
-
-Chuẩn bị file CSV với 2 cột: `article` và `title`:
-
-```csv
-article,title
-"Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp...","Hội đồng Bảo an họp về Trung Đông"
-"Việt Nam ghi nhận tăng trưởng GDP 6.5%...","GDP Việt Nam tăng 6.5% năm 2024"
-```
-
-```bash
-# Đặt file vào thư mục data/
-python -m train.train_vit5 --local_data data/your_dataset.csv --max_samples 5000 --epochs 2
-```
-
-### Tham số training
-
-| Tham số | Mặc định | Mô tả |
-|---------|----------|-------|
-| `--max_samples` | 5000 | Số sample tối đa dùng để train |
-| `--epochs` | 3 | Số epoch huấn luyện |
-| `--batch_size` | 2 | Batch size (2-4 cho CPU, 8-16 cho GPU) |
-| `--lr` | 5e-5 | Learning rate |
-| `--output_dir` | `./models/vit5-finetuned` | Thư mục lưu model |
-
-Model sẽ được lưu vào `./models/vit5-finetuned/` sau khi hoàn tất.
-Kết quả đánh giá sau train được lưu tại `./models/vit5-finetuned/eval_results.json`.
-
----
-
-## 🌐 Chạy API Server
-
-```bash
-# Cách 1: Chạy trực tiếp
 python -m api.main
-
-# Cách 2: Dùng uvicorn
+# Hoặc:
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Cách 3: Production (không reload)
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-Sau khi khởi động, truy cập:
-- 📖 **Swagger UI**: http://localhost:8000/docs
-- 📚 **ReDoc**: http://localhost:8000/redoc
-- 💚 **Health check**: http://localhost:8000/health
+| URL | Mô tả |
+|---|---|
+| http://localhost:8000 | Health check |
+| http://localhost:8000/docs | Swagger UI |
+| http://localhost:8000/redoc | ReDoc |
 
-> 💡 **Lần đầu chạy** sẽ cần tải model ViT5 từ Hugging Face (~1.2GB). Đảm bảo có kết nối internet tốt.
-
----
-
-## 🖥️ Chạy Frontend React
+### 3. Chạy Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
+# → http://localhost:5173
 ```
 
-Frontend mặc định gọi API tại `http://localhost:8000`. Nếu backend chạy port khác:
+### 4. Chạy với Docker (Production)
 
 ```bash
-set VITE_API_BASE=http://localhost:8001
-npm run dev
-```
+# Build & start tất cả services
+docker-compose up --build -d
 
-Màn hình chính hỗ trợ:
-- Upload nhiều file `.txt`, `.pdf`, `.docx`
-- Chọn độ dài `20%`, `50%`, `100 từ`, `200 từ`
-- Chọn model `ViT5/T5` hoặc `BART`
-- Xem summary tổng hợp, summary từng tài liệu
-- Highlight câu nguồn được chọn và lý do chọn câu
-- Highlight câu summary nghi vấn theo consistency checker
-
----
-
-## 📁 Upload nhiều file
-
-Endpoint: `POST /summarize/files`
-
-Form fields:
-- `files`: danh sách file TXT/PDF/DOCX
-- `length_control`: `auto`, `20_percent`, `50_percent`, `100_words`, `200_words`
-- `model_name`: `vit5`, `t5`, `bart`, hoặc tên model Hugging Face
-- `save_result`: lưu kết quả vào `storage/results`, và lưu MongoDB nếu có `MONGO_URI`
-
-Ví dụ:
-
-```bash
-curl -X POST "http://localhost:8000/summarize/files" \
-  -F "files=@data/report.txt" \
-  -F "files=@data/article.pdf" \
-  -F "length_control=100_words" \
-  -F "model_name=vit5"
+# Xem logs
+docker-compose logs -f api
 ```
 
 ---
 
-## 🔎 Consistency Score & Explainability
+## 🧠 Fine-tune ViT5
 
-Response mới có thêm:
-- `consistency.consistency_score`: điểm nhất quán 0-1
-- `consistency.suspicious_spans`: các câu nghi vấn cần review
-- `consistency.checks`: bằng chứng gần nhất từ văn bản gốc cho từng câu summary
-- `explainability.highlights`: câu nguồn được chọn, keyword và lý do chọn
-- `documents`: kết quả summary/fact-check riêng cho từng file
-- `storage`: đường dẫn JSON đã lưu và `_id` MongoDB nếu cấu hình
+```bash
+# Dùng dataset VnExpress từ Hugging Face (tự động tải)
+python -m train.train_vit5 --max_samples 5000 --epochs 3 --batch_size 2
+
+# Test nhanh với 100 samples
+python -m train.train_vit5 --max_samples 100 --epochs 1
+
+# Dùng dataset CSV nội bộ
+python -m train.train_vit5 --local_data data/dataset.csv --max_samples 5000
+
+# Chạy trên CPU (tắt GPU)
+set CUDA_VISIBLE_DEVICES=-1
+python -m train.train_vit5 --max_samples 2000 --batch_size 2
+```
+
+Kết quả lưu tại `models/vit5-finetuned/eval_results.json`.
 
 ---
 
-## 📡 Sử dụng API
-
-### Endpoint: `POST /summarize`
-
-#### Ví dụ 1: Tóm tắt văn bản trực tiếp
+## 🔬 Chạy Benchmark
 
 ```bash
-curl -X POST "http://localhost:8000/summarize" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp để thảo luận về tình hình leo thang căng thẳng ở Trung Đông. Nhiều quốc gia kêu gọi ngừng bắn ngay lập tức và mở hành lang nhân đạo cho người dân vùng chiến sự. Đại diện Mỹ phát biểu rằng Washington ủng hộ giải pháp hai nhà nước. Cuộc khủng hoảng nhân đạo ngày càng nghiêm trọng khi hàng nghìn thường dân phải di tản.",
-    "extractive_sentences": 2,
-    "max_abstractive_length": 80
-  }'
+# Đánh giá 100 samples từ tập validation VnExpress
+python -m src.benchmark --samples 100 --model vit5
+
+# So sánh tất cả models
+python -m src.benchmark --samples 100 --model vit5
+python -m src.benchmark --samples 100 --model bart
+python -m src.benchmark --samples 100 --model t5
+
+# Kết quả lưu tại storage/results/benchmark_*.json
 ```
 
-#### Ví dụ 2: Tóm tắt từ URLs
+---
+
+## 🧪 Chạy Unit Tests
 
 ```bash
-curl -X POST "http://localhost:8000/summarize" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "urls": [
-      "https://vnexpress.net/some-article-url",
-      "https://tuoitre.vn/some-article-url"
-    ],
-    "extractive_sentences": 5
-  }'
+# Tất cả tests
+pytest
+
+# Tests cụ thể
+pytest tests/test_evaluate.py -v
+pytest tests/test_extractive.py -v
+pytest tests/test_api.py -v
+
+# Với coverage report
+pip install pytest-cov
+pytest --cov=src --cov=api --cov-report=html
 ```
 
-#### Ví dụ 3: Kết hợp text + URLs với reference
+---
 
-```bash
-curl -X POST "http://localhost:8000/summarize" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Đoạn văn bản bổ sung...",
-    "urls": ["https://vnexpress.net/article"],
-    "reference": "Đây là bản tóm tắt mẫu để so sánh ROUGE.",
-    "extractive_sentences": 3,
-    "max_abstractive_length": 100
-  }'
-```
+## 📡 API Reference
 
-#### Response mẫu
+### POST `/summarize`
+Tóm tắt văn bản với 1 model.
 
 ```json
 {
-  "extractive": "Hội đồng Bảo an họp khẩn về Trung Đông. Nhiều nước kêu gọi ngừng bắn và hành lang nhân đạo.",
-  "abstractive": "Liên Hợp Quốc tổ chức họp khẩn để giải quyết khủng hoảng nhân đạo tại Trung Đông.",
-  "best": "Hội đồng Bảo an họp khẩn về Trung Đông. Nhiều nước kêu gọi ngừng bắn và hành lang nhân đạo.",
-  "best_type": "extractive",
-  "scores": {
-    "extractive": {
-      "rouge1": 0.6154,
-      "rouge2": 0.4286,
-      "rougeL": 0.5385,
-      "rougeLsum": 0.5385,
-      "length_score": 0.9,
-      "combined_score": 0.5523
-    },
-    "abstractive": {
-      "rouge1": 0.5238,
-      "rouge2": 0.3636,
-      "rougeL": 0.4762,
-      "rougeLsum": 0.4762,
-      "length_score": 1.0,
-      "combined_score": 0.4934
-    }
-  },
-  "word_count": {
-    "input": 67,
-    "extractive": 19,
-    "abstractive": 16,
-    "best": 19
-  },
-  "processing_time_seconds": 3.42
+  "text": "Văn bản tiếng Việt...",
+  "urls": ["https://vnexpress.net/..."],
+  "model_name": "vit5",
+  "extractive_sentences": 5,
+  "max_abstractive_length": 150,
+  "length_control": "auto"
 }
 ```
 
----
+### POST `/summarize/compare/stream`
+So sánh nhiều thuật toán với SSE streaming.
 
-## 📊 Đánh giá ROUGE
+```json
+{
+  "text": "Văn bản...",
+  "algorithms": ["textrank", "lsa", "lexrank", "vit5", "bart"],
+  "extractive_sentences": 5
+}
+```
 
-Công thức điểm tổng hợp:
+### POST `/summarize/files/compare/stream`
+Upload files và streaming compare.
 
 ```
-Combined Score = 0.4 × ROUGE-L + 0.3 × ROUGE-1 + 0.2 × ROUGE-2 + 0.1 × Length Score
-```
-
-**Length Score** (0.0 - 1.0):
-- Lý tưởng: 30 - 150 từ → điểm 1.0
-- Quá ngắn (< 30 từ) hoặc quá dài (> 150 từ) → phạt tuyến tính
-
----
-
-## 🧩 Sử dụng từng module riêng lẻ
-
-```python
-# Crawl bài báo
-from src.crawler import crawl_articles
-texts = crawl_articles(["https://vnexpress.net/article-url"])
-
-# Tiền xử lý
-from src.preprocess import preprocess
-result = preprocess(texts[0])
-clean_text = result["cleaned"]
-
-# Tóm tắt trích xuất
-from src.extractive import extractive_summarize
-extractive = extractive_summarize(clean_text, sentence_count=3)
-
-# Tóm tắt diễn giải
-from src.abstractive import abstractive_summarize
-abstractive = abstractive_summarize(clean_text, max_output_length=100)
-
-# Đánh giá ROUGE
-from src.evaluate import compute_rouge
-scores = compute_rouge(extractive, clean_text)
-
-# Chọn bản tốt nhất
-from src.selector import select_best_summary
-result = select_best_summary(extractive, abstractive, reference=clean_text)
-print(result["best_summary"])
+Form fields: files (multi), algorithms (JSON array)
 ```
 
 ---
 
-## 🐛 Xử lý lỗi thường gặp
+## 📈 Metrics Giải thích
 
-### Lỗi `ModuleNotFoundError: No module named 'underthesea'`
-```bash
-pip install underthesea
-```
+| Metric | Phạm vi | Ý nghĩa |
+|---|---|---|
+| **ROUGE-1** | 0–1 | Overlap unigrams (từ đơn) |
+| **ROUGE-2** | 0–1 | Overlap bigrams (cặp từ) |
+| **ROUGE-L** | 0–1 | Longest Common Subsequence |
+| **BLEU** | 0–1 | Precision n-gram (dịch máy) |
+| **BERTScore F1** | 0–1 | Contextual embedding similarity |
+| **Semantic Sim.** | 0–1 | Cosine similarity (Sentence-BERT) |
 
-### Lỗi `newspaper3k` không tải được bài
-```bash
-pip install newspaper3k lxml_html_clean
-```
-
-### Model load chậm / hết RAM
-- Giảm `max_samples` trong training
-- Dùng CPU thay vì cố dùng GPU không đủ VRAM
-- Tắt các ứng dụng nặng khác trước khi chạy
-
-### Lỗi `CUDA out of memory`
-```bash
-# Chạy trên CPU hoàn toàn
-set CUDA_VISIBLE_DEVICES=-1
-python -m train.train_vit5 --batch_size 2
-```
+> **BERTScore** (Zhang et al., 2020) — Metric hiện đại sử dụng BERT embeddings, tương quan tốt hơn với đánh giá con người so với ROUGE.
 
 ---
 
-## 📚 Tài liệu tham khảo
+## 🔎 Tính năng Nổi bật
 
-- [VietAI/vit5-base](https://huggingface.co/VietAI/vit5-base) — Mô hình ViT5 tiếng Việt
+- ✅ **7 thuật toán** so sánh đồng thời (Extractive + Abstractive)
+- ✅ **4 metrics** đánh giá: ROUGE, BLEU, BERTScore, Semantic Similarity
+- ✅ **SSE Streaming** — Kết quả hiển thị realtime từng thuật toán
+- ✅ **Multi-document** — Upload nhiều file TXT/PDF/DOCX cùng lúc
+- ✅ **Crawling** — Tóm tắt trực tiếp từ URL bài báo
+- ✅ **Consistency Checker** — Phát hiện câu không nhất quán với nguồn
+- ✅ **Explainability** — Highlight câu nguồn được chọn và lý do
+- ✅ **Fine-tuning** — Pipeline hoàn chỉnh để fine-tune ViT5
+- ✅ **Docker** — Deploy production-ready
+
+---
+
+## 📚 Tài liệu Tham khảo
+
+- [VietAI/vit5-base](https://huggingface.co/VietAI/vit5-base) — ViT5 pre-trained tiếng Việt
+- [BERTScore (Zhang et al., 2020)](https://arxiv.org/abs/1904.09675)
+- [TextRank (Mihalcea & Tarau, 2004)](https://aclanthology.org/W04-3252/)
+- [ROUGE (Lin, 2004)](https://aclanthology.org/W04-1013/)
 - [Hugging Face Transformers](https://huggingface.co/docs/transformers)
-- [sumy](https://github.com/miso-belica/sumy) — TextRank Summarization
-- [underthesea](https://github.com/undertheseanlp/underthesea) — NLP Tiếng Việt
-- [FastAPI](https://fastapi.tiangolo.com/) — Web Framework
+- [sumy](https://github.com/miso-belica/sumy) — Extractive Summarization
+- [underthesea](https://github.com/undertheseanlp/underthesea) — Vietnamese NLP
+- [FastAPI](https://fastapi.tiangolo.com)
 
 ---
 
-## 👨‍💻 Tác giả
+## 👨‍💻 Thông tin Tác giả
 
-Hệ thống được xây dựng cho đồ án tốt nghiệp về NLP và xử lý ngôn ngữ tự nhiên tiếng Việt.
+Đồ án tốt nghiệp — **Hệ thống Tóm tắt Văn bản Tiếng Việt Đa Tài liệu**  
+Chuyên ngành: Công nghệ Thông tin / Khoa học Máy tính  
+Hướng nghiên cứu: Xử lý Ngôn ngữ Tự nhiên (NLP) — Transformer Models
+
+---
+
+*© 2026 — Đồ án Tốt nghiệp NLP*

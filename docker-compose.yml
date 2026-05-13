@@ -1,0 +1,53 @@
+version: '3.9'
+
+services:
+  # ─── Backend FastAPI ────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nlp_api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount các thư mục data/model để persist giữa các lần restart
+      - ./models:/app/models
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./cache:/app/cache
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Tắt GPU nếu không có (chạy trên CPU)
+      - CUDA_VISIBLE_DEVICES=-1
+      # Cấu hình Hugging Face cache
+      - HF_HOME=/app/cache/huggingface
+      - TRANSFORMERS_CACHE=/app/cache/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ─── Frontend React (Vite build) ────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    container_name: nlp_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  models:
+  storage:

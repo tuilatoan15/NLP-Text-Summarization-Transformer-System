@@ -16,9 +16,10 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.utils import logger, ensure_dir, count_words
-from src.extractive import extractive_summarize
+from src.extractive import extractive_summarize, extractive_summarize_with_details, lexrank_summarize
 from src.abstractive import get_summarizer, resolve_model_name
-from src.evaluate import compute_rouge, compute_bleu, compute_semantic_similarity
+from src.evaluate import compute_rouge, compute_bleu, compute_semantic_similarity, compute_bertscore
+from src.preprocess import split_sentences
 
 
 CACHE_DIR = ensure_dir("cache/dashboard")
@@ -54,11 +55,11 @@ def _cache_set(key: str, data: dict) -> None:
         logger.warning(f"Không thể lưu cache: {e}")
 
 
-def _run_textrank(text: str, sentence_count: int = 5) -> str:
-    return extractive_summarize(text, sentence_count=sentence_count)
+def _run_textrank(text: str, sentence_count: int = 5) -> dict:
+    return extractive_summarize_with_details(text, sentence_count=sentence_count)
 
 
-def _run_lsa(text: str, sentence_count: int = 5) -> str:
+def _run_lsa(text: str, sentence_count: int = 5) -> dict:
     try:
         from sumy.parsers.plaintext import PlaintextParser
         from sumy.nlp.tokenizers import Tokenizer
@@ -68,16 +69,19 @@ def _run_lsa(text: str, sentence_count: int = 5) -> str:
         summarizer = LsaSummarizer()
         summary_sentences = summarizer(parser.document, sentence_count)
         sentences = [str(s) for s in summary_sentences]
-        return " ".join(sentences)
+        summary = " ".join(sentences)
+        # Mocking details for LSA for consistency in return format
+        return {"summary": summary, "selected_sentences": []}
     except Exception as e:
         logger.warning(f"LSA summarization failed: {e}")
         return _run_textrank(text, sentence_count=sentence_count)
 
 
-def _run_lexrank(text: str, sentence_count: int = 5) -> str:
+def _run_lexrank(text: str, sentence_count: int = 5) -> dict:
     try:
         from src.extractive import lexrank_summarize
-        return lexrank_summarize(text, sentence_count=sentence_count)
+        summary = lexrank_summarize(text, sentence_count=sentence_count)
+        return {"summary": summary, "selected_sentences": []} # LexRank with details could be added later
     except Exception as e:
         logger.warning(f"LexRank summarization failed: {e}")
         return _run_textrank(text, sentence_count=sentence_count)
@@ -96,10 +100,18 @@ def _run_abstractive(text: str, model_key: str, max_output_length: int = 120) ->
 def _measure_and_eval(func, name: str, text: str, reference: str, **kwargs) -> dict:
     start = time.time()
     try:
-        summary = func(text, **kwargs)
+        res = func(text, **kwargs)
+        if isinstance(res, dict):
+            summary = res.get("summary", "")
+            details = res
+        else:
+            summary = str(res)
+            details = {"summary": summary}
     except Exception as e:
         logger.error(f"Algorithm {name} error: {e}")
         summary = ""
+        details = {"summary": "", "error": str(e)}
+    
     duration = round(time.time() - start, 3)
     length = count_words(summary)
 
@@ -112,11 +124,14 @@ def _measure_and_eval(func, name: str, text: str, reference: str, **kwargs) -> d
     return {
         "algorithm": name,
         "summary": summary,
+        "details": details,
         "time_seconds": duration,
         "length_words": length,
         "rouge": rouge,
         "bleu": bleu,
         "semantic_similarity": semantic,
+        "bertscore": compute_bertscore(summary, ref),
+        "source_sentences": split_sentences(text)[:100] # Limit for UI performance
     }
 
 

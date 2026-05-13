@@ -18,7 +18,8 @@ from typing import List
 from src.utils import ensure_dir
 
 
-RESULT_DIR = Path("storage/results")
+RESULT_DIR    = Path("storage/results")
+BENCHMARK_DIR = Path("storage/benchmark_results")
 
 
 def _load_all_results() -> List[dict]:
@@ -132,11 +133,21 @@ def compute_dashboard_metrics() -> dict:
     else:
         compression["avg_compression_ratio"] = 0.0
 
+    # BERTScore aggregate
+    bertscore_list = []
+    for r in items:
+        if r.get("results") and isinstance(r.get("results"), list):
+            for alg in r["results"]:
+                bs = alg.get("bertscore") or {}
+                if bs.get("f1"):
+                    bertscore_list.append(float(bs["f1"]))
+
     return {
         "total_summaries": total,
         "total_processing_time_seconds": round(sum(processing_times), 2),
         "top_models": [{"model": k, "count": v} for k, v in top_models[:10]],
         "avg_rouge": {"rouge1": round(avg(rouge1_list), 4), "rouge2": round(avg(rouge2_list), 4), "rougeL": round(avg(rougeL_list), 4)},
+        "avg_bertscore_f1": round(avg(bertscore_list), 4),
         "token_stats": {"min_input": min(input_lengths) if input_lengths else 0, "max_input": max(input_lengths) if input_lengths else 0, "median_input": sorted(input_lengths)[len(input_lengths)//2] if input_lengths else 0},
         "compression": compression,
     }
@@ -178,3 +189,26 @@ def get_visualization_data() -> dict:
     length_avg = [int(round(mean(model_buckets[m]["length"]))) if model_buckets[m]["length"] else 0 for m in labels]
 
     return {"labels": labels, "rougeL_avg": rouge_avg, "time_avg": time_avg, "length_avg": length_avg}
+
+
+def list_benchmark_results() -> List[dict]:
+    """Đọc tất cả file benchmark từ storage/benchmark_results/."""
+    if not BENCHMARK_DIR.exists():
+        return []
+    results = []
+    for p in sorted(BENCHMARK_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            agg = data.get("aggregate", data)
+            results.append({
+                "filename": p.name,
+                "dataset": agg.get("dataset_name"),
+                "model": agg.get("model_name"),
+                "samples": agg.get("samples_evaluated"),
+                "timestamp": agg.get("timestamp"),
+                "comparison": agg.get("comparison_all_algorithms", []),
+                "key_findings": agg.get("key_findings", []),
+            })
+        except Exception:
+            continue
+    return results

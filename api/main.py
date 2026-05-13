@@ -36,7 +36,9 @@ from src.summary_control import enforce_word_limit, resolve_summary_controls
 from src.storage import persist_result, save_upload_file
 from src.dashboard import summarize_all, stream_compare
 from fastapi.responses import StreamingResponse
-from src.analytics import compute_dashboard_metrics, get_visualization_data, list_recent_results
+from src.analytics import compute_dashboard_metrics, get_visualization_data, list_recent_results, list_benchmark_results
+from src.evaluate import compute_bertscore
+from src import config
 
 
 # ==============================================================================
@@ -70,7 +72,7 @@ class SummarizeRequest(BaseModel):
         description="Số câu trong bản tóm tắt trích xuất",
     )
     max_abstractive_length: int = Field(
-        default=150,
+        default=config.MAX_OUTPUT_LENGTH,
         ge=30,
         le=512,
         description="Độ dài tối đa bản tóm tắt diễn giải (số token)",
@@ -141,7 +143,7 @@ class MultiSummarizeRequest(BaseModel):
         default_factory=lambda: ["textrank", "lsa", "lexrank", "vit5", "t5", "bart", "pegasus"]
     )
     extractive_sentences: int = Field(default=5)
-    max_abstractive_length: int = Field(default=150)
+    max_abstractive_length: int = Field(default=config.MAX_OUTPUT_LENGTH)
     save_result: bool = Field(default=True)
 
 
@@ -178,15 +180,9 @@ async def lifespan(app: FastAPI):
 # ==============================================================================
 
 app = FastAPI(
-    title="🇻🇳 Vietnamese Multi-Document Summarization API",
-    description=(
-        "Hệ thống tóm tắt văn bản tiếng Việt đa tài liệu.\n\n"
-        "Hỗ trợ:\n"
-        "- **Extractive**: Trích xuất câu quan trọng (TextRank)\n"
-        "- **Abstractive**: Sinh câu mới (ViT5 Transformer)\n"
-        "- **ROUGE Evaluation**: Đánh giá và chọn bản tóm tắt tốt nhất"
-    ),
-    version="1.0.0",
+    title=config.API_TITLE,
+    version=config.API_VERSION,
+    description="Hệ thống tóm tắt văn bản tiếng Việt production-ready.",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -599,6 +595,53 @@ async def summarize_compare_stream(
     gen = stream_compare(raw_text, request_body.reference, algorithms=request_body.algorithms, sentence_count=request_body.extractive_sentences, max_output_length=request_body.max_abstractive_length)
     return StreamingResponse(gen, media_type="text/event-stream")
 
+
+@app.post("/summarize/files/compare/stream", tags=["Summarization"], summary="Upload files và stream so sánh nhiều thuật toán")
+async def summarize_files_compare_stream(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    reference: Optional[str] = Form(default=None),
+    algorithms: Optional[str] = Form(default=None),
+    extractive_sentences: int = Form(default=5),
+    max_abstractive_length: int = Form(default=150),
+):
+    """Upload files TXT/PDF/DOCX và stream kết quả so sánh nhiều thuật toán theo SSE."""
+    if not files:
+        raise HTTPException(status_code=422, detail="Cần upload ít nhất một file.")
+
+    alg_list = None
+    if algorithms:
+        try:
+            import json as _json
+            alg_list = _json.loads(algorithms)
+        except Exception:
+            alg_list = [a.strip() for a in algorithms.split(",") if a.strip()]
+
+    documents = []
+    for upload in files:
+        try:
+            await upload.seek(0)
+            saved_path = save_upload_file(upload.file, upload.filename)
+            text = extract_text_from_file(saved_path)
+            if text and text.strip():
+                documents.append({"name": upload.filename, "text": text})
+        except Exception as exc:
+            logger.error(f"Không xử lý được file {upload.filename}: {exc}")
+
+    if not documents:
+        raise HTTPException(status_code=400, detail="Không đọc được nội dung từ các file đã upload.")
+
+    raw_text = merge_texts([d["text"] for d in documents])
+
+    gen = stream_compare(
+        raw_text,
+        reference,
+        algorithms=alg_list,
+        sentence_count=extractive_sentences,
+        max_output_length=max_abstractive_length,
+    )
+    return StreamingResponse(gen, media_type="text/event-stream")
+
 @app.get('/dashboard/metrics', tags=['Dashboard'], summary='Tổng hợp metrics cho dashboard')
 async def dashboard_metrics():
     """Trả về các chỉ số tổng quan phục vụ UI dashboard."""
@@ -639,6 +682,17 @@ async def list_models():
     except Exception as e:
         logger.warning(f"Không thể tải danh sách models: {e}")
         return {"models": []}
+
+
+@app.get('/benchmark/results', tags=['Dashboard'], summary='Kết quả benchmark pre-computed')
+async def benchmark_results():
+    """Đọc các file benchmark từ storage/benchmark_results/ và trả về."""
+    try:
+        items = list_benchmark_results()
+        return {"benchmark_results": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"Lỗi đọc benchmark results: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==============================================================================

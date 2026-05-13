@@ -13,6 +13,7 @@ from typing import Optional
 import evaluate as hf_evaluate
 
 from src.utils import logger
+from src import config
 
 
 # ==============================================================================
@@ -95,7 +96,52 @@ def compute_bleu(prediction: str, reference: str) -> float:
         return 0.0
 
 
-def compute_semantic_similarity(prediction: str, reference: str, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> float:
+def compute_bertscore(
+    prediction: str,
+    reference: str,
+    lang: str = config.BERTSCORE_LANG,
+    model_type: str = config.BERTSCORE_MODEL,
+) -> dict:
+    """
+    Tính BERTScore — metric hiện đại đánh giá chất lượng tóm tắt dựa trên
+    contextual embeddings của BERT thay vì n-gram matching như ROUGE.
+
+    BERTScore đã được chứng minh tương quan tốt hơn với đánh giá của con người
+    so với ROUGE (Zhang et al., 2020).
+
+    Args:
+        prediction: Bản tóm tắt cần đánh giá
+        reference:  Văn bản tham chiếu
+        lang:       Ngôn ngữ ("vi" cho tiếng Việt)
+        model_type: Model BERT dùng để tính (mặc định: multilingual)
+
+    Returns:
+        Dict chứa precision, recall, f1 (trung bình trên token level)
+    """
+    if not prediction or not prediction.strip():
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    if not reference or not reference.strip():
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+
+    try:
+        bertscore_metric = hf_evaluate.load("bertscore")
+        results = bertscore_metric.compute(
+            predictions=[prediction],
+            references=[reference],
+            lang=lang,
+            model_type=model_type,
+        )
+        return {
+            "precision": round(float(results["precision"][0]), 4),
+            "recall":    round(float(results["recall"][0]), 4),
+            "f1":        round(float(results["f1"][0]), 4),
+        }
+    except Exception as e:
+        logger.warning(f"Không thể tính BERTScore: {e}")
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+
+
+def compute_semantic_similarity(prediction: str, reference: str, model_name: str = config.SBERT_MODEL) -> float:
     """
     Tính similarity cosine giữa embedding của prediction và reference.
     Trả về giá trị [-1, 1] (chuẩn hóa sang 0..1 nếu cần).
