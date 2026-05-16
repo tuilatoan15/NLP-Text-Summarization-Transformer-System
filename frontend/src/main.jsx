@@ -1,122 +1,194 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BarChart3, CheckCircle2, AlertTriangle, FileText, Loader2,
-  UploadCloud, Copy, Download, Moon, Sun, Home, Star, Zap, Brain, BookOpen } from 'lucide-react';
-import { Bar, Radar } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-  RadialLinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
+import {
+  BarChart3,
+  Brain,
+  Check,
+  ChevronDown,
+  Copy,
+  FileText,
+  Moon,
+  Play,
+  RefreshCcw,
+  Sun,
+  UploadCloud,
+} from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import './styles.css';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, RadialLinearScale,
-  PointElement, LineElement, Title, Tooltip, Legend);
 
 const API = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
-const ALG_META = {
-  textrank: { label: 'TextRank', type: 'ext', color: '#10b981' },
-  lsa:      { label: 'LSA',      type: 'ext', color: '#06b6d4' },
-  lexrank:  { label: 'LexRank',  type: 'ext', color: '#3b82f6' },
-  vit5:     { label: 'ViT5',     type: 'abs', color: '#8b5cf6' },
-  t5:       { label: 'T5',       type: 'abs', color: '#6366f1' },
-  bart:     { label: 'BART',     type: 'abs', color: '#ec4899' },
-  pegasus:  { label: 'Pegasus',  type: 'abs', color: '#f59e0b' },
-};
+const ALGORITHMS = [
+  { key: 'textrank', name: 'TextRank', group: 'extractive', color: '#14b8a6' },
+  { key: 'lexrank', name: 'LexRank', group: 'extractive', color: '#38bdf8' },
+  { key: 'lsa', name: 'LSA Summarizer', group: 'extractive', color: '#84cc16' },
+  { key: 'vit5', name: 'ViT5', group: 'abstractive', color: '#f59e0b' },
+  { key: 'mt5', name: 'mT5', group: 'abstractive', color: '#e879f9' },
+  { key: 'bartpho', name: 'BARTPho', group: 'abstractive', color: '#fb7185' },
+];
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-function useToasts() {
-  const [toasts, setToasts] = useState([]);
-  const push = useCallback((msg, type = 'default', ms = 3000) => {
-    const id = Date.now();
-    setToasts(t => [...t, { id, msg, type }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), ms);
-  }, []);
-  return { toasts, push };
+const SAMPLE_TEXT = `Tập đoàn Điện lực Việt Nam cho biết nhu cầu tiêu thụ điện trong mùa nắng nóng tiếp tục tăng cao tại nhiều địa phương. Các nhà máy thủy điện ở miền Bắc được yêu cầu vận hành thận trọng do mực nước một số hồ chứa chưa phục hồi hoàn toàn. Bộ Công Thương đề nghị các đơn vị cung ứng điện xây dựng kịch bản điều độ linh hoạt, đồng thời khuyến khích doanh nghiệp và hộ gia đình tiết kiệm điện trong giờ cao điểm. Một số dự án năng lượng tái tạo cũng được rà soát để bổ sung nguồn cung cho hệ thống. Các chuyên gia cho rằng việc kết hợp tiết kiệm năng lượng, nâng cấp lưới truyền tải và đa dạng hóa nguồn phát là giải pháp quan trọng nhằm bảo đảm an ninh năng lượng trong dài hạn.`;
+
+function pct(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 
-// ─── Algorithm selector ───────────────────────────────────────────────────────
-function AlgSelector({ selected, onChange }) {
-  const toggle = key => onChange(
-    selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key]
-  );
+function metric(row, key) {
+  return Number(row?.metrics?.[key] ?? row?.[key] ?? 0);
+}
+
+function byKey(key) {
+  return ALGORITHMS.find((item) => item.key === key) || { key, name: key, group: 'extractive', color: '#64748b' };
+}
+
+function groupLabel(group) {
+  return group === 'abstractive' ? 'Abstractive' : 'Extractive';
+}
+
+function pillClass(group, selected = false) {
+  const base = 'inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition';
+  if (selected && group === 'extractive') return `${base} border-teal-400/70 bg-teal-400/10 text-teal-100`;
+  if (selected) return `${base} border-amber-300/70 bg-amber-300/10 text-amber-100`;
+  return `${base} border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-500`;
+}
+
+function AlgorithmSelector({ selected, setSelected }) {
+  const toggle = (key) => {
+    setSelected((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+  };
+
   return (
-    <div className="algGrid">
-      {Object.entries(ALG_META).map(([key, m]) => (
-        <label key={key} className={`algCheck ${selected.includes(key) ? 'selected' : ''}`}
-          onClick={() => toggle(key)}>
-          <span className="algDot" />
-          <span>{m.label}</span>
-          <span className={`badge badge-${m.type}`} style={{ marginLeft: 'auto' }}>
-            {m.type === 'ext' ? 'Ext' : 'Abs'}
-          </span>
-        </label>
+    <div className="space-y-4">
+      {['extractive', 'abstractive'].map((group) => (
+        <section key={group} className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{groupLabel(group)}</h3>
+            <span className="text-xs text-slate-500">{selected.filter((key) => byKey(key).group === group).length}/3</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {ALGORITHMS.filter((item) => item.group === group).map((item) => {
+              const isSelected = selected.includes(item.key);
+              return (
+                <button type="button" key={item.key} onClick={() => toggle(item.key)} className={pillClass(group, isSelected)}>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                  <span className="flex-1 text-left">{item.name}</span>
+                  {isSelected && <Check size={15} />}
+                </button>
+              );
+            })}
+          </div>
+        </section>
       ))}
     </div>
   );
 }
 
-// ─── Metric bar ───────────────────────────────────────────────────────────────
-function MetricBar({ value, max = 1, green = false }) {
-  const pct = Math.round((value || 0) * 100);
+function StatStrip({ result }) {
+  const rows = result?.results || [];
+  const best = result?.best_model;
+  const ext = result?.group_summary?.extractive;
+  const abs = result?.group_summary?.abstractive;
+  const stats = [
+    { label: 'Models', value: rows.length || 0 },
+    { label: 'Best', value: best?.algorithm || '-' },
+    { label: 'Ext ROUGE-L', value: ext ? pct(ext.avg_rougeL) : '-' },
+    { label: 'Abs ROUGE-L', value: abs ? pct(abs.avg_rougeL) : '-' },
+  ];
   return (
-    <div className="metricBar">
-      <span className="metricVal">{pct}%</span>
-      <div className="bar">
-        <div className={`barFill ${green ? 'green' : ''}`} style={{ width: `${pct}%` }} />
-      </div>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {stats.map((item) => (
+        <div key={item.label} className="rounded-lg border border-slate-800 bg-slate-950/70 p-4">
+          <div className="text-xs uppercase tracking-[0.16em] text-slate-500">{item.label}</div>
+          <div className="mt-2 truncate text-xl font-semibold text-slate-100">{item.value}</div>
+        </div>
+      ))}
     </div>
   );
 }
 
-// ─── Comparison Table ─────────────────────────────────────────────────────────
-function CompareTable({ results }) {
-  const rows = Object.values(results).filter(r => r && r.summary);
+function ComparisonTable({ rows, onSelect, selectedKey }) {
   if (!rows.length) return null;
-  const best = rows.reduce((a, b) =>
-    (b.rouge?.rougeL || 0) > (a.rouge?.rougeL || 0) ? b : a, rows[0]);
+  const bestByMetric = (key) => Math.max(...rows.map((row) => metric(row, key)));
+  const best = {
+    rouge1: bestByMetric('rouge1'),
+    rouge2: bestByMetric('rouge2'),
+    rougeL: bestByMetric('rougeL'),
+    bleu: bestByMetric('bleu'),
+    bertscore_f1: bestByMetric('bertscore_f1'),
+    semantic_similarity: bestByMetric('semantic_similarity'),
+  };
+
+  const scoreCell = (row, key) => {
+    const value = metric(row, key);
+    const isBest = value === best[key] && value > 0;
+    return <td className={isBest ? 'best-cell' : ''}>{pct(value)}</td>;
+  };
 
   return (
-    <div className="tableWrap fadeIn">
-      <div className="tableHeader">
-        <h3>📊 Bảng So Sánh Metrics</h3>
-        <span className="tag tag-best"><Star size={11} /> Best: {best.algorithm}</span>
+    <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950/70">
+      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+          <BarChart3 size={16} /> Metrics
+        </div>
+        <div className="text-xs text-slate-500">Best score highlighted</div>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="metricsTable">
-          <thead>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-900/80 text-xs uppercase tracking-[0.12em] text-slate-500">
             <tr>
-              <th>Thuật toán</th>
-              <th>ROUGE-1</th>
-              <th>ROUGE-2</th>
-              <th>ROUGE-L</th>
-              <th>BLEU</th>
-              <th>BERTScore F1</th>
-              <th>Sem. Sim</th>
-              <th>Thời gian</th>
-              <th>Số từ</th>
+              <th className="px-4 py-3">Model</th>
+              <th className="px-4 py-3">Group</th>
+              <th className="px-4 py-3">ROUGE-1</th>
+              <th className="px-4 py-3">ROUGE-2</th>
+              <th className="px-4 py-3">ROUGE-L</th>
+              <th className="px-4 py-3">BLEU</th>
+              <th className="px-4 py-3">BERTScore</th>
+              <th className="px-4 py-3">Semantic</th>
+              <th className="px-4 py-3">Compression</th>
+              <th className="px-4 py-3">Time</th>
             </tr>
           </thead>
-          <tbody>
-            {rows.map(r => {
-              const m = ALG_META[r.algorithm?.toLowerCase()] || {};
-              const isBest = r.algorithm === best.algorithm;
+          <tbody className="divide-y divide-slate-800 text-slate-300">
+            {rows.map((row) => {
+              const meta = byKey(row.key);
               return (
-                <tr key={r.algorithm} className={isBest ? 'best-row' : ''}>
-                  <td>
-                    <span style={{ display:'flex', alignItems:'center', gap:6, fontWeight:600 }}>
-                      <span style={{ width:10, height:10, borderRadius:'50%',
-                        background: m.color || '#888', display:'inline-block' }} />
-                      {m.label || r.algorithm}
-                      {isBest && <span className="tag tag-best" style={{fontSize:'0.65rem'}}>★ Best</span>}
+                <tr
+                  key={row.key}
+                  onClick={() => onSelect(row.key)}
+                  className={`cursor-pointer transition hover:bg-slate-900/80 ${selectedKey === row.key ? 'bg-slate-900' : ''}`}
+                >
+                  <td className="px-4 py-3 font-medium text-slate-100">
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
+                      {row.algorithm}
                     </span>
                   </td>
-                  <td><MetricBar value={r.rouge?.rouge1} /></td>
-                  <td><MetricBar value={r.rouge?.rouge2} /></td>
-                  <td><MetricBar value={r.rouge?.rougeL} green /></td>
-                  <td><span className="metricVal">{r.bleu?.toFixed?.(4) ?? '—'}</span></td>
-                  <td><MetricBar value={r.bertscore?.f1} green /></td>
-                  <td><MetricBar value={r.semantic_similarity} /></td>
-                  <td><span className="metricVal">{r.time_seconds}s</span></td>
-                  <td><span className="metricVal">{r.length_words}</span></td>
+                  <td className="px-4 py-3">{groupLabel(row.group)}</td>
+                  {scoreCell(row, 'rouge1')}
+                  {scoreCell(row, 'rouge2')}
+                  {scoreCell(row, 'rougeL')}
+                  {scoreCell(row, 'bleu')}
+                  {scoreCell(row, 'bertscore_f1')}
+                  {scoreCell(row, 'semantic_similarity')}
+                  <td className="px-4 py-3">{pct(row.compression_ratio)}</td>
+                  <td className="px-4 py-3">{Number(row.processing_time || 0).toFixed(2)}s</td>
                 </tr>
               );
             })}
@@ -127,620 +199,370 @@ function CompareTable({ results }) {
   );
 }
 
-function ResultCards({ results, push }) {
-  const rows = Object.values(results).filter(r => r?.summary);
-  const best = rows.reduce((a, b) =>
-    (b.rouge?.rougeL || 0) > (a.rouge?.rougeL || 0) ? b : a, rows[0] || {});
-
-  function copy(text) {
-    navigator.clipboard?.writeText(text)
-      .then(() => push('Đã copy!', 'success'))
-      .catch(() => push('Copy thất bại', 'error'));
-  }
-  function dl(text, name) {
-    const a = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(new Blob([text], { type: 'text/plain' })),
-      download: name,
+function Charts({ rows }) {
+  if (rows.length < 2) return null;
+  const barData = rows.map((row) => ({
+    name: row.algorithm,
+    rouge1: metric(row, 'rouge1'),
+    rouge2: metric(row, 'rouge2'),
+    rougeL: metric(row, 'rougeL'),
+    bertscore: metric(row, 'bertscore_f1'),
+  }));
+  const radarData = ['rouge1', 'rouge2', 'rougeL', 'bertscore_f1', 'semantic_similarity'].map((key) => {
+    const item = { metric: key.replace('bertscore_f1', 'BERT').replace('semantic_similarity', 'Semantic') };
+    rows.forEach((row) => {
+      item[row.algorithm] = metric(row, key);
     });
-    a.click();
-    push('Đã tải xuống', 'success');
-  }
+    return item;
+  });
+  const timeData = rows.map((row) => ({ name: row.algorithm, seconds: row.processing_time, group: row.group }));
 
   return (
-    <div className="cardsGrid fadeIn">
-      {rows.map(r => {
-        const m = ALG_META[r.algorithm?.toLowerCase()] || {};
-        const isBest = r.algorithm === best.algorithm;
-        return (
-          <div key={r.algorithm} 
-               className={`resultCard ${isBest ? 'best-card' : ''}`}
-               onClick={() => push && push('detail', r)}
-               style={{ cursor: 'pointer' }}>
-            <div className="cardTop">
-              <span className="cardAlgo">
-                <span style={{ width:10, height:10, borderRadius:'50%',
-                  background: m.color || '#888', display:'inline-block' }} />
-                {m.label || r.algorithm}
-                <span className={`badge badge-${m.type || 'ext'}`}>
-                  {m.type === 'abs' ? 'Abstractive' : 'Extractive'}
-                </span>
-              </span>
-              {isBest && <span className="tag tag-best"><Star size={10} /> Tốt nhất</span>}
+    <div className="grid gap-4 xl:grid-cols-2">
+      <ChartShell title="ROUGE và BERTScore">
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={barData}>
+            <CartesianGrid stroke="#1e293b" vertical={false} />
+            <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+            <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} domain={[0, 1]} />
+            <Tooltip contentStyle={{ background: '#020617', border: '1px solid #1e293b', borderRadius: 8 }} />
+            <Legend />
+            <Bar dataKey="rouge1" name="ROUGE-1" fill="#38bdf8" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="rouge2" name="ROUGE-2" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="rougeL" name="ROUGE-L" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="bertscore" name="BERTScore" fill="#fb7185" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Radar tổng hợp">
+        <ResponsiveContainer width="100%" height={280}>
+          <RadarChart data={radarData}>
+            <PolarGrid stroke="#334155" />
+            <PolarAngleAxis dataKey="metric" tick={{ fill: '#cbd5e1', fontSize: 12 }} />
+            <PolarRadiusAxis domain={[0, 1]} tick={{ fill: '#64748b', fontSize: 10 }} />
+            {rows.slice(0, 4).map((row) => (
+              <Radar
+                key={row.key}
+                name={row.algorithm}
+                dataKey={row.algorithm}
+                stroke={byKey(row.key).color}
+                fill={byKey(row.key).color}
+                fillOpacity={0.14}
+              />
+            ))}
+            <Legend />
+            <Tooltip contentStyle={{ background: '#020617', border: '1px solid #1e293b', borderRadius: 8 }} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Thời gian xử lý">
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={timeData}>
+            <CartesianGrid stroke="#1e293b" vertical={false} />
+            <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+            <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
+            <Tooltip contentStyle={{ background: '#020617', border: '1px solid #1e293b', borderRadius: 8 }} />
+            <Line type="monotone" dataKey="seconds" name="Seconds" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 4 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <Ranking rows={rows} />
+    </div>
+  );
+}
+
+function ChartShell({ title, children }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-4">
+      <h3 className="mb-3 text-sm font-semibold text-slate-200">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Ranking({ rows }) {
+  const ranked = [...rows].sort((a, b) => metric(b, 'combined_score') - metric(a, 'combined_score'));
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-4">
+      <h3 className="mb-3 text-sm font-semibold text-slate-200">Ranking</h3>
+      <div className="space-y-2">
+        {ranked.map((row, index) => (
+          <div key={row.key} className="flex items-center gap-3 rounded-md bg-slate-900/60 px-3 py-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-800 text-sm font-semibold text-slate-200">
+              {index + 1}
             </div>
-            <div className="cardBody">
-              <p className="summaryText">{r.summary || '—'}</p>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-slate-100">{row.algorithm}</div>
+              <div className="text-xs text-slate-500">{groupLabel(row.group)}</div>
             </div>
-            <div className="cardFooter" onClick={e => e.stopPropagation()}>
-              <div className="miniMetrics">
-                <span>R-L <strong>{Math.round((r.rouge?.rougeL||0)*100)}%</strong></span>
-                <span>BS <strong>{Math.round((r.bertscore?.f1||0)*100)}%</strong></span>
-                <span><strong>{r.time_seconds}s</strong></span>
-              </div>
-              <div className="cardActions">
-                <button className="btn-icon" title="Copy" onClick={() => copy(r.summary)}><Copy size={13}/></button>
-                <button className="btn-icon" title="Tải TXT" onClick={() => dl(r.summary, `${r.algorithm}.txt`)}><Download size={13}/></button>
-              </div>
-            </div>
+            <div className="font-mono text-sm text-amber-300">{metric(row, 'combined_score').toFixed(3)}</div>
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SummaryGrid({ rows, onSelect }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      {rows.map((row) => {
+        const meta = byKey(row.key);
+        return (
+          <article key={row.key} className="rounded-lg border border-slate-800 bg-slate-950/70">
+            <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+              <button onClick={() => onSelect(row.key)} className="flex items-center gap-2 text-left text-sm font-semibold text-slate-100">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
+                {row.algorithm}
+              </button>
+              <span className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-400">{groupLabel(row.group)}</span>
+            </header>
+            <p className="max-h-56 overflow-auto px-4 py-4 text-sm leading-7 text-slate-300">{row.summary || '-'}</p>
+            <footer className="grid grid-cols-3 border-t border-slate-800 text-xs text-slate-400">
+              <span className="px-4 py-3">R-L {pct(metric(row, 'rougeL'))}</span>
+              <span className="px-4 py-3">BERT {pct(metric(row, 'bertscore_f1'))}</span>
+              <span className="px-4 py-3">{Number(row.processing_time || 0).toFixed(2)}s</span>
+            </footer>
+          </article>
         );
       })}
     </div>
   );
 }
 
-// ─── Sentence Highlight ────────────────────────────────────────────────────────
-function SentenceHighlight({ result, onClose }) {
-  if (!result) return null;
-  const m = ALG_META[result.algorithm?.toLowerCase()] || { label: result.algorithm };
-  const sourceSents = result.source_sentences || [];
-  const selectedIdx = result.details?.highlighted_sentence_indexes || [];
-
-  return (
-    <div className="highlightPanel fadeIn">
-      <div className="highlightHeader">
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ width:12, height:12, borderRadius:'50%', background: m.color || '#888' }} />
-          <h4>{m.label} — Chi tiết trích xuất</h4>
-          <span className="badge badge-ext" style={{fontSize:'0.6rem'}}>Explainability</span>
+function Explainability({ row }) {
+  if (!row) return null;
+  if (row.group === 'extractive') {
+    const source = row.explainability?.extractive?.source_sentences || row.source_sentences || [];
+    const selected = new Set(row.explainability?.extractive?.highlighted_sentence_indexes || []);
+    const details = row.explainability?.extractive?.selected_sentences || [];
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-950/70">
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-100">Extractive Explainability</h3>
+          <span className="text-xs text-slate-500">{row.algorithm}</span>
         </div>
-        <button className="btn-icon" onClick={onClose}>✕</button>
-      </div>
-      <div className="sentenceList">
-        {sourceSents.length > 0 ? (
-          sourceSents.map((s, i) => {
-            const isSelected = selectedIdx.includes(i);
-            const detail = result.details?.selected_sentences?.find(d => d.sentence_index === i);
+        <div className="max-h-96 space-y-2 overflow-auto p-4">
+          {source.map((sentence, index) => {
+            const detail = details.find((item) => item.sentence_index === index);
             return (
-              <div key={i} className={`sentence ${isSelected ? 'highlighted' : ''}`}>
-                <div className="sentNum">{i + 1}</div>
-                <div className="sentContent">
-                  {s}
-                  {isSelected && detail && (
-                    <div className="sentReason">
-                      Score: <strong>{detail.sentence_score}</strong> · 
-                      Match: <strong>{Math.round(detail.match_similarity*100)}%</strong>
-                    </div>
-                  )}
+              <div key={`${index}-${sentence.slice(0, 20)}`} className={`rounded-md border px-3 py-2 text-sm leading-6 ${selected.has(index) ? 'border-teal-400/50 bg-teal-400/10 text-teal-50' : 'border-slate-800 bg-slate-900/40 text-slate-400'}`}>
+                <div className="flex gap-3">
+                  <span className="font-mono text-xs text-slate-500">{index + 1}</span>
+                  <span className="flex-1">{sentence}</span>
+                  {detail && <span className="font-mono text-xs text-teal-200">{Number(detail.sentence_score || 0).toFixed(3)}</span>}
                 </div>
               </div>
             );
-          })
-        ) : (
-          <div className="emptyState" style={{padding:'20px'}}>Không có dữ liệu câu nguồn để hiển thị highlight.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Progress Panel ────────────────────────────────────────────────────────────
-function ProgressPanel({ progress, algs }) {
-  const statusOf = alg => {
-    const events = progress.filter(e => e.algorithm === alg.toLowerCase());
-    if (events.some(e => e.event === 'error')) return 'error';
-    if (events.some(e => e.event === 'done')) return 'done';
-    if (events.some(e => e.event === 'running')) return 'running';
-    return 'waiting';
-  };
-  const timeOf = alg => {
-    const done = progress.find(e => e.algorithm === alg.toLowerCase() && e.event === 'done');
-    return done?.result?.time_seconds ? `${done.result.time_seconds}s` : '';
-  };
-  return (
-    <div className="progressPanel fadeIn">
-      <div className="progressTitle">⚡ Tiến trình xử lý</div>
-      <div className="progressList">
-        {algs.map(alg => {
-          const m = ALG_META[alg] || { label: alg };
-          const st = statusOf(alg);
-          return (
-            <div key={alg} className="progressItem">
-              <span className={`pStatus ${st}`} />
-              <span className="pName">{m.label}</span>
-              <span className="tag tag-info" style={{fontSize:'0.65rem'}}>
-                {st === 'running' ? '🔄 Đang chạy...' :
-                 st === 'done'    ? '✅ Hoàn thành' :
-                 st === 'error'   ? '❌ Lỗi' : '⏳ Chờ'}
-              </span>
-              <span className="pTime">{timeOf(alg)}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Charts ────────────────────────────────────────────────────────────────────
-function Charts({ results }) {
-  const rows = Object.values(results).filter(r => r?.summary);
-  if (rows.length < 2) return null;
-  const labels = rows.map(r => ALG_META[r.algorithm?.toLowerCase()]?.label || r.algorithm);
-  const isDark = document.documentElement.classList.contains('dark');
-  const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor = isDark ? '#94a3b8' : '#6b7280';
-
-  const barData = {
-    labels,
-    datasets: [
-      { label: 'ROUGE-1',    data: rows.map(r => Math.round((r.rouge?.rouge1||0)*100)), backgroundColor: 'rgba(99,102,241,.7)' },
-      { label: 'ROUGE-2',    data: rows.map(r => Math.round((r.rouge?.rouge2||0)*100)), backgroundColor: 'rgba(139,92,246,.7)' },
-      { label: 'ROUGE-L',    data: rows.map(r => Math.round((r.rouge?.rougeL||0)*100)), backgroundColor: 'rgba(16,185,129,.7)' },
-      { label: 'BERTScore',  data: rows.map(r => Math.round((r.bertscore?.f1||0)*100)), backgroundColor: 'rgba(245,158,11,.7)' },
-    ],
-  };
-  const opts = {
-    responsive: true,
-    plugins: { legend: { labels: { color: textColor, font: { size: 11 } } } },
-    scales: {
-      x: { ticks: { color: textColor }, grid: { color: gridColor } },
-      y: { ticks: { color: textColor }, grid: { color: gridColor }, max: 100 },
-    },
-  };
-
-  const radarData = {
-    labels: ['ROUGE-1','ROUGE-2','ROUGE-L','BERTScore','Sem.Sim','Speed'],
-    datasets: rows.slice(0,4).map((r, i) => {
-      const colors = ['#6366f1','#10b981','#f59e0b','#ec4899'];
-      return {
-        label: ALG_META[r.algorithm?.toLowerCase()]?.label || r.algorithm,
-        data: [
-          Math.round((r.rouge?.rouge1||0)*100),
-          Math.round((r.rouge?.rouge2||0)*100),
-          Math.round((r.rouge?.rougeL||0)*100),
-          Math.round((r.bertscore?.f1||0)*100),
-          Math.round((r.semantic_similarity||0)*100),
-          Math.max(0, 100 - Math.round((r.time_seconds||0)*10)),
-        ],
-        borderColor: colors[i],
-        backgroundColor: colors[i]+'22',
-        pointBackgroundColor: colors[i],
-      };
-    }),
-  };
-  const radarOpts = {
-    responsive: true,
-    scales: { r: { ticks: { color: textColor, font:{size:9}, backdropColor:'transparent' }, grid: { color: gridColor }, pointLabels: { color: textColor, font:{size:11} } } },
-    plugins: { legend: { labels: { color: textColor, font:{size:11} } } },
-  };
-
-  return (
-    <div className="chartsGrid fadeIn">
-      <div className="chartCard" style={{ gridColumn: 'span 2' }}>
-        <h4>Comparison — ROUGE + BERTScore (%)</h4>
-        <Bar data={barData} options={opts} />
-      </div>
-      <div className="chartCard">
-        <h4>Radar — Đánh giá tổng hợp</h4>
-        <Radar data={radarData} options={radarOpts} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({ push }) {
-  const [metrics, setMetrics] = useState(null);
-  const [viz, setViz] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [m, v] = await Promise.all([
-        fetch(`${API}/dashboard/metrics`).then(r => r.json()),
-        fetch(`${API}/dashboard/visualization`).then(r => r.json()),
-      ]);
-      setMetrics(m); setViz(v);
-      push('Dashboard đã cập nhật', 'success');
-    } catch { push('Không tải được dashboard', 'error'); }
-    finally { setLoading(false); }
-  }, [push]);
-
-  useEffect(() => { load(); }, [load]);
-
-  if (loading) return <div className="emptyState"><Loader2 className="spin" size={32}/><p>Đang tải...</p></div>;
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <h2 style={{ fontSize:'1rem', fontWeight:700 }}>📈 Dashboard Thống kê</h2>
-        <button className="btn btn-ghost" onClick={load} style={{ padding:'6px 12px', fontSize:'0.8rem' }}>Refresh</button>
-      </div>
-      <div className="statGrid">
-        {[
-          { label: 'Tổng văn bản', value: metrics?.total_summaries ?? 0, icon: <FileText size={16}/> },
-          { label: 'Thời gian (s)', value: metrics?.total_processing_time_seconds ?? 0, icon: <Zap size={16}/> },
-          { label: 'Avg ROUGE-L', value: `${Math.round((metrics?.avg_rouge?.rougeL||0)*100)}%`, icon: <Brain size={16}/> },
-        ].map(s => (
-          <div key={s.label} className="statCard">
-            <div style={{ color:'var(--accent)', marginBottom:4 }}>{s.icon}</div>
-            <div className="statLabel">{s.label}</div>
-            <div className="statValue">{s.value}</div>
-          </div>
-        ))}
-      </div>
-      {viz?.labels && (
-        <div className="chartCard">
-          <h4>ROUGE-L theo Model</h4>
-          <Bar data={{
-            labels: viz.labels,
-            datasets: [{ label:'ROUGE-L %', data: viz.rougeL_avg?.map(v=>Math.round(v*100)), backgroundColor:'rgba(99,102,241,.7)' }]
-          }} options={{ responsive:true, plugins:{ legend:{display:false} } }} />
+          })}
         </div>
-      )}
+      </div>
+    );
+  }
+
+  const tokens = row.explainability?.abstractive?.token_importance || [];
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/70">
+      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <h3 className="text-sm font-semibold text-slate-100">Abstractive Token Importance</h3>
+        <span className="text-xs text-slate-500">{row.algorithm}</span>
+      </div>
+      <div className="flex flex-wrap gap-2 p-4">
+        {tokens.length ? tokens.map((item, index) => (
+          <span
+            key={`${item.token}-${index}`}
+            className="rounded-md border border-amber-300/20 px-2.5 py-1 text-sm text-amber-50"
+            style={{ background: `rgba(245, 158, 11, ${0.08 + Math.min(0.35, Number(item.importance || 0) * 0.35)})` }}
+          >
+            {item.token}
+          </span>
+        )) : <span className="text-sm text-slate-500">Attention/token importance chưa khả dụng cho model này.</span>}
+      </div>
     </div>
   );
 }
 
-// ─── Benchmark View ────────────────────────────────────────────────────────────
-function BenchmarkView({ push }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+function App() {
+  const [dark, setDark] = useState(true);
+  const [text, setText] = useState(SAMPLE_TEXT);
+  const [reference, setReference] = useState('');
+  const [files, setFiles] = useState([]);
+  const [selected, setSelected] = useState(ALGORITHMS.map((item) => item.key));
+  const [sentenceCount, setSentenceCount] = useState(5);
+  const [maxLength, setMaxLength] = useState(150);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const [selectedKey, setSelectedKey] = useState('textrank');
 
   useEffect(() => {
-    fetch(`${API}/benchmark/results`)
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => { push('Không tải được benchmark', 'error'); setLoading(false); });
-  }, [push]);
-
-  if (loading) return <div className="emptyState"><Loader2 className="spin" size={28}/><p>Đang tải...</p></div>;
-  if (!data?.benchmark_results?.length)
-    return <div className="emptyState"><BookOpen size={36} strokeWidth={1.2}/><h2>Chưa có kết quả benchmark</h2><p>Chạy: <code>python -m src.benchmark --samples 100</code></p></div>;
-
-  const bench = data.benchmark_results[0];
-  const rows  = bench.comparison || [];
-  const isDark = document.documentElement.classList.contains('dark');
-  const gc     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const tc     = isDark ? '#94a3b8' : '#6b7280';
-
-  const barData = {
-    labels: rows.map(r => r.algorithm.replace(' (fine-tuned, 5000 samples)', '*').replace(' (pretrained)','').replace('BART-large-CNN','BART')),
-    datasets: [
-      { label:'ROUGE-1',   data: rows.map(r => Math.round(r.avg_rouge1*100)),      backgroundColor:'rgba(99,102,241,.75)' },
-      { label:'ROUGE-2',   data: rows.map(r => Math.round(r.avg_rouge2*100)),      backgroundColor:'rgba(139,92,246,.75)' },
-      { label:'ROUGE-L',   data: rows.map(r => Math.round(r.avg_rougeL*100)),      backgroundColor:'rgba(16,185,129,.75)' },
-      { label:'BERTScore', data: rows.map(r => Math.round(r.avg_bertscore_f1*100)),backgroundColor:'rgba(245,158,11,.75)' },
-    ],
-  };
-  const opts = {
-    responsive:true,
-    plugins:{ legend:{ labels:{ color:tc, font:{size:11} } }, title:{display:true, text:'Benchmark — VnExpress 100 samples', color:tc} },
-    scales:{ x:{ticks:{color:tc},grid:{color:gc}}, y:{ticks:{color:tc},grid:{color:gc},max:100,title:{display:true,text:'Score (%)',color:tc}} },
-  };
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <h2 style={{ fontSize:'1rem', fontWeight:700 }}>📋 Kết quả Benchmark</h2>
-        <div style={{ fontSize:'0.75rem', color:'var(--text3)' }}>
-          Dataset: <strong>{bench.dataset}</strong> · Samples: <strong>{bench.samples}</strong>
-        </div>
-      </div>
-
-      {/* Chart */}
-      <div className="chartCard">
-        <Bar data={barData} options={opts}/>
-      </div>
-
-      {/* Table */}
-      <div className="tableWrap">
-        <div className="tableHeader"><h3>So sánh chi tiết</h3></div>
-        <div style={{ overflowX:'auto' }}>
-          <table className="metricsTable">
-            <thead>
-              <tr>
-                <th>Thuật toán</th><th>Loại</th>
-                <th>ROUGE-1</th><th>ROUGE-2</th><th>ROUGE-L</th>
-                <th>BLEU</th><th>BERTScore F1</th><th>Sem.Sim</th>
-                <th>Time avg</th><th>Len avg</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const bestRl = Math.max(...rows.map(x => x.avg_rougeL));
-                const isBest = r.avg_rougeL === bestRl;
-                return (
-                  <tr key={i} className={isBest ? 'best-row' : ''}>
-                    <td style={{ fontWeight:600 }}>
-                      {r.algorithm.replace(' (fine-tuned, 5000 samples)','*').replace(' (pretrained)','')}
-                      {isBest && <span className="tag tag-best" style={{marginLeft:6,fontSize:'0.65rem'}}>★ Best</span>}
-                    </td>
-                    <td><span className={`badge badge-${r.type==='abstractive'?'abs':'ext'}`}>{r.type==='abstractive'?'Abstractive':'Extractive'}</span></td>
-                    <td><MetricBar value={r.avg_rouge1}/></td>
-                    <td><MetricBar value={r.avg_rouge2}/></td>
-                    <td><MetricBar value={r.avg_rougeL} green/></td>
-                    <td><span className="metricVal">{r.avg_bleu?.toFixed(4)??'—'}</span></td>
-                    <td><MetricBar value={r.avg_bertscore_f1} green/></td>
-                    <td><MetricBar value={r.avg_semantic_sim}/></td>
-                    <td><span className="metricVal">{r.avg_time_seconds}s</span></td>
-                    <td><span className="metricVal">{r.avg_length_words} từ</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Key findings */}
-      {bench.key_findings?.length > 0 && (
-        <div className="highlightPanel">
-          <div className="highlightHeader"><h4>💡 Nhận xét chính</h4></div>
-          <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:6 }}>
-            {bench.key_findings.map((f, i) => (
-              <div key={i} style={{ display:'flex', gap:8, fontSize:'0.83rem', lineHeight:1.55 }}>
-                <span style={{ color:'var(--green)', fontWeight:700, flexShrink:0 }}>✓</span>
-                <span>{f}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-// ─── App ───────────────────────────────────────────────────────────────────────
-export default function App() {
-  const [files, setFiles]           = useState([]);
-  const [text, setText]             = useState('');
-  const [urls, setUrls]             = useState('');
-  const [algs, setAlgs]             = useState(['textrank','lsa','lexrank','vit5']);
-  const [results, setResults]       = useState({});
-  const [progress, setProgress]     = useState([]);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState('');
-  const [dark, setDark]             = useState(() => localStorage.getItem('dark')==='1');
-  const [view, setView]             = useState('summarize'); // 'summarize' | 'dashboard' | 'benchmark'
-  const [selectedResult, setSelectedResult] = useState(null);
-  const { toasts, push }            = useToasts();
-  const ctrl                        = useRef(null);
-
-  useEffect(() => {
-    if (dark) { document.documentElement.classList.add('dark'); localStorage.setItem('dark','1'); }
-    else      { document.documentElement.classList.remove('dark'); localStorage.removeItem('dark'); }
+    document.documentElement.classList.toggle('dark', dark);
   }, [dark]);
 
-  function handleEvent(obj) {
-    if (!obj?.event) return;
-    setProgress(p => [...p, obj]);
-    if (obj.event === 'done' && obj.algorithm && obj.result)
-      setResults(prev => ({ ...prev, [obj.algorithm]: obj.result }));
-    if (obj.event === 'finished') {
-      (obj.data?.results || obj.result?.results || []).forEach(r => {
-        setResults(prev => ({ ...prev, [r.algorithm]: r }));
-      });
-      push('So sánh hoàn tất! 🎉', 'success', 4000);
-    }
-    if (obj.event === 'error') push(`Lỗi: ${obj.error}`, 'error', 6000);
-  }
+  const rows = useMemo(() => result?.results || [], [result]);
+  const selectedRow = rows.find((row) => row.key === selectedKey) || rows[0];
 
-  async function stream(url, init) {
-    const res = await fetch(url, init);
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${body}`);
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    ctrl.current = reader;
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const parts = buf.split('\n\n');
-      buf = parts.pop();
-      for (const part of parts) {
-        const m = part.match(/data:\s*(.*)/s);
-        if (m) { try { handleEvent(JSON.parse(m[1])); } catch {} }
-      }
-    }
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    setError(''); setResults({}); setProgress([]); setLoading(true);
+  async function runComparison(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
     try {
-      if (files.length > 0) {
-        const fd = new FormData();
-        files.forEach(f => fd.append('files', f));
-        fd.append('algorithms', JSON.stringify(algs));
-        await stream(`${API}/summarize/files/compare/stream`, { method:'POST', body: fd });
+      let response;
+      if (files.length) {
+        const form = new FormData();
+        files.forEach((file) => form.append('files', file));
+        form.append('reference', reference);
+        form.append('algorithms', JSON.stringify(selected));
+        form.append('extractive_sentences', String(sentenceCount));
+        form.append('max_abstractive_length', String(maxLength));
+        response = await fetch(`${API}/summarize/files/compare`, { method: 'POST', body: form });
       } else {
-        await stream(`${API}/summarize/compare/stream`, {
+        response = await fetch(`${API}/summarize/compare`, {
           method: 'POST',
-          headers: { 'Content-Type':'application/json' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: text.trim() || null,
-            urls: urls.split('\n').map(u=>u.trim()).filter(Boolean),
-            algorithms: algs,
-            extractive_sentences: 5,
-            max_abstractive_length: 150,
+            text,
+            reference: reference || null,
+            algorithms: selected,
+            extractive_sentences: sentenceCount,
+            max_abstractive_length: maxLength,
           }),
         });
       }
-    } catch (err) { setError(err.message || String(err)); }
-    finally { setLoading(false); ctrl.current = null; }
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      setResult(data);
+      setSelectedKey(data?.ranking?.[0]?.key || data?.results?.[0]?.key || 'textrank');
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const hasInput = files.length > 0 || text.trim() || urls.trim();
+  function copySelected() {
+    if (selectedRow?.summary) navigator.clipboard?.writeText(selectedRow.summary);
+  }
 
   return (
-    <div className="app">
-      {/* Top Bar */}
-      <header className="topbar">
-        <div className="topbar-brand">
-          <div className="topbar-logo">NLP</div>
-          <div>
-            <div className="topbar-title">Vietnamese Text Summarization</div>
-            <div className="topbar-sub">So sánh 7 thuật toán · ROUGE · BERTScore · Realtime Streaming</div>
+    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
+        <div className="flex h-16 items-center justify-between px-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-400/15 text-teal-200">
+              <Brain size={20} />
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold text-slate-100">Vietnamese Summarization Research</h1>
+              <p className="text-xs text-slate-500">TextRank · LexRank · LSA · ViT5 · mT5 · BARTPho</p>
+            </div>
           </div>
-        </div>
-        <div className="topbar-nav">
-          <button className={`btn btn-ghost ${view==='summarize'?'active':''}`}
-            onClick={() => setView('summarize')} style={{gap:5}}>
-            <Home size={14}/> Tóm tắt
-          </button>
-          <button className={`btn btn-ghost ${view==='dashboard'?'active':''}`}
-            onClick={() => setView('dashboard')} style={{gap:5}}>
-            <BarChart3 size={14}/> Dashboard
-          </button>
-          <button className={`btn btn-ghost ${view==='benchmark'?'active':''}`}
-            onClick={() => setView('benchmark')} style={{gap:5}}>
-            <BookOpen size={14}/> Benchmark
-          </button>
-          <button className="btn btn-ghost" onClick={() => setDark(d=>!d)} style={{width:36,padding:0}}>
-            {dark ? <Sun size={14}/> : <Moon size={14}/>}
+          <button className="icon-button" onClick={() => setDark((value) => !value)} title="Toggle theme">
+            {dark ? <Sun size={17} /> : <Moon size={17} />}
           </button>
         </div>
       </header>
 
-      <div className="workspace">
-        {/* Sidebar */}
-        <aside className="sidePanel">
-          {view === 'summarize' && (
-            <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
-              {/* Upload */}
-              <div className="panelSection">
-                <span className="sectionLabel">📂 Upload tài liệu</span>
-                <label className={`dropZone ${files.length ? 'active' : ''}`}>
-                  <UploadCloud size={22}/>
-                  <span>{files.length ? `${files.length} file đã chọn` : 'TXT / PDF / DOCX'}</span>
-                  <span style={{fontSize:'0.72rem', color:'var(--text3)'}}>Kéo thả hoặc click để chọn</span>
-                  <input type="file" multiple accept=".txt,.pdf,.docx"
-                    onChange={e => setFiles(Array.from(e.target.files||[]))}/>
-                </label>
-                {files.length > 0 && (
-                  <button type="button" className="btn btn-ghost" style={{fontSize:'0.78rem',padding:'5px'}}
-                    onClick={() => setFiles([])}>✕ Xóa files</button>
-                )}
+      <main className="grid min-h-[calc(100vh-4rem)] grid-cols-1 lg:grid-cols-[380px_1fr]">
+        <aside className="border-b border-slate-800 bg-slate-950 p-5 lg:border-b-0 lg:border-r">
+          <form onSubmit={runComparison} className="space-y-5">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="section-title">Input</label>
+                <button type="button" className="text-xs text-slate-500 hover:text-slate-200" onClick={() => setText(SAMPLE_TEXT)}>
+                  Sample
+                </button>
               </div>
+              <textarea
+                value={text}
+                disabled={files.length > 0}
+                onChange={(event) => setText(event.target.value)}
+                className="input min-h-44"
+                placeholder="Dán văn bản tiếng Việt..."
+              />
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400 hover:border-teal-400/60 hover:text-teal-100">
+                <UploadCloud size={18} />
+                <span className="flex-1 truncate">{files.length ? `${files.length} file selected` : 'TXT / DOCX / PDF'}</span>
+                <input type="file" multiple accept=".txt,.docx,.pdf" className="hidden" onChange={(event) => setFiles(Array.from(event.target.files || []))} />
+              </label>
+              {files.length > 0 && (
+                <button type="button" className="ghost-button w-full" onClick={() => setFiles([])}>
+                  Clear files
+                </button>
+              )}
+            </section>
 
-              <div className="divider"/>
+            <section className="space-y-3">
+              <label className="section-title">Reference Summary</label>
+              <textarea
+                value={reference}
+                onChange={(event) => setReference(event.target.value)}
+                className="input min-h-24"
+                placeholder="Tùy chọn, dùng để đánh giá ROUGE/BLEU/BERTScore..."
+              />
+            </section>
 
-              {/* Text / URLs */}
-              <div className="panelSection">
-                <span className="sectionLabel">✍️ Hoặc nhập văn bản</span>
-                <textarea value={text} onChange={e=>setText(e.target.value)}
-                  placeholder="Dán văn bản tiếng Việt vào đây..." rows={6}
-                  disabled={files.length > 0}/>
-              </div>
+            <AlgorithmSelector selected={selected} setSelected={setSelected} />
 
-              <div className="panelSection">
-                <span className="sectionLabel">🔗 Hoặc URL bài báo</span>
-                <textarea value={urls} onChange={e=>setUrls(e.target.value)}
-                  placeholder="Mỗi dòng một URL..." rows={3}
-                  disabled={files.length > 0}/>
-              </div>
+            <section className="grid grid-cols-2 gap-3">
+              <label className="space-y-2">
+                <span className="section-title">Sentences</span>
+                <input className="input" type="number" min="1" max="20" value={sentenceCount} onChange={(event) => setSentenceCount(Number(event.target.value))} />
+              </label>
+              <label className="space-y-2">
+                <span className="section-title">Max Tokens</span>
+                <input className="input" type="number" min="24" max="512" value={maxLength} onChange={(event) => setMaxLength(Number(event.target.value))} />
+              </label>
+            </section>
 
-              <div className="divider"/>
-
-              {/* Algorithm selector */}
-              <div className="panelSection">
-                <span className="sectionLabel">⚙️ Chọn thuật toán ({algs.length}/7)</span>
-                <AlgSelector selected={algs} onChange={setAlgs}/>
-                <div style={{display:'flex',gap:6,marginTop:4}}>
-                  <button type="button" className="btn btn-ghost" style={{flex:1,fontSize:'0.75rem',padding:'5px'}}
-                    onClick={()=>setAlgs(Object.keys(ALG_META))}>Tất cả</button>
-                  <button type="button" className="btn btn-ghost" style={{flex:1,fontSize:'0.75rem',padding:'5px'}}
-                    onClick={()=>setAlgs(['textrank','vit5'])}>Mặc định</button>
-                </div>
-              </div>
-
-              <div className="divider"/>
-
-              <button className="btn btn-primary" disabled={loading || !hasInput || algs.length===0}>
-                {loading ? <><Loader2 className="spin" size={16}/> Đang xử lý...</> : <><Zap size={16}/> Chạy & So sánh</>}
-              </button>
-
-              {error && <div className="errorBox">⚠️ {error}</div>}
-            </form>
-          )}
-
-          {view === 'dashboard' && (
-            <div style={{padding:'4px 0', color:'var(--text3)', fontSize:'0.82rem'}}>
-              Thống kê lịch sử các lần tóm tắt
-            </div>
-          )}
+            <button disabled={loading || selected.length === 0 || (!text.trim() && !files.length)} className="primary-button">
+              {loading ? <RefreshCcw className="animate-spin" size={17} /> : <Play size={17} />}
+              Run Comparison
+            </button>
+            {error && <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-100">{error}</div>}
+          </form>
         </aside>
 
-        {/* Result Pane */}
-        <main className="resultPane">
-          {view === 'dashboard' && <Dashboard push={push}/>}
-          {view === 'benchmark' && <BenchmarkView push={push}/>}
+        <section className="space-y-5 p-5">
+          {!result && (
+            <div className="flex min-h-[50vh] items-center justify-center rounded-lg border border-slate-800 bg-slate-950/70 p-8 text-center">
+              <div>
+                <FileText className="mx-auto mb-3 text-slate-600" size={42} />
+                <h2 className="text-lg font-semibold text-slate-200">Research dashboard ready</h2>
+                <p className="mt-2 max-w-md text-sm text-slate-500">Chạy một batch so sánh để xem metrics, ranking, biểu đồ và explainability.</p>
+              </div>
+            </div>
+          )}
 
-          {view === 'summarize' && (
+          {result && (
             <>
-              {!loading && !Object.keys(results).length && !progress.length && (
-                <div className="emptyState">
-                  <Brain size={40} strokeWidth={1.2}/>
-                  <h2>Sẵn sàng phân tích văn bản</h2>
-                  <p>Upload file, nhập văn bản hoặc URL. Chọn thuật toán rồi nhấn "Chạy & So sánh" để xem kết quả ROUGE, BERTScore và so sánh trực quan.</p>
-                </div>
-              )}
-
-              {(loading || progress.length > 0) && (
-                <ProgressPanel progress={progress} algs={algs}/>
-              )}
-
-              {Object.keys(results).length > 0 && (
-                <>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <h3 style={{ fontSize:'0.9rem', fontWeight:700 }}>✨ Kết quả phân tích</h3>
-                    <button className="btn btn-ghost" style={{padding:'4px 10px', fontSize:'0.75rem'}} 
-                            onClick={() => { setResults({}); setProgress([]); }}>Xóa kết quả</button>
-                  </div>
-                  <CompareTable results={results}/>
-                  <Charts results={results}/>
-                  <ResultCards results={results} push={(type, data) => {
-                    if (type === 'detail') setSelectedResult(data);
-                    else push(type, data);
-                  }}/>
-                  {selectedResult && (
-                    <SentenceHighlight result={selectedResult} onClose={() => setSelectedResult(null)} />
-                  )}
-                </>
-              )}
+              <StatStrip result={result} />
+              <ComparisonTable rows={rows} onSelect={setSelectedKey} selectedKey={selectedKey} />
+              <Charts rows={rows} />
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-200">Summaries</h2>
+                <button className="ghost-button" onClick={copySelected}>
+                  <Copy size={15} /> Copy selected
+                </button>
+              </div>
+              <SummaryGrid rows={rows} onSelect={setSelectedKey} />
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-200">Explainability</span>
+                <ChevronDown size={16} className="text-slate-500" />
+              </div>
+              <Explainability row={selectedRow} />
             </>
           )}
-        </main>
-      </div>
-
-      {/* Toasts */}
-      <div className="toastWrap">
-        {toasts.map(t => (
-          <div key={t.id} className={`toast ${t.type}`}>
-            {t.type==='success' ? <CheckCircle2 size={13}/> : t.type==='error' ? <AlertTriangle size={13}/> : null}
-            {t.msg}
-          </div>
-        ))}
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<App />);

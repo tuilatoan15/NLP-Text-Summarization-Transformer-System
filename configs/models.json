@@ -1,0 +1,48 @@
+{
+  "extractive": {
+    "textrank": {
+      "name": "TextRank",
+      "sentence_count": 5,
+      "notes": "Graph-based centrality baseline for Vietnamese news."
+    },
+    "lexrank": {
+      "name": "LexRank",
+      "sentence_count": 5,
+      "notes": "Thresholded sentence similarity graph."
+    },
+    "lsa": {
+      "name": "LSA Summarizer",
+      "sentence_count": 5,
+      "notes": "SVD over TF-IDF sentence matrix."
+    }
+  },
+  "abstractive": {
+    "vit5": {
+      "name": "ViT5",
+      "base_model": "VietAI/vit5-base",
+      "local_dir": "models/vit5-finetuned",
+      "prefix": "summarize: ",
+      "max_input_tokens": 512,
+      "max_target_tokens": 128,
+      "recommended": true
+    },
+    "mt5": {
+      "name": "mT5",
+      "base_model": "google/mt5-small",
+      "local_dir": "models/mt5-finetuned",
+      "prefix": "summarize: ",
+      "max_input_tokens": 512,
+      "max_target_tokens": 128,
+      "recommended": false
+    },
+    "bartpho": {
+      "name": "BARTPho",
+      "base_model": "vinai/bartpho-syllable",
+      "local_dir": "models/bartpho-finetuned",
+      "prefix": "",
+      "max_input_tokens": 512,
+      "max_target_tokens": 128,
+      "recommended": true
+    }
+  }
+}

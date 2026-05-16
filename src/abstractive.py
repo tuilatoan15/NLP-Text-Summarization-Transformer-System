@@ -1,144 +1,289 @@
 """
-abstractive.py — Tóm tắt diễn giải (Abstractive Summarization) dùng ViT5.
+abstractive.py — Optimized abstractive summarization wrappers.
 
-Model VietAI/vit5-base là mô hình Seq2Seq dựa trên T5 được pre-train trên
-tiếng Việt, phù hợp cho bài toán tóm tắt và dịch thuật tiếng Việt.
+Optimization summary vs old version
+─────────────────────────────────────
+1. Models are NO LONGER loaded per-request.
+   AbstractiveSummarizer.load() now delegates to model_loader.get_loaded_model()
+   which returns a pre-warmed, singleton model — zero disk I/O after startup.
 
-Hỗ trợ 2 chế độ:
-  1. Inference: Load model từ local (./models/) hoặc Hugging Face Hub
-  2. Training: Có thể fine-tune lại với dữ liệu mới (xem train/train_vit5.py)
+2. GPU-first inference:
+   • torch.inference_mode() (faster than no_grad for inference)
+   • torch.cuda.amp.autocast() with fp16 when GPU supports it
+   • log_vram_usage() before/after generation for debugging
+
+3. Optimized generate() parameters:
+   • max_new_tokens (not max_length) avoids input-length miscounting
+   • num_beams=4 (quality/speed balance)
+   • repetition_penalty=1.15 to suppress loops
+   • no_repeat_ngram_size=3
+   • early_stopping=True
+
+4. ViT5 special-token cleanup:
+   • strip <extra_id_*> SentencePiece artifacts
+   • UTF-8 safe decode (skip_special_tokens=True, clean_up_tokenization_spaces=False)
+   • is_probably_bad_generation() guard with detailed logging
+
+5. Chunked summarization for long documents:
+   • splits by sentence, respects MAX_INPUT_TOKENS budget
+   • merges partials with a recursive final pass
 """
 
+from __future__ import annotations
+
 import os
-from pathlib import Path
+import time
 from typing import Optional
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
 
 import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    pipeline,
+
+from src import config
+from src.model_loader import get_device, get_loaded_model, is_fp16
+from src.model_registry import ABSTRACTIVE_ALGORITHMS, AlgorithmConfig
+from src.preprocess import (
+    clean_generated_summary,
+    clean_text,
+    is_probably_bad_generation,
+    split_sentences,
 )
-
-from src.utils import logger, truncate_text
-
-
-# ==============================================================================
-# CẤU HÌNH
-# ==============================================================================
-
-# Model mặc định: ViT5 base của VietAI
-DEFAULT_MODEL_NAME = "VietAI/vit5-base"
-BART_MODEL_NAME = "facebook/bart-large-cnn"
-SUPPORTED_MODEL_NAMES = {
-    "vit5": DEFAULT_MODEL_NAME,
-    "t5": "t5-small",
-    "t5-small": "t5-small",
-    "bart": BART_MODEL_NAME,
-    "pegasus": "google/pegasus-xsum",
-}
-
-# Thư mục lưu model đã fine-tune
-LOCAL_MODEL_DIR = Path("./models/vit5-finetuned")
-
-# Cấu hình sinh văn bản
-DEFAULT_MAX_INPUT_TOKENS = 512      # Giới hạn token đầu vào
-DEFAULT_MAX_OUTPUT_LENGTH = 110     # Ngắn hơn để suy luận nhanh hơn
-DEFAULT_MIN_OUTPUT_LENGTH = 20      # Độ dài tối thiểu bản tóm tắt
-DEFAULT_NUM_BEAMS = 2               # Tối ưu tốc độ cho API demo
-DEFAULT_NO_REPEAT_NGRAM_SIZE = 3    # Tránh lặp n-gram trong output
+from src.utils import log_vram_usage, logger
 
 
-# ==============================================================================
-# CLASS ABSTRACTIVE SUMMARIZER
-# ==============================================================================
+# ─────────────────────────── Internal helpers ───────────────────────────────
+
+def _algorithm_from_key(key: str) -> AlgorithmConfig:
+    """Resolve an algorithm key → AlgorithmConfig, with alias handling."""
+    key = (key or "").strip().lower()
+    aliases = {"phobart": "bartpho", "pho-bart": "bartpho", "bart": "bartpho"}
+    key = aliases.get(key, key)
+    if key in ABSTRACTIVE_ALGORITHMS:
+        return ABSTRACTIVE_ALGORITHMS[key]
+    # Fallback: wrap an unknown HF model name
+    return AlgorithmConfig(
+        key=key.replace("/", "__"),
+        name=key,
+        group="abstractive",
+        model_name=key,
+        description="Custom HuggingFace seq2seq model.",
+    )
+
+
+def _prefix_text(key: str, text: str) -> str:
+    """Add task prefix required by T5-family models."""
+    if key in {"vit5", "mt5"}:
+        return f"summarize: {text}"
+    return text
+
+
+def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
+    """Split text into sentence-aligned chunks that fit the model's token budget."""
+    sentences = split_sentences(text)
+    if not sentences:
+        return [text]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+
+    for sentence in sentences:
+        w = len(sentence.split())
+        if current and current_words + w > max_words_per_chunk:
+            chunks.append(" ".join(current))
+            current, current_words = [], 0
+        current.append(sentence)
+        current_words += w
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return chunks[:8]  # hard cap: never process more than 8 chunks
+
+
+# ─────────────────────────── Core inference ────────────────────────────────
+
+def _generate_one(
+    key: str,
+    text: str,
+    max_new_tokens: int,
+    min_new_tokens: int,
+    num_beams: int,
+) -> str:
+    """
+    Run one forward pass through a loaded Transformer model.
+
+    The model and tokenizer are fetched from the singleton registry —
+    no disk I/O, no model instantiation, no repeated .to(device) calls.
+    """
+    loaded = get_loaded_model(key)
+    model = loaded.model
+    tokenizer = loaded.tokenizer
+    device = loaded.device
+    use_fp16 = loaded.fp16
+
+    prefixed = _prefix_text(key, text)
+    encoded = tokenizer(
+        prefixed,
+        return_tensors="pt",
+        truncation=True,
+        max_length=config.MAX_INPUT_TOKENS,
+        padding=False,
+    )
+    encoded = {k: v.to(device) for k, v in encoded.items()}
+
+    log_vram_usage(f"pre_generate_{key}")
+    t_start = time.perf_counter()
+
+    # torch.inference_mode is faster than no_grad — disables all autograd bookkeeping
+    with torch.inference_mode():
+        if use_fp16 and device.type == "cuda":
+            # autocast lets the GPU run matmuls in fp16 while keeping
+            # numerically sensitive ops in fp32 automatically
+            with torch.cuda.amp.autocast(dtype=torch.float16):
+                generated_ids = model.generate(
+                    **encoded,
+                    max_new_tokens=max_new_tokens,
+                    min_new_tokens=min_new_tokens,
+                    num_beams=num_beams,
+                    no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
+                    repetition_penalty=1.15,
+                    length_penalty=1.0,
+                    early_stopping=True,
+                    do_sample=False,
+                )
+        else:
+            generated_ids = model.generate(
+                **encoded,
+                max_new_tokens=max_new_tokens,
+                min_new_tokens=min_new_tokens,
+                num_beams=num_beams,
+                no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
+                repetition_penalty=1.15,
+                length_penalty=1.0,
+                early_stopping=True,
+                do_sample=False,
+            )
+
+    elapsed = time.perf_counter() - t_start
+    logger.debug("[%s] generate() took %.3f s", key, elapsed)
+    log_vram_usage(f"post_generate_{key}")
+
+    # Decode — skip_special_tokens removes <pad>, </s>, <unk> etc.
+    # clean_up_tokenization_spaces=False preserves Vietnamese spacing exactly
+    decoded = tokenizer.batch_decode(
+        generated_ids,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
+    )
+    raw = decoded[0] if decoded else ""
+    summary = clean_generated_summary(raw)
+
+    if is_probably_bad_generation(summary):
+        logger.warning(
+            "[%s] Bad generation detected (len=%d, preview=%r) — returning empty",
+            key, len(summary), summary[:80],
+        )
+        return ""
+
+    return summary
+
+
+# ─────────────────────────── Public summarize function ─────────────────────
+
+def abstractive_summarize_key(
+    key: str,
+    text: str,
+    max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    min_output_length: int = config.MIN_OUTPUT_LENGTH,
+    num_beams: int = config.NUM_BEAMS,
+) -> str:
+    """
+    Summarize *text* using the model identified by *key* (e.g. 'vit5').
+
+    For long texts, the input is split into chunks, each chunk summarised,
+    then the partial summaries are merged in a final recursive pass.
+    """
+    text = clean_text(text, aggressive=True)
+    if not text:
+        return ""
+
+    # Estimate whether the text needs chunking (word-based heuristic)
+    max_words = max(180, int(config.MAX_INPUT_TOKENS * 0.65))
+    if len(text.split()) > max_words:
+        chunks = _chunk_text(text, max_words)
+        logger.debug("[%s] Long text — splitting into %d chunks", key, len(chunks))
+
+        partials = [
+            _generate_one(
+                key,
+                chunk,
+                max_new_tokens=max(48, max_output_length // 2),
+                min_new_tokens=min(24, min_output_length),
+                num_beams=num_beams,
+            )
+            for chunk in chunks
+        ]
+        merged = " ".join(p for p in partials if p)
+
+        # If merged partials are still too long, do one final compression pass
+        if len(merged.split()) > max_output_length:
+            return abstractive_summarize_key(
+                key, merged,
+                max_output_length=max_output_length,
+                min_output_length=min_output_length,
+                num_beams=num_beams,
+            )
+        return clean_generated_summary(merged)
+
+    return _generate_one(key, text, max_output_length, min_output_length, num_beams)
+
+
+# ─────────────────────────── Compatibility shim ────────────────────────────
+# The old AbstractiveSummarizer class is preserved as a thin wrapper so that
+# anything still calling get_summarizer() / AbstractiveSummarizer.summarize()
+# continues to work without code changes.
 
 class AbstractiveSummarizer:
     """
-    Wrapper cho mô hình ViT5 dùng để tóm tắt diễn giải tiếng Việt.
+    Thin compatibility wrapper around abstractive_summarize_key().
 
-    Tự động phát hiện và dùng GPU nếu có, fallback về CPU nếu không.
-    Ưu tiên load model đã fine-tune từ local, nếu không có thì dùng Hugging Face.
+    All heavy lifting (model loading, GPU scheduling, fp16, etc.) happens in
+    model_loader.py / _generate_one().  This class is kept only so that
+    existing call-sites in dashboard.py / tests do not need to change.
     """
 
     def __init__(
         self,
-        model_name: str = DEFAULT_MODEL_NAME,
+        model_name: str = "vit5",
         local_model_dir: Optional[str] = None,
-        max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
-        max_output_length: int = DEFAULT_MAX_OUTPUT_LENGTH,
-        min_output_length: int = DEFAULT_MIN_OUTPUT_LENGTH,
-        num_beams: int = DEFAULT_NUM_BEAMS,
-        no_repeat_ngram_size: int = DEFAULT_NO_REPEAT_NGRAM_SIZE,
-    ):
-        self.model_name = model_name
-        self.local_model_dir = Path(local_model_dir) if local_model_dir else LOCAL_MODEL_DIR
+        max_input_tokens: int = config.MAX_INPUT_TOKENS,
+        max_output_length: int = config.MAX_OUTPUT_LENGTH,
+        min_output_length: int = config.MIN_OUTPUT_LENGTH,
+        num_beams: int = config.NUM_BEAMS,
+        no_repeat_ngram_size: int = config.NO_REPEAT_NGRAM_SIZE,
+    ) -> None:
+        self.algorithm = _algorithm_from_key(model_name)
+        self.key = self.algorithm.key
         self.max_input_tokens = max_input_tokens
         self.max_output_length = max_output_length
         self.min_output_length = min_output_length
         self.num_beams = num_beams
         self.no_repeat_ngram_size = no_repeat_ngram_size
 
-        # Phát hiện thiết bị (GPU ưu tiên, fallback CPU)
-        self.device = 0 if torch.cuda.is_available() else -1
-        device_name = "CUDA (GPU)" if self.device == 0 else "CPU"
-        logger.info(f"Thiết bị suy luận: {device_name}")
-
-        # Chưa load model (lazy loading để tiết kiệm RAM)
-        self.tokenizer = None
-        self.model = None
-        self._pipeline = None
-
-    def _resolve_model_path(self) -> str:
-        """
-        Quyết định dùng model local hay Hugging Face Hub.
-        Ưu tiên: local fine-tuned > Hugging Face Hub
-        """
-        should_use_local = self.model_name == DEFAULT_MODEL_NAME or self.local_model_dir != LOCAL_MODEL_DIR
-        if should_use_local and self.local_model_dir.exists() and any(self.local_model_dir.iterdir()):
-            logger.info(f"Dùng model local: {self.local_model_dir}")
-            return str(self.local_model_dir)
-        else:
-            logger.info(f"Không tìm thấy model local, dùng Hugging Face: {self.model_name}")
-            return self.model_name
-
+    # Keep the old .load() signature — it's now effectively a no-op because
+    # model_loader already holds the model.
     def load(self) -> None:
-        """
-        Load tokenizer và model vào bộ nhớ.
-        Gọi hàm này một lần trước khi sử dụng.
-        """
-        if self._pipeline is not None:
-            logger.info("Model đã được load, bỏ qua.")
-            return
+        _ = get_loaded_model(self.key)
 
-        model_path = self._resolve_model_path()
-        logger.info(f"Đang load tokenizer từ: {model_path}")
+    def is_loaded(self) -> bool:
+        from src.model_loader import _registry
+        return _registry.is_loaded(self.key)
 
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-            logger.info(f"Đang load model từ: {model_path}")
-            # Load weights (PT) — không phụ thuộc vào pipeline để tránh breaking changes
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
-
-            # Move model to device (GPU nếu có, CPU nếu không)
-            try:
-                device_pt = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-                self.model.to(device_pt)
-            except Exception:
-                # Nếu việc di chuyển thất bại thì tiếp tục — vẫn có thể generate trên CPU
-                pass
-
-            # Không tạo pipeline mặc định để tránh lỗi với các version transformers khác nhau.
-            # Thay vào đó, dùng fallback `model.generate()` trong `summarize()` nếu cần.
-            self._pipeline = None
-            logger.info("✅ Load model thành công (sẵn sàng dùng model.generate())")
-
-        except Exception as e:
-            logger.error(f"❌ Lỗi load model: {e}")
-            raise RuntimeError(f"Không thể load model ViT5: {e}") from e
+    @property
+    def device(self) -> torch.device:
+        return get_device()
 
     def summarize(
         self,
@@ -148,206 +293,66 @@ class AbstractiveSummarizer:
         num_beams: Optional[int] = None,
         chunk_long_text: bool = True,
     ) -> str:
-        """
-        Sinh bản tóm tắt diễn giải từ văn bản đầu vào.
-
-        Tự động truncate input nếu vượt quá giới hạn token.
-
-        Args:
-            text: Văn bản tiếng Việt cần tóm tắt
-            max_output_length: Độ dài tối đa output (ghi đè cấu hình mặc định)
-            min_output_length: Độ dài tối thiểu output
-            num_beams: Số beam trong beam search
-
-        Returns:
-            Bản tóm tắt diễn giải
-        """
-        if not text or not text.strip():
-            logger.warning("Văn bản đầu vào rỗng.")
-            return ""
-
-        # Lazy load model nếu chưa có
-        if self._pipeline is None and self.model is None:
-            # Nếu model chưa được load thì load.
-            self.load()
-
-        # Truncate input nếu quá dài (tính theo từ, ước lượng token)
-        # Với ViT5, 1 từ tiếng Việt ≈ 1.5 - 2 token => dùng max_words = token_limit * 0.6
-        max_words = int(self.max_input_tokens * 0.6)
-        text = truncate_text(text, max_words=max_words)
-
-        # Sử dụng cấu hình override hoặc cấu hình mặc định
-        _max_len = max_output_length or self.max_output_length
-        _min_len = min_output_length or self.min_output_length
-        _beams = num_beams or self.num_beams
-
-        if chunk_long_text and len(text.split()) > max_words:
-            return self._summarize_chunks(text, _max_len, _min_len, _beams, max_words)
-
-        # Nếu pipeline có sẵn, ưu tiên dùng pipeline (ít khi xảy ra với các release mới)
-        if self._pipeline is not None:
-            try:
-                results = self._pipeline(
-                    text,
-                    max_length=_max_len,
-                    min_length=_min_len,
-                    num_beams=_beams,
-                    no_repeat_ngram_size=self.no_repeat_ngram_size,
-                    early_stopping=True,
-                    do_sample=False,    # Deterministic output
-                )
-                summary = results[0]["summary_text"].strip()
-                logger.info(f"Abstractive OK: {len(summary.split())} từ.")
-                return summary
-            except Exception as e:
-                logger.error(f"Pipeline summarization failed: {e}")
-
-        # Fallback: dùng trực tiếp model.generate() + tokenizer.decode()
-        try:
-            device = next(self.model.parameters()).device if self.model is not None and any(True for _ in self.model.parameters()) else torch.device("cpu")
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_input_tokens)
-            input_ids = inputs["input_ids"].to(device)
-            attention_mask = inputs.get("attention_mask")
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-
-            outputs = self.model.generate(
-                input_ids,
-                attention_mask=attention_mask,
-                max_length=_max_len,
-                min_length=_min_len,
-                num_beams=_beams,
-                no_repeat_ngram_size=self.no_repeat_ngram_size,
-                early_stopping=True,
-                do_sample=False,
-            )
-            summary = self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-            logger.info(f"Abstractive OK (generate): {len(summary.split())} từ.")
-            return summary
-        except Exception as e:
-            logger.error(f"Lỗi sinh tóm tắt bằng model.generate(): {e}")
-            return ""
-
-    def _summarize_chunks(
-        self,
-        text: str,
-        max_length: int,
-        min_length: int,
-        num_beams: int,
-        max_words: int,
-    ) -> str:
-        words = text.split()
-        chunk_size = max(120, max_words)
-        overlap = 40
-        chunks = []
-        start = 0
-        while start < len(words):
-            chunks.append(" ".join(words[start:start + chunk_size]))
-            start += max(1, chunk_size - overlap)
-
-        partials = []
-        for chunk in chunks[:6]:
-            partial = self.summarize(
-                chunk,
-                max_output_length=max(40, int(max_length / 2)),
-                min_output_length=min(min_length, 20),
-                num_beams=num_beams,
-                chunk_long_text=False,
-            )
-            if partial:
-                partials.append(partial)
-
-        merged = " ".join(partials)
-        if len(merged.split()) <= max_words:
-            return merged
-        return self.summarize(
-            merged,
-            max_output_length=max_length,
-            min_output_length=min_length,
-            num_beams=num_beams,
-            chunk_long_text=False,
+        return abstractive_summarize_key(
+            self.key,
+            text,
+            max_output_length=max_output_length or self.max_output_length,
+            min_output_length=min_output_length or self.min_output_length,
+            num_beams=num_beams or self.num_beams,
         )
 
-    def is_loaded(self) -> bool:
-        """Kiểm tra model đã được load chưa."""
-        return (self._pipeline is not None) or (self.model is not None)
+    def explain_tokens(self, source_text: str, summary: str, limit: int = 40) -> list[dict]:
+        source_tokens = _tokenize_for_importance(source_text)
+        summary_tokens = _tokenize_for_importance(summary)
+        if not summary_tokens:
+            return []
+        counts = {token: source_tokens.count(token) for token in set(source_tokens)}
+        max_count = max(counts.values()) if counts else 1
+        return [
+            {
+                "token": token,
+                "importance": round((counts.get(token, 0) / max_count) if max_count else 0.0, 4),
+            }
+            for token in summary_tokens[:limit]
+        ]
 
 
-# ==============================================================================
-# SINGLETON INSTANCE (Dùng chung trong API để tránh load model nhiều lần)
-# ==============================================================================
+def _tokenize_for_importance(text: str) -> list[str]:
+    from src.preprocess import tokenize_words
+    return tokenize_words(text, remove_stopwords=True)
+
+
+# ── Backward-compatible module-level helpers ────────────────────────────────
 
 _global_summarizers: dict[str, AbstractiveSummarizer] = {}
 
 
-def resolve_model_name(model_name: str | None = None) -> str:
-    if not model_name:
-        return DEFAULT_MODEL_NAME
-    key = model_name.strip().lower()
-    return SUPPORTED_MODEL_NAMES.get(key, model_name)
-
-
 def get_summarizer(
-    model_name: str = DEFAULT_MODEL_NAME,
+    model_name: str = "vit5",
     local_model_dir: Optional[str] = None,
 ) -> AbstractiveSummarizer:
-    """
-    Lấy instance AbstractiveSummarizer toàn cục (singleton pattern).
-    Đảm bảo model chỉ được load một lần duy nhất trong quá trình chạy.
-    """
-    resolved_model_name = resolve_model_name(model_name)
-    cache_key = f"{resolved_model_name}|{local_model_dir or LOCAL_MODEL_DIR}"
-
+    key = _algorithm_from_key(model_name).key
+    cache_key = f"{key}|{local_model_dir or ''}"
     if cache_key not in _global_summarizers:
-        logger.info("Khởi tạo AbstractiveSummarizer lần đầu...")
         _global_summarizers[cache_key] = AbstractiveSummarizer(
-            model_name=resolved_model_name,
+            model_name=key,
             local_model_dir=local_model_dir,
         )
-        _global_summarizers[cache_key].load()
-
     return _global_summarizers[cache_key]
 
 
 def abstractive_summarize(
     text: str,
-    max_output_length: int = DEFAULT_MAX_OUTPUT_LENGTH,
-    min_output_length: int = DEFAULT_MIN_OUTPUT_LENGTH,
-    num_beams: int = DEFAULT_NUM_BEAMS,
+    max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    min_output_length: int = config.MIN_OUTPUT_LENGTH,
+    num_beams: int = config.NUM_BEAMS,
     local_model_dir: Optional[str] = None,
-    model_name: str = DEFAULT_MODEL_NAME,
+    model_name: str = "vit5",
 ) -> str:
-    """
-    Hàm tiện ích: tóm tắt diễn giải, dùng singleton summarizer.
-
-    Dùng khi muốn gọi trực tiếp mà không cần khởi tạo class.
-    """
-    summarizer = get_summarizer(model_name=model_name, local_model_dir=local_model_dir)
-    return summarizer.summarize(
-        text,
+    key = _algorithm_from_key(model_name).key
+    return abstractive_summarize_key(
+        key, text,
         max_output_length=max_output_length,
         min_output_length=min_output_length,
         num_beams=num_beams,
     )
-
-
-# ==============================================================================
-# CHẠY THỬ TRỰC TIẾP
-# ==============================================================================
-
-if __name__ == "__main__":
-    sample = """
-    Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp để thảo luận về tình hình
-    leo thang căng thẳng ở Trung Đông. Nhiều quốc gia kêu gọi ngừng bắn ngay lập
-    tức và mở hành lang nhân đạo cho người dân vùng chiến sự. Đại diện Mỹ phát biểu
-    rằng Washington ủng hộ giải pháp hai nhà nước nhưng nhấn mạnh quyền tự vệ hợp
-    pháp. Nga và Trung Quốc phản đối dự thảo nghị quyết, cho rằng văn kiện còn
-    thiếu cân bằng. Cuộc khủng hoảng nhân đạo ngày càng nghiêm trọng khi hàng nghìn
-    thường dân phải di tản. Các tổ chức phi chính phủ kêu gọi cộng đồng quốc tế
-    hành động khẩn cấp để bảo vệ dân thường.
-    """
-
-    print("=== TÓM TẮT DIỄN GIẢI (ViT5) ===")
-    # Sử dụng hàm tiện ích (sẽ load model từ HF nếu chưa có local)
-    summary = abstractive_summarize(sample, max_output_length=80, num_beams=2)
-    print(summary)

@@ -30,6 +30,7 @@ def collect_vnexpress_links(limit=100):
                 
             for item in items:
                 link = item.get("href")
+                link = str(link) if link is not None else None
                 if link and link.startswith("https://vnexpress.net/") and link.endswith(".html"):
                     if link not in links:
                         links.append(link)

@@ -1,0 +1,27 @@
+{
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Windows",
+  "venvPath": ".",
+  "venv": "venv",
+  "include": [
+    "src",
+    "api",
+    "tests",
+    "scripts"
+  ],
+  "exclude": [
+    "venv",
+    "__pycache__",
+    ".pytest_cache"
+  ],
+  "extraPaths": ["."],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "pythonVersion": "3.13",
+      "extraPaths": ["."]
+    }
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none"
+}

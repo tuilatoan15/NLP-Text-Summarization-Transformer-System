@@ -12,3 +12,15 @@ omit = ["tests/*", "venv/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "def __repr__", "if __name__ == .__main__."]
+
+[tool.pyright]
+pythonVersion = "3.13"
+venvPath = "."
+venv = "venv"
+extraPaths = ["."]
+reportMissingImports = "warning"
+reportMissingModuleSource = "none"
+
+[tool.pyrefly]
+project_root = "."
+search_paths = ["."]

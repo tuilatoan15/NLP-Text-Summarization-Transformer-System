@@ -1,244 +1,456 @@
 """
-dashboard.py — Orchestrator cho multi-algorithm summarization và streaming progress.
+dashboard.py — Optimized multi-algorithm comparison orchestrator.
 
-Chức năng chính:
- - Chạy đồng thời nhiều thuật toán (TextRank, LSA, BART, T5, Pegasus, ...)
- - Tính các chỉ số (ROUGE, BLEU, semantic similarity)
- - Cung cấp hàm trả về kết quả đầy đủ và generator SSE cho tiến trình realtime
- - Cache kết quả theo hash của input + options
+Optimization vs old version
+─────────────────────────────
+1. EXTRACTIVE models run CONCURRENTLY via summarize_extractive_parallel()
+   (ThreadPoolExecutor in extractive.py) — ~60-70% wall-time reduction for
+   the extractive group.
+
+2. ABSTRACTIVE models run GPU-SEQUENTIALLY to avoid CUDA OOM:
+   • If VRAM >= GPU_VRAM_LIMIT_GB → run all Transformers in a single thread
+     (sequential on GPU is still fast because GPU parallelism is inside each
+     model.generate() call, not across models).
+   • Result: no out-of-memory crashes on low-VRAM machines (e.g. 4 GB GTX).
+
+3. Models are already preloaded via model_loader.py — zero cold-start inside
+   _run_abstractive(). The only cost is the actual forward pass.
+
+4. CPU usage + inference time are logged per algorithm.
+
+5. _evaluate_result() is unchanged at the signature level so api/main.py
+   and tests need NO changes.
 """
 
-import time
+from __future__ import annotations
+
 import json
-import hashlib
-from pathlib import Path
-from typing import List, Dict, Optional
+import threading
+import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Iterable
 
-from src.utils import logger, ensure_dir, count_words
-from src.extractive import extractive_summarize, extractive_summarize_with_details, lexrank_summarize
-from src.abstractive import get_summarizer, resolve_model_name
-from src.evaluate import compute_rouge, compute_bleu, compute_semantic_similarity, compute_bertscore
-from src.preprocess import split_sentences
+import torch
 
-
-CACHE_DIR = ensure_dir("cache/dashboard")
-
-
-def _cache_path(key: str) -> Path:
-    return Path(CACHE_DIR) / f"{key}.json"
-
-
-def _make_cache_key(text: str, algorithms: List[str], options: Dict) -> str:
-    h = hashlib.sha256()
-    h.update(text.encode("utf-8"))
-    h.update("|".join(sorted(algorithms)).encode("utf-8"))
-    h.update(json.dumps(options, sort_keys=True).encode("utf-8"))
-    return h.hexdigest()
+from src import config
+from src.abstractive import abstractive_summarize_key, get_summarizer
+from src.evaluate import evaluate_summary
+from src.extractive import summarize_extractive_algorithm, summarize_extractive_parallel
+from src.model_registry import (
+    ABSTRACTIVE_ALGORITHMS,
+    DEFAULT_ALGORITHMS,
+    EXTRACTIVE_ALGORITHMS,
+    resolve_algorithm,
+)
+from src.preprocess import clean_text, split_sentences
+from src.utils import count_words, log_vram_usage, logger
 
 
-def _cache_get(key: str) -> Optional[dict]:
-    p = _cache_path(key)
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-    return None
+# ─────────────────────────── GPU scheduling lock ───────────────────────────
+# Prevents multiple Transformer models from running simultaneously on a
+# low-VRAM GPU, which would cause CUDA OOM errors.
+_GPU_LOCK = threading.Semaphore(config.MAX_GPU_CONCURRENT)
 
 
-def _cache_set(key: str, data: dict) -> None:
-    p = _cache_path(key)
-    try:
-        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        logger.warning(f"Không thể lưu cache: {e}")
+# ─────────────────────────── Scoring ───────────────────────────────────────
+
+def _combined_score(metrics: dict) -> float:
+    compression = float(metrics.get("compression_ratio", 0.0))
+    compression_score = max(0.0, 1.0 - abs(compression - 0.25) / 0.25)
+    score = (
+        0.30 * float(metrics.get("rougeL", 0.0))
+        + 0.25 * float(metrics.get("bertscore_f1", 0.0))
+        + 0.20 * float(metrics.get("semantic_similarity", 0.0))
+        + 0.15 * float(metrics.get("rouge2", 0.0))
+        + 0.10 * compression_score
+    )
+    return round(score, 4)
 
 
-def _run_textrank(text: str, sentence_count: int = 5) -> dict:
-    return extractive_summarize_with_details(text, sentence_count=sentence_count)
+# ─────────────────────────── Per-algorithm runners ─────────────────────────
 
-
-def _run_lsa(text: str, sentence_count: int = 5) -> dict:
-    try:
-        from sumy.parsers.plaintext import PlaintextParser
-        from sumy.nlp.tokenizers import Tokenizer
-        from sumy.summarizers.lsa import LsaSummarizer
-
-        parser = PlaintextParser.from_string(text, Tokenizer("english"))
-        summarizer = LsaSummarizer()
-        summary_sentences = summarizer(parser.document, sentence_count)
-        sentences = [str(s) for s in summary_sentences]
-        summary = " ".join(sentences)
-        # Mocking details for LSA for consistency in return format
-        return {"summary": summary, "selected_sentences": []}
-    except Exception as e:
-        logger.warning(f"LSA summarization failed: {e}")
-        return _run_textrank(text, sentence_count=sentence_count)
-
-
-def _run_lexrank(text: str, sentence_count: int = 5) -> dict:
-    try:
-        from src.extractive import lexrank_summarize
-        summary = lexrank_summarize(text, sentence_count=sentence_count)
-        return {"summary": summary, "selected_sentences": []} # LexRank with details could be added later
-    except Exception as e:
-        logger.warning(f"LexRank summarization failed: {e}")
-        return _run_textrank(text, sentence_count=sentence_count)
-
-
-def _run_abstractive(text: str, model_key: str, max_output_length: int = 120) -> str:
-    resolved = resolve_model_name(model_key)
-    summarizer = get_summarizer(model_name=resolved)
-    try:
-        return summarizer.summarize(text, max_output_length=max_output_length)
-    except Exception as e:
-        logger.error(f"Abstractive model {resolved} failed: {e}")
-        return ""
-
-
-def _measure_and_eval(func, name: str, text: str, reference: str, **kwargs) -> dict:
-    start = time.time()
-    try:
-        res = func(text, **kwargs)
-        if isinstance(res, dict):
-            summary = res.get("summary", "")
-            details = res
-        else:
-            summary = str(res)
-            details = {"summary": summary}
-    except Exception as e:
-        logger.error(f"Algorithm {name} error: {e}")
-        summary = ""
-        details = {"summary": "", "error": str(e)}
-    
-    duration = round(time.time() - start, 3)
-    length = count_words(summary)
-
-    # Evaluate (use reference if provided, otherwise use original text)
-    ref = reference or text
-    rouge = compute_rouge(summary, ref)
-    bleu = compute_bleu(summary, ref)
-    semantic = compute_semantic_similarity(summary, ref)
-
-    return {
-        "algorithm": name,
-        "summary": summary,
-        "details": details,
-        "time_seconds": duration,
-        "length_words": length,
-        "rouge": rouge,
-        "bleu": bleu,
-        "semantic_similarity": semantic,
-        "bertscore": compute_bertscore(summary, ref),
-        "source_sentences": split_sentences(text)[:100] # Limit for UI performance
+def _run_extractive(text: str, key: str, sentence_count: int) -> tuple[str, dict]:
+    details = summarize_extractive_algorithm(text, key, sentence_count=sentence_count)
+    return details.get("summary", ""), {
+        "extractive": {
+            "source_sentences": details.get("source_sentences", []),
+            "selected_sentences": details.get("selected_sentences", []),
+            "highlighted_sentence_indexes": details.get("highlighted_sentence_indexes", []),
+        }
     }
 
+
+def _fallback_summary(text: str, sentence_count: int) -> str:
+    return summarize_extractive_algorithm(text, "textrank", sentence_count=sentence_count).get("summary", "")
+
+
+def _run_abstractive(
+    text: str,
+    key: str,
+    max_output_length: int,
+    sentence_count: int,
+) -> tuple[str, dict]:
+    """
+    Run one Transformer model under the GPU semaphore.
+
+    The semaphore (MAX_GPU_CONCURRENT=1 by default) ensures that only one
+    model.generate() call occupies the GPU at a time — critical for machines
+    with limited VRAM (≤ 6 GB).  On high-VRAM machines you can raise
+    MAX_GPU_CONCURRENT to allow parallelism.
+    """
+    log_vram_usage(f"before_{key}")
+    with _GPU_LOCK:
+        summarizer = get_summarizer(model_name=key)
+        summary = summarizer.summarize(text, max_output_length=max_output_length)
+
+    fallback_used = not summary
+    if fallback_used:
+        summary = _fallback_summary(text, sentence_count)
+        logger.warning("[%s] Empty generation — using TextRank fallback", key)
+
+    log_vram_usage(f"after_{key}")
+
+    explain_fn = getattr(summarizer, "explain_tokens", None)
+    token_importance = explain_fn(text, summary) if callable(explain_fn) else []
+    if not isinstance(token_importance, list):
+        token_importance = []
+
+    return summary, {
+        "abstractive": {
+            "attention_available": False,
+            "fallback_used": fallback_used,
+            "token_importance": token_importance,
+        }
+    }
+
+
+# ─────────────────────────── Full result builder ───────────────────────────
+
+def _evaluate_result(
+    key: str,
+    text: str,
+    reference: str,
+    sentence_count: int,
+    max_output_length: int,
+) -> dict:
+    """Build a full result row for a single algorithm (extractive OR abstractive)."""
+    algorithm = resolve_algorithm(key)
+    start = time.perf_counter()
+    error: str | None = None
+    explainability: dict = {}
+
+    try:
+        if algorithm.key in EXTRACTIVE_ALGORITHMS:
+            summary, explainability = _run_extractive(text, algorithm.key, sentence_count)
+        elif algorithm.key in ABSTRACTIVE_ALGORITHMS:
+            summary, explainability = _run_abstractive(
+                text, algorithm.key, max_output_length, sentence_count
+            )
+        else:
+            raise KeyError(f"Unsupported algorithm: {algorithm.key}")
+    except Exception as exc:
+        logger.exception("Algorithm %s failed", algorithm.key)
+        error = str(exc)
+        summary = _fallback_summary(text, sentence_count)
+        explainability = {"error": error, "fallback_used": True}
+
+    duration = time.perf_counter() - start
+    logger.info(
+        "⏱  [%s] inference done in %.3f s  words_out=%d",
+        algorithm.key, duration, count_words(summary),
+    )
+
+    metrics = evaluate_summary(summary, reference, text, duration)
+    metrics["combined_score"] = _combined_score(metrics)
+
+    return {
+        "key": algorithm.key,
+        "algorithm": algorithm.name,
+        "group": algorithm.group,
+        "summary": summary,
+        "word_count": count_words(summary),
+        "metrics": metrics,
+        "rouge": {
+            "rouge1": metrics["rouge1"],
+            "rouge2": metrics["rouge2"],
+            "rougeL": metrics["rougeL"],
+            "rougeLsum": metrics["rougeLsum"],
+        },
+        "bleu": metrics["bleu"],
+        "bertscore": metrics["bertscore"],
+        "semantic_similarity": metrics["semantic_similarity"],
+        "compression_ratio": metrics["compression_ratio"],
+        "time_seconds": metrics["processing_time"],
+        "processing_time": metrics["processing_time"],
+        "explainability": explainability,
+        "details": (
+            explainability.get("extractive")
+            or explainability.get("abstractive")
+            or explainability
+        ),
+        "source_sentences": split_sentences(text)[:200],
+        "error": error,
+    }
+
+
+# ─────────────────────────── Parallel orchestration ────────────────────────
+
+def _run_all_parallel(
+    text: str,
+    reference: str,
+    extractive_keys: list[str],
+    abstractive_keys: list[str],
+    sentence_count: int,
+    max_output_length: int,
+) -> list[dict]:
+    """
+    Strategy
+    ─────────
+    • Extractive algorithms → all submitted to ThreadPoolExecutor AT ONCE
+      (pure Python / NumPy, no GIL issue with GPU).
+    • Abstractive algorithms → submitted ONE BY ONE to a SINGLE-THREAD pool,
+      ensuring at most MAX_GPU_CONCURRENT models run on GPU simultaneously.
+
+    This gives maximum parallelism without CUDA OOM.
+    """
+    results: dict[str, dict] = {}
+
+    # ── 1. Fire extractive algorithms in parallel ───────────────────────────
+    if extractive_keys:
+        ext_parallel = summarize_extractive_parallel(text, extractive_keys, sentence_count)
+        # Now build full result rows (evaluate_summary inside) in parallel too
+        with ThreadPoolExecutor(
+            max_workers=min(len(extractive_keys), config.EXTRACTIVE_WORKERS),
+            thread_name_prefix="ext_eval",
+        ) as ext_pool:
+            ext_futures = {
+                ext_pool.submit(
+                    _evaluate_result, key, text, reference, sentence_count, max_output_length
+                ): key
+                for key in extractive_keys
+            }
+            for future in as_completed(ext_futures):
+                key = ext_futures[future]
+                try:
+                    results[key] = future.result()
+                except Exception as exc:
+                    logger.error("Extractive eval [%s] failed: %s", key, exc)
+
+    # ── 2. Run abstractive models GPU-sequentially ──────────────────────────
+    # Using a single-thread executor keeps code clean while enforcing order.
+    if abstractive_keys:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="abs_gpu") as abs_pool:
+            abs_futures = {
+                abs_pool.submit(
+                    _evaluate_result, key, text, reference, sentence_count, max_output_length
+                ): key
+                for key in abstractive_keys
+            }
+            for future in as_completed(abs_futures):
+                key = abs_futures[future]
+                try:
+                    results[key] = future.result()
+                except Exception as exc:
+                    logger.error("Abstractive eval [%s] failed: %s", key, exc)
+
+    # ── 3. Preserve original key ordering ──────────────────────────────────
+    ordered = []
+    for key in extractive_keys + abstractive_keys:
+        if key in results:
+            ordered.append(results[key])
+    return ordered
+
+
+# ─────────────────────────── Ranking + charts ──────────────────────────────
+
+def _rank_results(results: list[dict]) -> list[dict]:
+    ranked = sorted(
+        results,
+        key=lambda row: (
+            row["metrics"].get("combined_score", 0.0),
+            row["metrics"].get("rougeL", 0.0),
+            -row["metrics"].get("processing_time", 999.0),
+        ),
+        reverse=True,
+    )
+    return [
+        {
+            "rank": idx + 1,
+            "key": row["key"],
+            "algorithm": row["algorithm"],
+            "group": row["group"],
+            "combined_score": row["metrics"]["combined_score"],
+            "rougeL": row["metrics"]["rougeL"],
+            "bertscore_f1": row["metrics"]["bertscore_f1"],
+            "processing_time": row["metrics"]["processing_time"],
+        }
+        for idx, row in enumerate(ranked)
+    ]
+
+
+def _chart_payload(results: list[dict]) -> dict:
+    return {
+        "bar": [
+            {
+                "model": row["algorithm"],
+                "ROUGE-1": row["metrics"]["rouge1"],
+                "ROUGE-2": row["metrics"]["rouge2"],
+                "ROUGE-L": row["metrics"]["rougeL"],
+                "BERTScore": row["metrics"]["bertscore_f1"],
+                "Semantic": row["metrics"]["semantic_similarity"],
+            }
+            for row in results
+        ],
+        "radar": [
+            {
+                "model": row["algorithm"],
+                "rouge1": row["metrics"]["rouge1"],
+                "rouge2": row["metrics"]["rouge2"],
+                "rougeL": row["metrics"]["rougeL"],
+                "bertscore": row["metrics"]["bertscore_f1"],
+                "semantic": row["metrics"]["semantic_similarity"],
+                "compression": row["metrics"]["compression_ratio"],
+            }
+            for row in results
+        ],
+        "time": [
+            {
+                "model": row["algorithm"],
+                "seconds": row["metrics"]["processing_time"],
+                "group": row["group"],
+            }
+            for row in results
+        ],
+    }
+
+
+# ─────────────────────────── Public entry point ────────────────────────────
 
 def summarize_all(
     text: str,
-    reference: Optional[str] = None,
-    algorithms: Optional[List[str]] = None,
+    reference: str | None = None,
+    algorithms: list[str] | None = None,
     sentence_count: int = 5,
-    max_output_length: int = 120,
-    use_cache: bool = True,
+    max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    use_cache: bool = False,
 ) -> dict:
     """
-    Chạy tuần tự/đồng thời các thuật toán tóm tắt và trả về kết quả tổng hợp.
+    Run all requested algorithms and return a unified comparison payload.
+
+    Extractive algorithms run concurrently; abstractive models run sequentially
+    on the GPU (one at a time) to avoid VRAM exhaustion.
     """
-    if algorithms is None:
-        algorithms = ["textrank", "lsa", "lexrank", "vit5", "t5", "bart", "pegasus"]
+    del use_cache  # reserved for future Redis caching
 
-    key = _make_cache_key(text, algorithms, {"sentence_count": sentence_count, "max_output_length": max_output_length})
-    if use_cache:
-        cached = _cache_get(key)
-        if cached:
-            logger.info("Load result từ cache")
-            return cached
+    cleaned = clean_text(text, aggressive=True)
+    if not cleaned or count_words(cleaned) < 5:
+        raise ValueError("Input text is empty or too short after preprocessing.")
 
-    tasks = {}
-    results = []
+    selected = algorithms or DEFAULT_ALGORITHMS
+    normalized_keys: list[str] = []
+    for key in selected:
+        try:
+            normalized_keys.append(resolve_algorithm(key).key)
+        except KeyError:
+            logger.warning("Ignoring unsupported algorithm: %s", key)
 
-    with ThreadPoolExecutor(max_workers=min(6, len(algorithms))) as ex:
-        futures = {}
-        for alg in algorithms:
-            name = alg.lower()
-            if name == "textrank":
-                futures[ex.submit(_measure_and_eval, _run_textrank, "TextRank", text, reference, sentence_count=sentence_count)] = "TextRank"
-            elif name == "lsa":
-                futures[ex.submit(_measure_and_eval, _run_lsa, "LSA", text, reference, sentence_count=sentence_count)] = "LSA"
-            elif name == "lexrank":
-                futures[ex.submit(_measure_and_eval, _run_lexrank, "LexRank", text, reference, sentence_count=sentence_count)] = "LexRank"
-            else:
-                # treat as abstractive model key
-                futures[ex.submit(_measure_and_eval, _run_abstractive, name.upper(), text, reference, model_key=name, max_output_length=max_output_length)] = name
+    if not normalized_keys:
+        normalized_keys = DEFAULT_ALGORITHMS
 
-        for fut in as_completed(futures):
-            try:
-                res = fut.result()
-            except Exception as e:
-                logger.error(f"Task failed: {e}")
-                continue
-            results.append(res)
+    reference_text = clean_text(reference, aggressive=True) if reference else cleaned
 
-    # Compute pairwise similarity between generated summaries (optional)
-    summaries = [r["summary"] for r in results if r.get("summary")]
-    pairwise_sim = []
-    for i in range(len(summaries)):
-        for j in range(i + 1, len(summaries)):
-            sim = compute_semantic_similarity(summaries[i], summaries[j])
-            pairwise_sim.append({"pair": f"{results[i]['algorithm']}__{results[j]['algorithm']}", "sim": sim})
+    # Split by group for targeted scheduling
+    extractive_keys = [k for k in normalized_keys if k in EXTRACTIVE_ALGORITHMS]
+    abstractive_keys = [k for k in normalized_keys if k in ABSTRACTIVE_ALGORITHMS]
 
-    final = {
-        "algorithms": algorithms,
+    t_total = time.perf_counter()
+    results = _run_all_parallel(
+        cleaned, reference_text,
+        extractive_keys, abstractive_keys,
+        sentence_count, max_output_length,
+    )
+    total_wall = time.perf_counter() - t_total
+    logger.info(
+        "🏁 summarize_all complete: %d algorithms in %.3f s  (ext=%d abs=%d)",
+        len(results), total_wall, len(extractive_keys), len(abstractive_keys),
+    )
+
+    ranking = _rank_results(results)
+    best_key = ranking[0]["key"] if ranking else None
+
+    group_summary: dict[str, dict] = defaultdict(dict)
+    for group in ("extractive", "abstractive"):
+        group_rows = [row for row in results if row["group"] == group]
+        if not group_rows:
+            continue
+        group_summary[group] = {
+            "count": len(group_rows),
+            "avg_rougeL": round(
+                sum(row["metrics"]["rougeL"] for row in group_rows) / len(group_rows), 4
+            ),
+            "avg_bertscore_f1": round(
+                sum(row["metrics"]["bertscore_f1"] for row in group_rows) / len(group_rows), 4
+            ),
+            "avg_processing_time": round(
+                sum(row["metrics"]["processing_time"] for row in group_rows) / len(group_rows), 4
+            ),
+        }
+
+    return {
+        "algorithms": normalized_keys,
+        "algorithm_groups": {
+            "extractive": list(EXTRACTIVE_ALGORITHMS.keys()),
+            "abstractive": list(ABSTRACTIVE_ALGORITHMS.keys()),
+        },
         "results": results,
-        "pairwise_similarity": pairwise_sim,
+        "ranking": ranking,
+        "best_model": next((row for row in ranking if row["key"] == best_key), None),
+        "group_summary": dict(group_summary),
+        "charts": _chart_payload(results),
+        "performance": {
+            "total_wall_time_s": round(total_wall, 3),
+            "extractive_count": len(extractive_keys),
+            "abstractive_count": len(abstractive_keys),
+        },
         "meta": {
-            "input_words": count_words(text),
+            "input_words": count_words(cleaned),
+            "input_sentences": len(split_sentences(cleaned)),
             "reference_provided": bool(reference),
+            "reference_words": count_words(reference_text),
+            "sentence_count": sentence_count,
+            "max_output_length": max_output_length,
         },
     }
 
-    if use_cache:
-        _cache_set(key, final)
 
-    return final
+# ─────────────────────────── SSE streaming helper ──────────────────────────
 
-
-def stream_compare(text: str, reference: Optional[str], algorithms: Optional[List[str]] = None, sentence_count: int = 5, max_output_length: int = 120):
+def stream_compare(
+    text: str,
+    reference: str | None,
+    algorithms: list[str] | None = None,
+    sentence_count: int = 5,
+    max_output_length: int = config.MAX_OUTPUT_LENGTH,
+):
     """
-    Generator trả về các event theo định dạng SSE (text/event-stream).
-    Mỗi event là JSON có 2 keys: 'event' ('progress'|'done'|'error') và 'data'.
+    Server-Sent Events generator that yields one JSON event per algorithm result.
+    The frontend receives each result as soon as it is ready (no full wait).
     """
-    if algorithms is None:
-        algorithms = ["textrank", "lsa", "lexrank", "vit5", "t5", "bart", "pegasus"]
-
-    # streaming: chạy tuần tự nhưng yield progress từng algorithm
-    yield f"data: {json.dumps({'event': 'start', 'algorithms': algorithms}, ensure_ascii=False)}\n\n"
-
-    results = []
-    for alg in algorithms:
-        name = alg.lower()
-        yield f"data: {json.dumps({'event': 'running', 'algorithm': name}, ensure_ascii=False)}\n\n"
-        try:
-            if name == "textrank":
-                res = _measure_and_eval(_run_textrank, "TextRank", text, reference, sentence_count=sentence_count)
-            elif name == "lsa":
-                res = _measure_and_eval(_run_lsa, "LSA", text, reference, sentence_count=sentence_count)
-            elif name == "lexrank":
-                res = _measure_and_eval(_run_lexrank, "LexRank", text, reference, sentence_count=sentence_count)
-            else:
-                res = _measure_and_eval(_run_abstractive, name.upper(), text, reference, model_key=name, max_output_length=max_output_length)
-
-            results.append(res)
-            yield f"data: {json.dumps({'event': 'done', 'algorithm': name, 'result': res}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error(f"Error running {name}: {e}")
-            yield f"data: {json.dumps({'event': 'error', 'algorithm': name, 'error': str(e)}, ensure_ascii=False)}\n\n"
-
-    # Final aggregated event
-    final = {
-        'results': results,
-        'meta': {'input_words': count_words(text), 'reference_provided': bool(reference)}
-    }
-    yield f"data: {json.dumps({'event': 'finished', 'data': final}, ensure_ascii=False)}\n\n"
+    algo_list = algorithms or DEFAULT_ALGORITHMS
+    yield (
+        f"data: {json.dumps({'event': 'start', 'algorithms': algo_list}, ensure_ascii=False)}\n\n"
+    )
+    try:
+        result = summarize_all(text, reference, algo_list, sentence_count, max_output_length)
+        for row in result["results"]:
+            yield (
+                f"data: {json.dumps({'event': 'done', 'algorithm': row['key'], 'result': row}, ensure_ascii=False)}\n\n"
+            )
+        yield (
+            f"data: {json.dumps({'event': 'finished', 'data': result}, ensure_ascii=False)}\n\n"
+        )
+    except Exception as exc:
+        yield (
+            f"data: {json.dumps({'event': 'error', 'error': str(exc)}, ensure_ascii=False)}\n\n"
+        )

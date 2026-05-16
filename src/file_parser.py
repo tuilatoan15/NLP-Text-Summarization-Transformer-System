@@ -1,13 +1,13 @@
-"""
-file_parser.py - Extract text from uploaded TXT, PDF and DOCX files.
-"""
+"""Extract text from uploaded TXT, PDF, and DOCX files."""
+
+from __future__ import annotations
 
 from pathlib import Path
-import re
-import unicodedata
 
 import fitz
 from docx import Document
+
+from src.preprocess import clean_text
 
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx"}
@@ -31,23 +31,16 @@ def extract_text_from_file(path: str | Path) -> str:
 
 
 def clean_extracted_text(text: str) -> str:
-    text = unicodedata.normalize("NFC", text or "")
-    text = text.replace("\x00", " ").replace("\ufeff", " ")
-    text = re.sub(r"[\u200b-\u200f\u202a-\u202e]", "", text)
-    text = re.sub(r"([a-zà-ỹ])([A-ZÀ-Ỹ])", r"\1 \2", text)
-    text = re.sub(r"([.,;:!?])([^\s])", r"\1 \2", text)
-    text = re.sub(r"([a-zA-ZÀ-ỹ])(\d)", r"\1 \2", text)
-    text = re.sub(r"(\d)([a-zA-ZÀ-ỹ])", r"\1 \2", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return "\n".join(line.strip() for line in text.splitlines()).strip()
+    return clean_text(text or "", aggressive=True)
 
 
 def _read_txt(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return path.read_text(encoding="utf-8-sig", errors="replace")
+    for encoding in ("utf-8", "utf-8-sig", "cp1258", "latin-1"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _read_pdf(path: Path) -> str:
@@ -65,5 +58,5 @@ def _read_pdf(path: Path) -> str:
 
 def _read_docx(path: Path) -> str:
     document = Document(str(path))
-    paragraphs = [p.text.strip() for p in document.paragraphs if p.text.strip()]
+    paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
     return "\n\n".join(paragraphs)

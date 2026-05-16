@@ -1,154 +1,207 @@
-"""
-utils.py — Các hàm tiện ích dùng chung trong toàn hệ thống.
-Bao gồm: logging, đọc/ghi file, định dạng output.
-"""
+"""Shared utilities: logging, file I/O, text statistics, GPU diagnostics."""
 
-import logging
-import os
+from __future__ import annotations
+
 import json
+import logging
+import sys
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Generator
+
 from src import config
 
 
-# ==============================================================================
-# LOGGING SETUP
-# ==============================================================================
+# ─────────────────────────── stdout encoding ───────────────────────────────
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
-def setup_logger(name: str = "nlp_summarizer", level: str = None) -> logging.Logger:
-    """
-    Tạo và cấu hình logger có định dạng rõ ràng cho toàn hệ thống.
-    
-    Args:
-        name: Tên logger (mặc định: 'nlp_summarizer')
-        level: Mức độ log (mặc định: INFO)
-    
-    Returns:
-        Logger đã được cấu hình
-    """
+
+# ─────────────────────────── Logger setup ──────────────────────────────────
+
+def setup_logger(name: str = "nlp_summarizer", level: str | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
-    
-    # Tránh thêm handler trùng lặp khi gọi lại hàm
     if logger.handlers:
         return logger
 
-    if level is None:
-        level_str = config.LOG_LEVEL.upper()
-        level = getattr(logging, level_str, logging.INFO)
-    
-    logger.setLevel(level)
+    numeric_level = getattr(logging, (level or config.LOG_LEVEL).upper(), logging.INFO)
+    logger.setLevel(numeric_level)
+    logger.propagate = False
 
-    # Định dạng log: thời gian | tên | cấp độ | nội dung
     formatter = logging.Formatter(
         fmt="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Handler ra console
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # Handler ra file log (lưu vào thư mục logs/)
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"summarizer_{datetime.now().strftime('%Y%m%d')}.log"
+    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = config.LOG_DIR / f"summarizer_{datetime.now().strftime('%Y%m%d')}.log"
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-
     return logger
 
 
-# Tạo logger mặc định để import ở các module khác
 logger = setup_logger()
 
 
-# ==============================================================================
-# FILE I/O
-# ==============================================================================
+# ─────────────────────────── GPU diagnostics ───────────────────────────────
 
-def read_text_file(filepath: str, encoding: str = "utf-8") -> str:
-    """Đọc nội dung một file văn bản."""
-    with open(filepath, "r", encoding=encoding) as f:
-        return f.read()
-
-
-def write_text_file(filepath: str, content: str, encoding: str = "utf-8") -> None:
-    """Ghi nội dung ra file văn bản, tạo thư mục nếu chưa có."""
-    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding=encoding) as f:
-        f.write(content)
-    logger.info(f"Đã ghi file: {filepath}")
-
-
-def load_json(filepath: str) -> dict:
-    """Đọc file JSON và trả về dict."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_json(data: dict, filepath: str, indent: int = 2) -> None:
-    """Lưu dict ra file JSON."""
-    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=indent)
-    logger.info(f"Đã lưu JSON: {filepath}")
+def get_device_info() -> dict:
+    """Return a dict describing the current compute device and VRAM status."""
+    info: dict[str, Any] = {"device": "cpu", "cuda_available": False}
+    try:
+        import torch
+        info["cuda_available"] = torch.cuda.is_available()
+        if torch.cuda.is_available():
+            idx = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(idx)
+            total_mb = props.total_memory / 1024 ** 2
+            reserved_mb = torch.cuda.memory_reserved(idx) / 1024 ** 2
+            allocated_mb = torch.cuda.memory_allocated(idx) / 1024 ** 2
+            info.update(
+                device=f"cuda:{idx}",
+                gpu_name=props.name,
+                total_vram_mb=round(total_mb, 1),
+                reserved_vram_mb=round(reserved_mb, 1),
+                allocated_vram_mb=round(allocated_mb, 1),
+                free_vram_mb=round(total_mb - reserved_mb, 1),
+                torch_version=torch.__version__,
+            )
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
 
 
-# ==============================================================================
-# TEXT UTILITIES
-# ==============================================================================
+def log_device_info() -> None:
+    """Log current GPU/CPU status to console."""
+    info = get_device_info()
+    if info.get("cuda_available"):
+        logger.info(
+            "🚀 GPU detected: %s | VRAM total=%.0f MB  free=%.0f MB",
+            info.get("gpu_name"),
+            info.get("total_vram_mb", 0),
+            info.get("free_vram_mb", 0),
+        )
+    else:
+        logger.info("⚠️  No GPU found — running on CPU (inference will be slower)")
+
+
+def log_vram_usage(tag: str = "") -> None:
+    """Log current VRAM usage at a given checkpoint tag."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        idx = torch.cuda.current_device()
+        alloc = torch.cuda.memory_allocated(idx) / 1024 ** 2
+        reserved = torch.cuda.memory_reserved(idx) / 1024 ** 2
+        logger.debug(
+            "VRAM [%s]: allocated=%.0f MB  reserved=%.0f MB",
+            tag or "checkpoint",
+            alloc,
+            reserved,
+        )
+    except Exception:
+        pass
+
+
+def clear_gpu_cache() -> None:
+    """Release fragmented CUDA memory back to the allocator."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except Exception:
+        pass
+
+
+@contextmanager
+def timer(label: str = "operation") -> Generator[None, None, None]:
+    """Context manager that logs wall-clock time of a block."""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - start
+        logger.info("⏱  %s completed in %.3f s", label, elapsed)
+
+
+# ─────────────────────────── File helpers ──────────────────────────────────
+
+def ensure_dir(path: str | Path) -> str:
+    Path(path).mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def read_text_file(filepath: str | Path, encoding: str = "utf-8") -> str:
+    return Path(filepath).read_text(encoding=encoding)
+
+
+def write_text_file(filepath: str | Path, content: str, encoding: str = "utf-8") -> None:
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding=encoding)
+    logger.info("Wrote text file: %s", path)
+
+
+def load_json(filepath: str | Path) -> dict:
+    return json.loads(Path(filepath).read_text(encoding="utf-8"))
+
+
+def save_json(data: Any, filepath: str | Path, indent: int = 2) -> None:
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=indent), encoding="utf-8")
+    logger.info("Saved JSON: %s", path)
+
+
+# ─────────────────────────── Text statistics ───────────────────────────────
 
 def count_words(text: str) -> int:
-    """Đếm số từ trong đoạn văn (tách bằng khoảng trắng)."""
     return len(text.split()) if text else 0
 
 
 def count_sentences(text: str) -> int:
-    """Đếm sơ bộ số câu dựa trên dấu câu kết thúc (.!?)."""
-    import re
-    sentences = re.split(r'[.!?]+', text)
-    return len([s for s in sentences if s.strip()])
+    from src.preprocess import split_sentences
+    return len(split_sentences(text))
 
 
 def truncate_text(text: str, max_words: int = 512) -> str:
-    """
-    Cắt ngắn văn bản theo số từ tối đa.
-    Dùng để đảm bảo đầu vào không vượt quá giới hạn token của model.
-    """
     words = text.split()
     if len(words) <= max_words:
         return text
-    truncated = " ".join(words[:max_words])
-    logger.warning(f"Văn bản đã bị cắt ngắn từ {len(words)} xuống {max_words} từ.")
-    return truncated
+    logger.warning("Truncated text from %s to %s words", len(words), max_words)
+    return " ".join(words[:max_words])
+
+
+def compression_ratio(summary: str, source: str) -> float:
+    return round(count_words(summary) / max(1, count_words(source)), 4)
 
 
 def format_scores(scores: dict) -> str:
-    """Định dạng dict điểm ROUGE để hiển thị ra console rõ ràng."""
-    lines = ["=" * 40, "📊 ROUGE SCORES:", "=" * 40]
-    for key, value in scores.items():
-        lines.append(f"  {key:12s}: {value:.4f}")
-    lines.append("=" * 40)
-    return "\n".join(lines)
+    rows = ["ROUGE scores"]
+    rows.extend(f"{key}: {float(value):.4f}" for key, value in scores.items())
+    return "\n".join(rows)
 
 
-def ensure_dir(path: str) -> str:
-    """Tạo thư mục nếu chưa tồn tại, trả về path."""
-    Path(path).mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def clear_cache():
-    """Xóa toàn bộ file cache trong thư mục cache/."""
-    cache_path = Path(config.CACHE_DIR)
-    if not cache_path.exists():
-        return
+def clear_cache() -> int:
     count = 0
-    for f in cache_path.glob("**/*"):
-        if f.is_file():
-            f.unlink()
+    cache_path = config.CACHE_DIR
+    if not cache_path.exists():
+        return count
+    for path in cache_path.rglob("*"):
+        if path.is_file():
+            path.unlink()
             count += 1
-    logger.info(f"Đã dọn dẹp cache: {count} files bị xóa.")
+    logger.info("Cleared %s cache files", count)
     return count

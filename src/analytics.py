@@ -165,7 +165,7 @@ def get_visualization_data() -> dict:
         if not model and r.get("results"):
             # take names from results
             for alg in r["results"]:
-                m = alg.get("algorithm") or alg.get("algorithm")
+                m = alg.get("algorithm")
                 if m:
                     model_buckets.setdefault(m, {"rougeL": [], "time": [], "length": []})
                     rouge = alg.get("rouge") or {}
