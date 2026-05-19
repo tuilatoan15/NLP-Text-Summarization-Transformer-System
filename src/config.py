@@ -22,7 +22,7 @@ for _path in (DATA_DIR, CACHE_DIR, MODEL_DIR, RESULTS_DIR, UPLOAD_DIR, LOG_DIR, 
 
 # ─────────────────────────── API ───────────────────────────
 API_TITLE = "Vietnamese Summarization Research API"
-API_VERSION = "3.1.0"
+API_VERSION = "3.2.0"
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 
@@ -42,32 +42,99 @@ MIN_OUTPUT_LENGTH = int(os.getenv("MIN_OUTPUT_LENGTH", "20"))
 NUM_BEAMS = int(os.getenv("NUM_BEAMS", "4"))
 NO_REPEAT_NGRAM_SIZE = int(os.getenv("NO_REPEAT_NGRAM_SIZE", "3"))
 
+# ─────────────────────────── PER-MODEL GENERATION CONFIGS ──
+# Tuned individually to maximise output quality per architecture.
+# Keys must match ABSTRACTIVE_ALGORITHMS keys in model_registry.py
+GENERATION_CONFIGS: dict[str, dict] = {
+    # ViT5: fine-tuned Vietnamese T5 — prone to repetition loops, use aggressive
+    # deduplication (ngram_size=4, penalty=2.0) with conservative beam count.
+    "vit5": dict(
+        max_new_tokens=80,
+        min_new_tokens=15,
+        num_beams=2,
+        no_repeat_ngram_size=4,
+        repetition_penalty=2.0,
+        length_penalty=1.0,
+        early_stopping=True,
+        do_sample=False,
+    ),
+    # mT5: multilingual T5 — vocab mismatch makes beam search unstable;
+    # sampling is more robust for this checkpoint.
+    "mt5": dict(
+        max_new_tokens=80,
+        min_new_tokens=10,
+        num_beams=2,
+        no_repeat_ngram_size=3,
+        repetition_penalty=1.5,
+        length_penalty=1.0,
+        early_stopping=True,
+        do_sample=False,
+    ),
+    # BARTPho: syllable-level Vietnamese BART — most stable, allow longer output.
+    "bartpho": dict(
+        max_new_tokens=120,
+        min_new_tokens=20,
+        num_beams=4,
+        no_repeat_ngram_size=3,
+        repetition_penalty=1.2,
+        length_penalty=1.0,
+        early_stopping=True,
+        do_sample=False,
+    ),
+}
+
+# Default fallback generation config (used if a key is missing above)
+DEFAULT_GENERATION_CONFIG: dict = dict(
+    max_new_tokens=MAX_OUTPUT_LENGTH,
+    min_new_tokens=MIN_OUTPUT_LENGTH,
+    num_beams=NUM_BEAMS,
+    no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
+    repetition_penalty=1.15,
+    length_penalty=1.0,
+    early_stopping=True,
+    do_sample=False,
+)
+
+# ─────────────────────────── mT5 EXPERIMENTAL ──────────────
+# mT5 uses a multilingual tokenizer; vocab mismatch after resize can produce
+# non-Vietnamese artifacts. If ratio of ASCII/latin chars exceeds this threshold
+# in the generated output, the model is flagged as "experimental" in the response.
+MT5_EXPERIMENTAL = os.getenv("MT5_EXPERIMENTAL", "1") == "1"
+MT5_LATIN_RATIO_THRESHOLD = float(os.getenv("MT5_LATIN_RATIO_THRESHOLD", "0.35"))
+
 # ─────────────────────────── GPU / DEVICE ──────────────────
-# Preload all models on startup to avoid per-request cold-start latency
 PRELOAD_MODELS = os.getenv("PRELOAD_MODELS", "1") == "1"
-
-# Maximum VRAM (GB) allowed before switching to sequential GPU scheduling
-# Set lower on machines with < 8 GB VRAM
 GPU_VRAM_LIMIT_GB = float(os.getenv("GPU_VRAM_LIMIT_GB", "4.0"))
-
-# Whether to use fp16 inference (requires GPU)
-USE_FP16 = os.getenv("USE_FP16", "auto")  # "auto" | "1" | "0"
-
-# torch.compile — enabled on PyTorch >= 2 for ~20-40% speedup after warm-up
+USE_FP16 = os.getenv("USE_FP16", "auto")   # "auto" | "1" | "0"
 USE_TORCH_COMPILE = os.getenv("USE_TORCH_COMPILE", "0") == "1"
-
-# Number of worker threads for extractive parallel inference
 EXTRACTIVE_WORKERS = int(os.getenv("EXTRACTIVE_WORKERS", "3"))
-
-# Maximum concurrent Transformer models on GPU (to avoid OOM)
 MAX_GPU_CONCURRENT = int(os.getenv("MAX_GPU_CONCURRENT", "1"))
+
+# ─────────────────────────── EVALUATION FAIRNESS ───────────
+# When True, ROUGE/BLEU are computed even when source text is used as reference.
+# Setting to False disables overlap metrics in that case (recommended for research).
+ALLOW_SOURCE_AS_REFERENCE = os.getenv("ALLOW_SOURCE_AS_REFERENCE", "0") == "1"
+
+# When no real reference is available, only these metrics are used for ranking.
+NO_REFERENCE_RANKING_WEIGHTS: dict[str, float] = {
+    "bertscore_f1": 0.45,
+    "semantic_similarity": 0.35,
+    "compression_score": 0.20,
+}
+
+# Weights used when a REAL reference summary is available.
+WITH_REFERENCE_RANKING_WEIGHTS: dict[str, float] = {
+    "rougeL": 0.25,
+    "rouge2": 0.15,
+    "bertscore_f1": 0.30,
+    "semantic_similarity": 0.20,
+    "compression_score": 0.10,
+}
 
 # ─────────────────────────── METRICS ───────────────────────
 BERTSCORE_MODEL = os.getenv("BERTSCORE_MODEL", "bert-base-multilingual-cased")
 BERTSCORE_LANG = os.getenv("BERTSCORE_LANG", "vi")
 SBERT_MODEL = os.getenv("SBERT_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-
-# Run heavy metrics (BERTScore, Semantic Sim) synchronously or skip if too slow
 HEAVY_METRICS_TIMEOUT = float(os.getenv("HEAVY_METRICS_TIMEOUT", "30.0"))
 
 # ─────────────────────────── TRAINING ──────────────────────
@@ -81,3 +148,4 @@ WARMUP_STEPS = int(os.getenv("WARMUP_STEPS", "100"))
 
 # ─────────────────────────── LOGGING ───────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+

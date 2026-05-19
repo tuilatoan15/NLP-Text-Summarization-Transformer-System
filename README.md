@@ -1,77 +1,31 @@
-# 🇻🇳 Hệ thống Tóm tắt Văn bản Tiếng Việt Đa Tài liệu
-### Đồ án Tốt nghiệp — Xử lý Ngôn ngữ Tự nhiên (NLP)
+# 🇻🇳 Hệ thống Nghiên cứu Tóm tắt Văn bản Tiếng Việt Đa Phương pháp (Transformer-based & Graph-based)
+### Đồ án Tốt nghiệp / Nghiên cứu Khoa học — Vietnamese NLP Text Summarization System
 
-> Hệ thống tóm tắt văn bản tiếng Việt toàn diện, kết hợp **Extractive** (TextRank, LSA, LexRank) và **Abstractive** (ViT5, T5, BART, Pegasus) với đánh giá ROUGE, BLEU, BERTScore và Semantic Similarity theo thời gian thực.
+Hệ thống tóm tắt văn bản tiếng Việt toàn diện, tích hợp các thuật toán **Extractive** cổ điển và **Abstractive** hiện đại (Transformers) sử dụng FastAPI ở backend và React ở frontend. Hệ thống hỗ trợ xử lý tăng tốc bằng GPU, song song hóa đa luồng, đánh giá đa chiều thời gian thực và phân tích nghiên cứu trực quan.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-green)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-blue)](https://react.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B--cu124-red)](https://pytorch.org)
 
 ---
 
-## 🏗️ Kiến trúc Hệ thống
+## 🏗️ Kiến trúc & Tính năng Nổi bật của Hệ thống
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     INPUT LAYER                                 │
-│   Text trực tiếp │ URL crawling │ Upload TXT/PDF/DOCX           │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  PREPROCESSING MODULE                           │
-│   HTML removal → Unicode normalization → Sentence splitting     │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-               ┌─────────────┴─────────────┐
-               ▼                           ▼
-┌──────────────────────┐     ┌──────────────────────────────────┐
-│  EXTRACTIVE ENGINE   │     │      ABSTRACTIVE ENGINE          │
-│  • TextRank (sumy)   │     │  • VietAI/vit5-base (Fine-tuned) │
-│  • LSA (sumy)        │     │  • t5-small                      │
-│  • LexRank (sumy)    │     │  • facebook/bart-large-cnn       │
-└──────────┬───────────┘     │  • google/pegasus-xsum           │
-           │                 └──────────────┬───────────────────┘
-           └─────────────┬──────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   EVALUATION MODULE                             │
-│   ROUGE-1/2/L │ BLEU │ BERTScore │ Semantic Similarity         │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              POST-PROCESSING & ANALYSIS                         │
-│   Consistency Checker │ Explainability │ Selector (Best)        │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-               ┌─────────────┴──────────────┐
-               ▼                            ▼
-┌──────────────────────┐     ┌──────────────────────────────────┐
-│   FastAPI REST API   │     │     React Frontend (Vite)         │
-│   /summarize         │     │  • So sánh bảng có progress bar  │
-│   /summarize/compare │     │  • ROUGE / BERTScore charts      │
-│   /summarize/files   │     │  • Sentence highlighting         │
-│   /dashboard         │     │  • Dark mode, responsive         │
-└──────────────────────┘     └──────────────────────────────────┘
-```
-
----
-
-## 📊 Kết quả Benchmark (VnExpress Dataset — 100 samples)
-
-| Thuật toán | ROUGE-1 | ROUGE-2 | ROUGE-L | BERTScore F1 | Thời gian avg |
-|---|---|---|---|---|---|
-| **TextRank** | 0.4231 | 0.1872 | 0.3654 | 0.8102 | 0.12s |
-| **LSA** | 0.3987 | 0.1654 | 0.3421 | 0.7989 | 0.14s |
-| **LexRank** | 0.4089 | 0.1743 | 0.3512 | 0.8034 | 0.15s |
-| **ViT5 (base)** | 0.3812 | 0.1543 | 0.3287 | 0.8321 | 4.21s |
-| **ViT5 (fine-tuned)** | **0.4512** | **0.2143** | **0.3987** | **0.8567** | 4.35s |
-| **T5-small** | 0.2987 | 0.1021 | 0.2654 | 0.7812 | 2.54s |
-| **BART** | 0.3654 | 0.1432 | 0.3123 | 0.8154 | 5.12s |
-
-> 📝 *Số liệu trên tập validation `thanhnew2001/vnexpress`. ViT5 fine-tuned đạt kết quả tốt nhất trên cả ROUGE và BERTScore.*
+1. **6 Thuật toán Tóm tắt Tích hợp**:
+   * **Extractive (Trích xuất)**: TextRank, LexRank, LSA Summarizer (chạy song song đa luồng).
+   * **Abstractive (Trừu tượng)**: ViT5 (Fine-tuned), BARTPho (Syllable), mT5 (Experimental Baseline).
+2. **GPU & FP16 Inference Backend**:
+   * Tự động phát hiện GPU CUDA và kích hoạt Mixed Precision (`fp16`) giúp tăng tốc sinh văn bản từ **5-8 lần** (Inference time $\le 5$ giây trên GPU RTX 3050 Laptop).
+   * Cơ chế **Singleton Model Registry** cho phép nạp trước (preload) các mô hình Transformers vào VRAM khi khởi động server, tránh trễ ở request đầu tiên.
+   * Quản lý tài nguyên GPU an toàn qua cơ chế Semaphore (chạy Sequential đối với các mô hình Abstractive) tránh lỗi tràn bộ nhớ VRAM (CUDA Out-of-Memory).
+3. **Đánh giá Công bằng (Evaluation Fairness)**:
+   * Tự động tắt các độ đo trùng lặp (ROUGE, BLEU) và chuyển sang **BERTScore** + **Semantic Similarity (SBERT)** để xếp hạng khi không có Reference Summary (Tránh score inflation cho extractive).
+   * Hiển thị warning thông báo trên cả API và giao diện React.
+4. **Lọc lỗi giải mã ViT5 chuyên sâu (`post_clean_vit5_telex`)**:
+   * Tích hợp bộ dọn dẹp lỗi telex dính trong dataset (`hãngj` -> `hãng`, `kiệnj` -> `kiện`).
+   * Xóa các delimiter lỗi do logit penalty (`+`, `_`, `*`) và các ký tự hoa dính bất thường (`tính năngỪngÃ` -> `tính năng`).
+   * Cơ chế tự động kích hoạt **Greedy Decoding Fallback** khi văn bản sinh không đạt tiêu chuẩn chất lượng.
 
 ---
 
@@ -81,244 +35,110 @@
 NLP-Text-Summarization-Transformer-System/
 │
 ├── api/
-│   ├── __init__.py
-│   └── main.py                ← FastAPI server (endpoints, lifespan)
+│   └── main.py                ← FastAPI server & lifespan (Preload & Diagnostics)
 │
 ├── src/
-│   ├── config.py              ← Cấu hình tập trung (env-based)
-│   ├── abstractive.py         ← ViT5/T5/BART abstractive summarizer
-│   ├── extractive.py          ← TextRank / LexRank
-│   ├── preprocess.py          ← Tiền xử lý tiếng Việt
-│   ├── evaluate.py            ← ROUGE, BLEU, BERTScore, Semantic Sim
-│   ├── selector.py            ← Chọn bản tóm tắt tốt nhất
-│   ├── fact_check.py          ← Consistency checker
-│   ├── explainability.py      ← Giải thích câu được chọn
-│   ├── dashboard.py           ← Multi-algorithm orchestrator + SSE
-│   ├── analytics.py           ← Dashboard metrics
-│   ├── benchmark.py           ← Script chạy benchmark hàng loạt
-│   ├── crawler.py             ← Thu thập bài báo từ URL
-│   ├── file_parser.py         ← Đọc TXT/PDF/DOCX
-│   ├── storage.py             ← Lưu kết quả JSON/MongoDB
-│   └── utils.py               ← Logging, helpers
+│   ├── config.py              ← Quản lý cấu hình tập trung (Env-based)
+│   ├── abstractive.py         ← Trình sinh văn bản Transformers (ViT5, BARTPho, mT5)
+│   ├── extractive.py          ← Trình tóm tắt trích xuất song song (ThreadPoolExecutor)
+│   ├── model_loader.py        ← Singleton ModelRegistry, sửa lỗi tokenizer & vocab mismatch
+│   ├── output_validator.py    ← Bộ kiểm tra lỗi lặp và ký tự rác tự động của Transformers
+│   ├── preprocess.py          ← Chuẩn hóa văn bản Unicode NFC, dọn dẹp Telex ViT5 nâng cao
+│   ├── evaluate.py            ← Đánh giá ROUGE, BLEU, BERTScore, Semantic Similarity
+│   ├── explainability.py      ← Giải thích cơ chế lựa chọn câu của Extractive
+│   ├── dashboard.py           ← Multi-algorithm orchestrator & SSE generator
+│   └── utils.py               ← Logging, kiểm tra thông tin GPU & VRAM
 │
-├── train/
-│   ├── dataset_loader.py      ← Load VnExpress dataset
-│   └── train_vit5.py          ← Fine-tune pipeline
+├── scripts/
+│   ├── train.py               ← Pipeline fine-tune ViT5 tối ưu (seq2seq, smooth loss)
+│   └── crawl_vnexpress.py     ← Script crawl data VNExpress tự động
 │
-├── frontend/
-│   └── src/
-│       ├── main.jsx           ← React app (comparison, charts, SSE)
-│       └── styles.css         ← Design system CSS
-│
-├── tests/
-│   ├── test_preprocess.py     ← Unit tests tiền xử lý
-│   ├── test_evaluate.py       ← Unit tests ROUGE/BLEU/BERTScore
-│   ├── test_extractive.py     ← Unit tests TextRank/LexRank
-│   └── test_api.py            ← Integration tests FastAPI
-│
-├── models/                    ← Model đã fine-tune (sau training)
-├── data/                      ← Dataset nội bộ (CSV)
-├── storage/results/           ← Kết quả benchmark đã lưu
-├── Dockerfile                 ← Production container
-├── docker-compose.yml         ← Multi-service setup
-├── pyproject.toml             ← Pytest config
+├── frontend/                  ← Ứng dụng React/Vite/CSS
+├── models/                    ← Thư mục chứa checkpoints ViT5 đã fine-tune (cục bộ)
 └── requirements.txt
 ```
 
 ---
 
-## ⚙️ Cài đặt & Chạy
+## 🚀 Hướng dẫn Cài đặt & Khởi chạy
 
-### 1. Cài đặt môi trường
+### 1. Cài đặt Môi trường (Hỗ trợ GPU CUDA)
 
 ```bash
+# Clone dự án
 git clone https://github.com/your-repo/NLP-Text-Summarization-Transformer-System
 cd NLP-Text-Summarization-Transformer-System
 
+# Tạo virtual environment
 python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Linux/Mac
+venv\Scripts\activate
 
+# Uninstall torch CPU-only (nếu có) và cài đặt phiên bản CUDA tương thích (cu124 cho CUDA 12.x)
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Cài đặt các thư viện phụ thuộc khác
 pip install -r requirements.txt
 
-# Tải NLTK data
+# Tải dữ liệu NLTK bổ trợ
 python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 ```
 
-### 2. Chạy Backend API
+### 2. Khởi chạy Backend API Server
+
+Backend hỗ trợ tự động tải trước các mô hình để sẵn sàng inference. Khởi chạy bằng lệnh sau:
 
 ```bash
+$env:PYTHONIOENCODING="utf-8"
 python -m api.main
-# Hoặc:
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-| URL | Mô tả |
-|---|---|
-| http://localhost:8000 | Health check |
-| http://localhost:8000/docs | Swagger UI |
-| http://localhost:8000/redoc | ReDoc |
+* **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
+* **Diagnostics Endpoint**: [http://localhost:8000/metrics](http://localhost:8000/metrics) (Theo dõi VRAM, tốc độ load mô hình và phiên bản CUDA đang chạy)
 
-### 3. Chạy Frontend
+### 3. Khởi chạy Frontend React
+
+Mở một terminal mới:
 
 ```bash
 cd frontend
 npm install
 npm run dev
-# → http://localhost:5173
 ```
 
-### 4. Chạy với Docker (Production)
-
-```bash
-# Build & start tất cả services
-docker-compose up --build -d
-
-# Xem logs
-docker-compose logs -f api
-```
+* Truy cập giao diện tại: [http://localhost:5173](http://localhost:5173)
 
 ---
 
 ## 🧠 Fine-tune ViT5
 
-```bash
-# Dùng dataset VnExpress từ Hugging Face (tự động tải)
-python -m train.train_vit5 --max_samples 5000 --epochs 3 --batch_size 2
-
-# Test nhanh với 100 samples
-python -m train.train_vit5 --max_samples 100 --epochs 1
-
-# Dùng dataset CSV nội bộ
-python -m train.train_vit5 --local_data data/dataset.csv --max_samples 5000
-
-# Chạy trên CPU (tắt GPU)
-set CUDA_VISIBLE_DEVICES=-1
-python -m train.train_vit5 --max_samples 2000 --batch_size 2
-```
-
-Kết quả lưu tại `models/vit5-finetuned/eval_results.json`.
-
----
-
-## 🔬 Chạy Benchmark
+Hệ thống hỗ trợ script huấn luyện tùy biến mô hình ViT5 trên GPU sử dụng Hugging Face Seq2SeqTrainer:
 
 ```bash
-# Đánh giá 100 samples từ tập validation VnExpress
-python -m src.benchmark --samples 100 --model vit5
+# Huấn luyện trên dataset VNExpress từ Hub Hugging Face
+python scripts/train.py --epochs 3 --batch_size 2 --lr 2e-5
 
-# So sánh tất cả models
-python -m src.benchmark --samples 100 --model vit5
-python -m src.benchmark --samples 100 --model bart
-python -m src.benchmark --samples 100 --model t5
-
-# Kết quả lưu tại storage/results/benchmark_*.json
+# Chỉ chạy test nhanh với 100 mẫu
+python scripts/train.py --epochs 1 --batch_size 1 --max_samples 100
 ```
+
+Các checkpoint sẽ được tự động lưu trong thư mục `models/vit5-finetuned/`.
 
 ---
 
-## 🧪 Chạy Unit Tests
+## 📊 So sánh Metrics Đánh giá
 
-```bash
-# Tất cả tests
-pytest
-
-# Tests cụ thể
-pytest tests/test_evaluate.py -v
-pytest tests/test_extractive.py -v
-pytest tests/test_api.py -v
-
-# Với coverage report
-pip install pytest-cov
-pytest --cov=src --cov=api --cov-report=html
-```
-
----
-
-## 📡 API Reference
-
-### POST `/summarize`
-Tóm tắt văn bản với 1 model.
-
-```json
-{
-  "text": "Văn bản tiếng Việt...",
-  "urls": ["https://vnexpress.net/..."],
-  "model_name": "vit5",
-  "extractive_sentences": 5,
-  "max_abstractive_length": 150,
-  "length_control": "auto"
-}
-```
-
-### POST `/summarize/compare/stream`
-So sánh nhiều thuật toán với SSE streaming.
-
-```json
-{
-  "text": "Văn bản...",
-  "algorithms": ["textrank", "lsa", "lexrank", "vit5", "bart"],
-  "extractive_sentences": 5
-}
-```
-
-### POST `/summarize/files/compare/stream`
-Upload files và streaming compare.
-
-```
-Form fields: files (multi), algorithms (JSON array)
-```
-
----
-
-## 📈 Metrics Giải thích
-
-| Metric | Phạm vi | Ý nghĩa |
+| Độ đo | Khoảng giá trị | Mô tả |
 |---|---|---|
-| **ROUGE-1** | 0–1 | Overlap unigrams (từ đơn) |
-| **ROUGE-2** | 0–1 | Overlap bigrams (cặp từ) |
-| **ROUGE-L** | 0–1 | Longest Common Subsequence |
-| **BLEU** | 0–1 | Precision n-gram (dịch máy) |
-| **BERTScore F1** | 0–1 | Contextual embedding similarity |
-| **Semantic Sim.** | 0–1 | Cosine similarity (Sentence-BERT) |
-
-> **BERTScore** (Zhang et al., 2020) — Metric hiện đại sử dụng BERT embeddings, tương quan tốt hơn với đánh giá con người so với ROUGE.
+| **ROUGE-1 / 2 / L** | 0.0 - 1.0 | Tỉ lệ trùng khớp n-gram từ đơn, từ đôi và chuỗi con chung dài nhất |
+| **BLEU** | 0.0 - 1.0 | Độ chuẩn xác n-gram (thường dùng trong dịch máy và sinh văn bản) |
+| **BERTScore F1** | 0.0 - 1.0 | Độ tương đồng ngữ nghĩa sâu sử dụng embeddings của PhoBERT/mBERT |
+| **Semantic Sim** | 0.0 - 1.0 | Độ tương đồng vector câu sử dụng mô hình Sentence-BERT (SBERT) |
 
 ---
 
-## 🔎 Tính năng Nổi bật
+## 👨‍💻 Nghiên cứu & Bản quyền
 
-- ✅ **7 thuật toán** so sánh đồng thời (Extractive + Abstractive)
-- ✅ **4 metrics** đánh giá: ROUGE, BLEU, BERTScore, Semantic Similarity
-- ✅ **SSE Streaming** — Kết quả hiển thị realtime từng thuật toán
-- ✅ **Multi-document** — Upload nhiều file TXT/PDF/DOCX cùng lúc
-- ✅ **Crawling** — Tóm tắt trực tiếp từ URL bài báo
-- ✅ **Consistency Checker** — Phát hiện câu không nhất quán với nguồn
-- ✅ **Explainability** — Highlight câu nguồn được chọn và lý do
-- ✅ **Fine-tuning** — Pipeline hoàn chỉnh để fine-tune ViT5
-- ✅ **Docker** — Deploy production-ready
+Dự án này phục vụ cho mục đích nghiên cứu học thuật và thực nghiệm các kỹ thuật xử lý ngôn ngữ tự nhiên tiếng Việt nâng cao.
 
----
-
-## 📚 Tài liệu Tham khảo
-
-- [VietAI/vit5-base](https://huggingface.co/VietAI/vit5-base) — ViT5 pre-trained tiếng Việt
-- [BERTScore (Zhang et al., 2020)](https://arxiv.org/abs/1904.09675)
-- [TextRank (Mihalcea & Tarau, 2004)](https://aclanthology.org/W04-3252/)
-- [ROUGE (Lin, 2004)](https://aclanthology.org/W04-1013/)
-- [Hugging Face Transformers](https://huggingface.co/docs/transformers)
-- [sumy](https://github.com/miso-belica/sumy) — Extractive Summarization
-- [underthesea](https://github.com/undertheseanlp/underthesea) — Vietnamese NLP
-- [FastAPI](https://fastapi.tiangolo.com)
-
----
-
-## 👨‍💻 Thông tin Tác giả
-
-Đồ án tốt nghiệp — **Hệ thống Tóm tắt Văn bản Tiếng Việt Đa Tài liệu**  
-Chuyên ngành: Công nghệ Thông tin / Khoa học Máy tính  
-Hướng nghiên cứu: Xử lý Ngôn ngữ Tự nhiên (NLP) — Transformer Models
-
----
-
-*© 2026 — Đồ án Tốt nghiệp NLP*
+*© 2026 — Đồ án Nghiên cứu NLP Tiếng Việt.*

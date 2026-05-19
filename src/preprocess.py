@@ -161,17 +161,25 @@ def clean_generated_summary(text: str) -> str:
     • HTML entities that survived tokenisation
     • Repeated word sequences (word loops — sign of bad generation)
     • Trailing/leading punctuation and extra whitespace
+    • Vietnamese unicode normalization and repeated phrase collapse
     """
     if not text:
         return ""
 
-    # 1. Remove SentencePiece U+2581 boundary marker (▁)
-    text = text.replace("\u2581", " ")
+    # 1. Normalize unicode (NFC)
+    import unicodedata
+    text = unicodedata.normalize("NFC", text)
 
-    # 2. Remove T5 sentinel tokens
+    # 2. Remove SentencePiece U+2581 boundary marker (▁) and common tokenizer leaks
+    text = text.replace("\u2581", " ")
+    text = text.replace("▁", " ")
+    text = text.replace("_òng", "nòng")  # Common ViT5/mT5 tokenization error for 'nòng'
+    text = text.replace("đnag", "đang")  # Typo correction
+
+    # 3. Remove T5 sentinel tokens
     text = re.sub(r"<extra_id_\d+>", " ", text)
 
-    # 3. Remove common special tokens that leaked through
+    # 4. Remove common special tokens that leaked through
     text = re.sub(
         r"<\s*(pad|unk|s|eos|sep|cls|mask)\s*>",
         " ", text, flags=re.IGNORECASE,
@@ -179,22 +187,85 @@ def clean_generated_summary(text: str) -> str:
     # Also handle bare token names that sometimes appear without angle brackets
     text = re.sub(r"\b(unk|pad)\b", " ", text, flags=re.IGNORECASE)
 
-    # 4. Collapse excessive repeated n-grams (word-loop artifact)
-    # e.g. "học học học" → "học"
-    text = re.sub(
-        r"\b(\w+)(\s+\1\b){2,}", r"\1",
-        text, flags=re.IGNORECASE | re.UNICODE,
-    )
-    # Repeated 2-gram loops: "học sinh học sinh học sinh" → "học sinh"
-    text = re.sub(
-        r"\b((\w+\s+\w+))(\s+\2\b){2,}", r"\1",
-        text, flags=re.IGNORECASE | re.UNICODE,
-    )
+    # Clean weird characters
+    text = re.sub(r"[▁█▓▒░]", " ", text)
 
-    # 5. Standard Vietnamese text cleanup
+    # 5. Remove malformed UTF fragments (e.g. invalid combinations or stray plus symbols joining parts)
+    text = re.sub(r"([a-zA-ZÀ-ỹđĐ])\+([a-zA-ZÀ-ỹđĐ])", r"\1 \2", text)
+
+    # 6. Collapse excessive repeated n-grams / phrase loops (word-loop artifact) using targeted patterns
+    # Apply standard patterns first
+    patterns = [
+        r"(\b\w+\b)(\s+\1){2,}", # Repeated 1-gram (3 or more times)
+        r"(.{2,20}?)(\1){3,}",    # Repeated phrase loops
+    ]
+    for pattern in patterns:
+        text = re.sub(pattern, r"\1", text, flags=re.IGNORECASE | re.UNICODE)
+
+    for _ in range(3):  # Multiple passes to catch nested repetition loops
+        # 1-word repeat: "học học học"
+        text = re.sub(r"\b(\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
+        # 2-word repeat: "học sinh học sinh"
+        text = re.sub(r"\b(\w+\s+\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
+        # 3-word repeat: "cách mạng công cách mạng công"
+        text = re.sub(r"\b(\w+\s+\w+\s+\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
+        # 4-word repeat: "cuộc cách mạng công cuộc cách mạng công"
+        text = re.sub(r"\b(\w+\s+\w+\s+\w+\s+\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
+
+    # 7. Standard Vietnamese text cleanup
     text = clean_text(text, aggressive=True)
 
+    # 8. Additional malformed punctuation cleanup (e.g. " , ", " . . ", " ., ", " ,. ")
+    text = re.sub(r"\s*,\s*,", ", ", text)
+    text = re.sub(r"\s*\.\s*\.", ". ", text)
+    text = re.sub(r"\s*,\s*\.", ". ", text)
+    text = re.sub(r"\s*\.\s*,", ". ", text)
+    text = re.sub(r"\s*([.,;:!?])\s*", r"\1 ", text)
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text) # Remove spaces before punctuation
+
+    # Double check for start of summary starting with commas or dots
+    text = text.lstrip(".,;:!? ")
+
+    # 9. Telex and Delimiter cleanup for ViT5 model output
+    text = post_clean_vit5_telex(text)
+
     return normalize_whitespace(text)
+
+
+def post_clean_vit5_telex(text: str) -> str:
+    """Aggressively removes telex typing leaks and delimiter artifacts left by ViT5."""
+    if not text:
+        return ""
+    # 1. Remove custom delimiters
+    text = re.sub(r"[\*\+\_\[\]\<\>\(\)\{\}\\\/\|]", " ", text)
+    
+    # 2. Clean telex leaks at end of words (like hãngj, kiệnj)
+    pattern_telex_leak = r"\b([a-zA-ZÀ-ỹđĐ]*[áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđĐ]+[a-zA-ZÀ-ỹđĐ]*)([jZzWwsrxf]+)\b"
+    text = re.sub(pattern_telex_leak, r"\1", text)
+    
+    # 3. Strict uppercase tonal vowel set to strip corrupted trailing/middle capitals
+    uppercase_tonal_vowels = "ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼẾỀỂỄỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỶỸỸ"
+    pattern_uppercase_tonal_leak = rf"\b([a-zA-ZÀ-ỹđĐ]+?)([{uppercase_tonal_vowels}]+)[a-zA-ZÀ-ỹđĐ]*\b"
+    text = re.sub(pattern_uppercase_tonal_leak, r"\1", text)
+    
+    # 4. Correct specific spelling patterns
+    specific_fixes = {
+        r"\bmổi\b": "mỗi",
+        r"\bmổij\b": "mỗi",
+        r"\bkiệnj\b": "kiện",
+        r"\bnhứt\b": "nhất",
+        r"\bhảng\b": "hãng",
+        r"\bmăt\b": "mắt",
+        r"\bnhât\b": "nhất",
+        r"\bmât\b": "mất",
+    }
+    for pat, rep in specific_fixes.items():
+        text = re.sub(pat, rep, text, flags=re.IGNORECASE)
+        
+    # 5. Remove single character telex leftovers
+    text = re.sub(r"\b[jZzWwsrxf]\b", " ", text)
+    
+    return text
 
 
 def clean_dataset_record(
@@ -203,14 +274,46 @@ def clean_dataset_record(
     min_article_words: int = 30,
     min_summary_words: int = 3,
 ) -> dict | None:
-    article_clean = clean_text(article, aggressive=True)
-    summary_clean = clean_text(summary, aggressive=True)
+    if not article or not summary:
+        return None
+
+    # 1. Normalize Unicode NFC
+    import unicodedata
+    art_norm = unicodedata.normalize("NFC", article)
+    sum_norm = unicodedata.normalize("NFC", summary)
+
+    # 2. Duplicated space and malformed character removal
+    art_norm = re.sub(r"\s+", " ", art_norm).strip()
+    sum_norm = re.sub(r"\s+", " ", sum_norm).strip()
+    
+    # Remove weird OCR character clusters and noise
+    noise_chars_pattern = r"[^\w\s.,!?;:'\"()/%+\-–—•@*]"
+    art_norm = re.sub(noise_chars_pattern, "", art_norm)
+    sum_norm = re.sub(noise_chars_pattern, "", sum_norm)
+
+    # 3. Remove common headers/signatures (e.g. "VnExpress - ", "Theo...", "Ảnh:", "[A-Z]+ (VNA) -")
+    art_norm = re.sub(r"^(vne|vnexpress|vietnamplus|dantri|tuoitre|vnanet)\s*[-–—:]\s*", "", art_norm, flags=re.IGNORECASE)
+    art_norm = re.sub(r"\b(theo\s+[\w\s.,]+(báo|tin|đài|tổng hợp|vne|vnexpress|vnanet))\b.*$", "", art_norm, flags=re.IGNORECASE)
+    art_norm = re.sub(r"\(ảnh\s*:\s*[\w\s.,-]+\)", "", art_norm, flags=re.IGNORECASE)
+
+    # 4. Clean text natively
+    article_clean = clean_text(art_norm, aggressive=True)
+    summary_clean = clean_text(sum_norm, aggressive=True)
+
+    # 5. Length Rule Enforcement (input >= 100 chars, summary >= 20 chars)
+    if len(article_clean) < 100:
+        return None
+    if len(summary_clean) < 20:
+        return None
+
+    # Additional word count thresholds
     if len(tokenize_words(article_clean)) < min_article_words:
         return None
     if len(tokenize_words(summary_clean)) < min_summary_words:
         return None
     if is_probably_bad_generation(summary_clean):
         return None
+
     return {
         "article": article_clean,
         "title": summary_clean,

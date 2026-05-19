@@ -122,16 +122,17 @@ def train_model(args) -> dict:
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
         weight_decay=args.weight_decay,
+        label_smoothing_factor=0.1,
         eval_strategy="steps",
         eval_steps=args.eval_steps,
         save_strategy="steps",
         save_steps=args.save_steps,
         save_total_limit=2,
         load_best_model_at_end=True,
-        metric_for_best_model="rougeL",
-        greater_is_better=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         predict_with_generate=True,
-        generation_max_length=args.max_target_tokens,
+        generation_max_length=64,
         fp16=torch.cuda.is_available(),
         dataloader_num_workers=0,
         logging_steps=args.logging_steps,
@@ -177,12 +178,12 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=config.NUM_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=config.TRAIN_BATCH_SIZE)
     parser.add_argument("--eval_batch_size", type=int, default=config.EVAL_BATCH_SIZE)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=config.GRADIENT_ACCUMULATION_STEPS)
-    parser.add_argument("--learning_rate", type=float, default=config.LEARNING_RATE)
-    parser.add_argument("--weight_decay", type=float, default=config.WEIGHT_DECAY)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
+    parser.add_argument("--learning_rate", type=float, default=2e-5)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
     parser.add_argument("--warmup_steps", type=int, default=config.WARMUP_STEPS)
     parser.add_argument("--max_input_tokens", type=int, default=config.MAX_INPUT_TOKENS)
-    parser.add_argument("--max_target_tokens", type=int, default=config.MAX_TARGET_TOKENS)
+    parser.add_argument("--max_target_tokens", type=int, default=64)
     parser.add_argument("--eval_steps", type=int, default=500)
     parser.add_argument("--save_steps", type=int, default=500)
     parser.add_argument("--logging_steps", type=int, default=50)

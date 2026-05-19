@@ -126,35 +126,43 @@ class ModelRegistry:
         model_vocab = int(model.get_input_embeddings().weight.shape[0])
         tok_vocab = len(tokenizer)
 
-        if model_vocab == tok_vocab:
+        if algorithm.key == "vit5":
+            tokenizer.clean_up_tokenization_spaces = True
+
+        if model_vocab == tok_vocab and len(tokenizer) == model.config.vocab_size:
             return tokenizer
 
         logger.warning(
-            "[%s] Vocab mismatch — tokenizer=%d model=%d",
-            algorithm.key, tok_vocab, model_vocab,
+            "[%s] Vocab mismatch — tokenizer=%d model=%d config_vocab=%d",
+            algorithm.key, tok_vocab, model_vocab, model.config.vocab_size,
         )
 
-        # Strategy 1: try the hub tokenizer for fine-tuned checkpoints
-        if model_path != algorithm.model_name and algorithm.model_name:
+        # NEVER auto-resize ViT5 embeddings. Safe fallback to original pretrained tokenizer if mismatch.
+        if len(tokenizer) != model.config.vocab_size or model_vocab != tok_vocab:
+            logger.warning(
+                f"[{algorithm.key}] tokenizer/model vocab mismatch (len={len(tokenizer)}, config={model.config.vocab_size}, embed={model_vocab})"
+            )
             try:
-                base_tok = AutoTokenizer.from_pretrained(algorithm.model_name, use_fast=False)
-                if len(base_tok) == model_vocab:
-                    logger.info("[%s] Repaired: using hub tokenizer %s", algorithm.key, algorithm.model_name)
-                    return base_tok
+                tokenizer = AutoTokenizer.from_pretrained(
+                    algorithm.model_name,
+                    use_fast=False,
+                    legacy=True,
+                )
+                if algorithm.key == "vit5":
+                    tokenizer.clean_up_tokenization_spaces = True
+                return tokenizer
             except Exception as exc:
-                logger.warning("[%s] Hub tokenizer repair failed: %s", algorithm.key, exc)
+                logger.error("[%s] Failed to load fallback hub tokenizer: %s", algorithm.key, exc)
 
-        # Strategy 2: resize embeddings if difference is small (< 256 tokens)
-        diff = abs(model_vocab - tok_vocab)
-        if diff <= 256:
-            model.resize_token_embeddings(tok_vocab)
-            logger.warning("[%s] Resized token embeddings to %d", algorithm.key, tok_vocab)
-            return tokenizer
+        # For non-ViT5 models, fallback or resize if difference is small and config allows
+        if algorithm.key != "vit5":
+            diff = abs(model_vocab - tok_vocab)
+            if diff <= 256:
+                model.resize_token_embeddings(tok_vocab)
+                logger.warning("[%s] Resized token embeddings to %d", algorithm.key, tok_vocab)
+                return tokenizer
 
-        raise RuntimeError(
-            f"[{algorithm.key}] Unsafe vocab mismatch: tokenizer={tok_vocab}, model={model_vocab}. "
-            "Retrain with the correct tokenizer."
-        )
+        return tokenizer
 
     def _patch_generation_config(
         self,
@@ -195,7 +203,7 @@ class ModelRegistry:
         # Load model — use float16 from disk if GPU fp16 is enabled (saves VRAM)
         load_kwargs: dict[str, Any] = {}
         if self.fp16:
-            load_kwargs["torch_dtype"] = torch.float16
+            load_kwargs["dtype"] = torch.float16  # was torch_dtype in older transformers
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
 
         tokenizer = self._repair_vocab_mismatch(model, tokenizer, algorithm, model_path)

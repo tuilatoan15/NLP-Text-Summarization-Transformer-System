@@ -82,6 +82,10 @@ class SummarizeResponse(BaseModel):
     documents: list[dict] = Field(default_factory=list)
     storage: dict = Field(default_factory=dict)
     controls: dict = Field(default_factory=dict)
+    best_extractive: Optional[dict] = Field(default=None)
+    best_abstractive: Optional[dict] = Field(default=None)
+    research_analysis: Optional[dict] = Field(default=None)
+    warning: Optional[str] = Field(default=None)
 
 
 # ─────────────────────────── Lifespan (startup / shutdown) ─────────────────
@@ -239,6 +243,10 @@ def _legacy_response(compare: dict, requested_model: str) -> dict:
         "documents": [],
         "storage": {},
         "controls": compare.get("meta", {}),
+        "best_extractive": compare.get("best_extractive"),
+        "best_abstractive": compare.get("best_abstractive"),
+        "research_analysis": compare.get("research_analysis"),
+        "warning": compare.get("meta", {}).get("warning"),
     }
 
 

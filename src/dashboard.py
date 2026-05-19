@@ -25,6 +25,7 @@ Optimization vs old version
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from collections import defaultdict
@@ -58,13 +59,26 @@ _GPU_LOCK = threading.Semaphore(config.MAX_GPU_CONCURRENT)
 def _combined_score(metrics: dict) -> float:
     compression = float(metrics.get("compression_ratio", 0.0))
     compression_score = max(0.0, 1.0 - abs(compression - 0.25) / 0.25)
-    score = (
-        0.30 * float(metrics.get("rougeL", 0.0))
-        + 0.25 * float(metrics.get("bertscore_f1", 0.0))
-        + 0.20 * float(metrics.get("semantic_similarity", 0.0))
-        + 0.15 * float(metrics.get("rouge2", 0.0))
-        + 0.10 * compression_score
-    )
+    
+    is_biased = metrics.get("is_biased", False)
+    if is_biased:
+        # Reference is missing or source-based: use weights that do not rely on ROUGE/BLEU
+        weights = config.NO_REFERENCE_RANKING_WEIGHTS
+        score = (
+            weights.get("bertscore_f1", 0.45) * float(metrics.get("bertscore_f1", 0.0))
+            + weights.get("semantic_similarity", 0.35) * float(metrics.get("semantic_similarity", 0.0))
+            + weights.get("compression_score", 0.20) * compression_score
+        )
+    else:
+        # Real reference summary is available: standard multi-metric weight suite
+        weights = config.WITH_REFERENCE_RANKING_WEIGHTS
+        score = (
+            weights.get("rougeL", 0.25) * float(metrics.get("rougeL", 0.0))
+            + weights.get("rouge2", 0.15) * float(metrics.get("rouge2", 0.0))
+            + weights.get("bertscore_f1", 0.30) * float(metrics.get("bertscore_f1", 0.0))
+            + weights.get("semantic_similarity", 0.20) * float(metrics.get("semantic_similarity", 0.0))
+            + weights.get("compression_score", 0.10) * compression_score
+        )
     return round(score, 4)
 
 
@@ -164,6 +178,22 @@ def _evaluate_result(
     metrics = evaluate_summary(summary, reference, text, duration)
     metrics["combined_score"] = _combined_score(metrics)
 
+    # 5. Handle mT5 experimental state
+    is_experimental = False
+    warning_badge = None
+    if algorithm.key == "mt5" and config.MT5_EXPERIMENTAL:
+        is_experimental = True
+        warning_badge = "Experimental Baseline"
+        # If output length is substantial, also check for latin char ratio to see if it's junk
+        if summary:
+            # Measure ratio of standard english-only ASCII letters over total letters to catch multilingual leaks
+            total_letters = len(re.findall(r'[a-zA-Z]', summary))
+            total_vi_letters = len(re.findall(r'[a-zA-ZÀ-ỹĐđ]', summary))
+            # If standard English chars are heavily dominant compared to Vietnamese chars, it's likely multilingual junk
+            if total_letters > 0 and (total_letters / max(1, total_vi_letters)) > 0.85:
+                warning_badge = "Experimental (Corrupt Multilingual)"
+        logger.warning("[%s] Marked as experimental baseline — ranking contribution disabled", algorithm.key)
+
     return {
         "key": algorithm.key,
         "algorithm": algorithm.name,
@@ -184,6 +214,8 @@ def _evaluate_result(
         "time_seconds": metrics["processing_time"],
         "processing_time": metrics["processing_time"],
         "explainability": explainability,
+        "experimental": is_experimental,
+        "warning_badge": warning_badge,
         "details": (
             explainability.get("extractive")
             or explainability.get("abstractive")
@@ -268,6 +300,7 @@ def _rank_results(results: list[dict]) -> list[dict]:
     ranked = sorted(
         results,
         key=lambda row: (
+            not row.get("experimental", False),  # Put non-experimental models first
             row["metrics"].get("combined_score", 0.0),
             row["metrics"].get("rougeL", 0.0),
             -row["metrics"].get("processing_time", 999.0),
@@ -284,6 +317,8 @@ def _rank_results(results: list[dict]) -> list[dict]:
             "rougeL": row["metrics"]["rougeL"],
             "bertscore_f1": row["metrics"]["bertscore_f1"],
             "processing_time": row["metrics"]["processing_time"],
+            "experimental": row.get("experimental", False),
+            "warning_badge": row.get("warning_badge"),
         }
         for idx, row in enumerate(ranked)
     ]
@@ -379,6 +414,13 @@ def summarize_all(
     ranking = _rank_results(results)
     best_key = ranking[0]["key"] if ranking else None
 
+    # Highlight best per category
+    extractive_ranked = [r for r in ranking if r["group"] == "extractive"]
+    abstractive_ranked = [r for r in ranking if r["group"] == "abstractive"]
+    
+    best_extractive = extractive_ranked[0] if extractive_ranked else None
+    best_abstractive = abstractive_ranked[0] if abstractive_ranked else None
+
     group_summary: dict[str, dict] = defaultdict(dict)
     for group in ("extractive", "abstractive"):
         group_rows = [row for row in results if row["group"] == group]
@@ -397,6 +439,31 @@ def summarize_all(
             ),
         }
 
+    is_biased = not bool(reference)
+    
+    research_analysis = {
+        "extractive_insights": (
+            "Extractive models (TextRank, LexRank, LSA) guarantee 100% factual consistency because they select "
+            "sentences directly from the source text. However, they lack semantic flexibility, have lower compression "
+            "adaptability, and are highly prone to score inflation when overlap metrics are evaluated without a real reference."
+        ),
+        "abstractive_insights": (
+            "Abstractive models (ViT5, BARTPho, mT5) exhibit high semantic flexibility and produce more natural, "
+            "paraphrased summaries. However, they carry the risk of hallucinations, repetition loops, or multilingual artifacts "
+            "if tokenizers are misaligned."
+        ),
+        "recommendation": (
+            "BARTPho is the recommended model for production. It is stable, handles Vietnamese syllables natively, and achieves "
+            "strong semantic scores. ViT5 is a viable alternative now that its generation parameters have been optimized. "
+            "mT5 should only be used as an experimental baseline."
+        ),
+        "bias_notice": (
+            "Reference summary was NOT provided — overlap metrics (ROUGE/BLEU) have been disabled for fairness. "
+            "Semantic similarity (SBERT) and BERTScore were used for ranking." if is_biased else
+            "Reference summary was provided. All overlap, semantic, and compression metrics are fully active."
+        )
+    }
+
     return {
         "algorithms": normalized_keys,
         "algorithm_groups": {
@@ -406,8 +473,12 @@ def summarize_all(
         "results": results,
         "ranking": ranking,
         "best_model": next((row for row in ranking if row["key"] == best_key), None),
+        "best_extractive": best_extractive,
+        "best_abstractive": best_abstractive,
+        "research_analysis": research_analysis,
         "group_summary": dict(group_summary),
         "charts": _chart_payload(results),
+        "warning": "Reference summary not provided — overlap metrics may be biased." if is_biased else None,
         "performance": {
             "total_wall_time_s": round(total_wall, 3),
             "extractive_count": len(extractive_keys),
@@ -420,6 +491,7 @@ def summarize_all(
             "reference_words": count_words(reference_text),
             "sentence_count": sentence_count,
             "max_output_length": max_output_length,
+            "warning": "Reference summary not provided — overlap metrics may be biased." if is_biased else None
         },
     }
 

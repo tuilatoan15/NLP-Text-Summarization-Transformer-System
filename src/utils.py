@@ -82,17 +82,34 @@ def get_device_info() -> dict:
 
 
 def log_device_info() -> None:
-    """Log current GPU/CPU status to console."""
-    info = get_device_info()
-    if info.get("cuda_available"):
-        logger.info(
-            "🚀 GPU detected: %s | VRAM total=%.0f MB  free=%.0f MB",
-            info.get("gpu_name"),
-            info.get("total_vram_mb", 0),
-            info.get("free_vram_mb", 0),
-        )
-    else:
+    """Log current GPU/CPU status to console — called once at server startup."""
+    try:
+        import torch
+    except ImportError:
+        logger.info("⚠️  PyTorch not importable")
+        return
+
+    if not torch.cuda.is_available():
         logger.info("⚠️  No GPU found — running on CPU (inference will be slower)")
+        logger.info("    torch=%s  cuda_build=%s", torch.__version__, torch.version.cuda or "None (CPU-only build)")
+        return
+
+    idx = torch.cuda.current_device()
+    props = torch.cuda.get_device_properties(idx)
+    total_mb = props.total_memory / 1024 ** 2
+    free_mb = (props.total_memory - torch.cuda.memory_reserved(idx)) / 1024 ** 2
+    fp16_ok = props.major >= 7  # Volta / Turing / Ampere / Ada
+
+    logger.info("=" * 56)
+    logger.info("  🚀 GPU DETECTED — Running on CUDA")
+    logger.info("  GPU Name    : %s", props.name)
+    logger.info("  VRAM Total  : %.0f MB  (%.1f GB)", total_mb, total_mb / 1024)
+    logger.info("  VRAM Free   : %.0f MB", free_mb)
+    logger.info("  Compute Cap : %d.%d  (sm_%d%d)", props.major, props.minor, props.major, props.minor)
+    logger.info("  CUDA Build  : %s  (Driver CUDA: %s)", torch.version.cuda, torch.version.cuda)
+    logger.info("  fp16 OK     : %s  (requires compute >= 7.0)", fp16_ok)
+    logger.info("  torch ver   : %s", torch.__version__)
+    logger.info("=" * 56)
 
 
 def log_vram_usage(tag: str = "") -> None:

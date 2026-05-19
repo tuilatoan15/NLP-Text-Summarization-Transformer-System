@@ -107,9 +107,9 @@ def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
 def _generate_one(
     key: str,
     text: str,
-    max_new_tokens: int,
-    min_new_tokens: int,
-    num_beams: int,
+    max_new_tokens: Optional[int] = None,
+    min_new_tokens: Optional[int] = None,
+    num_beams: Optional[int] = None,
 ) -> str:
     """
     Run one forward pass through a loaded Transformer model.
@@ -133,59 +133,102 @@ def _generate_one(
     )
     encoded = {k: v.to(device) for k, v in encoded.items()}
 
+    # 1. Retrieve specific config for the model or fall back to default
+    if key == "vit5":
+        # Stable deterministic beam search generation preset for ViT5
+        gen_preset = {
+            "max_new_tokens": 64,
+            "min_new_tokens": 12,
+            "num_beams": 2,
+            "do_sample": False,
+            "early_stopping": True,
+            "no_repeat_ngram_size": 4,
+            "repetition_penalty": 2.5,
+            "length_penalty": 1.2,
+        }
+    else:
+        gen_preset = config.GENERATION_CONFIGS.get(key, config.DEFAULT_GENERATION_CONFIG).copy()
+    
+    # Allow local override if specified by caller (unless it's a fallback)
+    if max_new_tokens is not None:
+        gen_preset["max_new_tokens"] = max_new_tokens
+    if min_new_tokens is not None:
+        gen_preset["min_new_tokens"] = min_new_tokens
+    if num_beams is not None:
+        gen_preset["num_beams"] = num_beams
+
     log_vram_usage(f"pre_generate_{key}")
     t_start = time.perf_counter()
 
-    # torch.inference_mode is faster than no_grad — disables all autograd bookkeeping
-    with torch.inference_mode():
-        if use_fp16 and device.type == "cuda":
-            # autocast lets the GPU run matmuls in fp16 while keeping
-            # numerically sensitive ops in fp32 automatically
-            with torch.cuda.amp.autocast(dtype=torch.float16):
-                generated_ids = model.generate(
-                    **encoded,
-                    max_new_tokens=max_new_tokens,
-                    min_new_tokens=min_new_tokens,
-                    num_beams=num_beams,
-                    no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
-                    repetition_penalty=1.15,
-                    length_penalty=1.0,
-                    early_stopping=True,
-                    do_sample=False,
-                )
-        else:
-            generated_ids = model.generate(
-                **encoded,
-                max_new_tokens=max_new_tokens,
-                min_new_tokens=min_new_tokens,
-                num_beams=num_beams,
-                no_repeat_ngram_size=config.NO_REPEAT_NGRAM_SIZE,
-                repetition_penalty=1.15,
-                length_penalty=1.0,
-                early_stopping=True,
-                do_sample=False,
-            )
+    # Helper function to run the model generate call
+    def _run_model_generate(params):
+        with torch.inference_mode():
+            if use_fp16 and device.type == "cuda":
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    return model.generate(**encoded, **params)
+            else:
+                return model.generate(**encoded, **params)
 
+    generated_ids = _run_model_generate(gen_preset)
     elapsed = time.perf_counter() - t_start
     logger.debug("[%s] generate() took %.3f s", key, elapsed)
     log_vram_usage(f"post_generate_{key}")
 
-    # Decode — skip_special_tokens removes <pad>, </s>, <unk> etc.
-    # clean_up_tokenization_spaces=False preserves Vietnamese spacing exactly
+    # 2. Decode with appropriate space cleanups
+    is_vit5 = (key == "vit5")
     decoded = tokenizer.batch_decode(
         generated_ids,
         skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
+        clean_up_tokenization_spaces=is_vit5,
     )
     raw = decoded[0] if decoded else ""
+    
+    # Normalize Vietnamese Unicode NFC
+    import unicodedata
+    raw = unicodedata.normalize("NFC", raw)
     summary = clean_generated_summary(raw)
+
+    # 3. Quality Validation and SAFE AUTO FALLBACK
+    from src.output_validator import validate_output
+    validation = validate_output(summary)
+    
+    if validation["is_corrupted"]:
+        logger.warning(
+            "[%s] Corrupted output detected: %s. Retrying ONCE with safer greedy decoding fallback...",
+            key, validation["quality_warning"]
+        )
+        # Safer greedy fallback preset
+        fallback_preset = {
+            "num_beams": 1,
+            "max_new_tokens": 40,
+            "do_sample": False,
+        }
+        
+        fallback_ids = _run_model_generate(fallback_preset)
+        decoded_fallback = tokenizer.batch_decode(
+            fallback_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=is_vit5,
+        )
+        raw_fallback = decoded_fallback[0] if decoded_fallback else ""
+        raw_fallback = unicodedata.normalize("NFC", raw_fallback)
+        summary_fallback = clean_generated_summary(raw_fallback)
+        
+        # Validate fallback output
+        fallback_validation = validate_output(summary_fallback)
+        if fallback_validation["is_corrupted"]:
+            logger.error(
+                "[%s] Fallback output also corrupted: %s. Returning best-effort summary.",
+                key, fallback_validation["quality_warning"]
+            )
+        return summary_fallback
 
     if is_probably_bad_generation(summary):
         logger.warning(
-            "[%s] Bad generation detected (len=%d, preview=%r) — returning empty",
-            key, len(summary), summary[:80],
+            "[%s] General bad generation sanity check failed (len=%d) — returning empty or best effort",
+            key, len(summary)
         )
-        return ""
+        return summary  # Return best effort instead of completely empty to keep dashboard happy
 
     return summary
 

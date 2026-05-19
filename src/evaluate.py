@@ -225,11 +225,43 @@ def evaluate_summary(
 
     This interface is backward-compatible with the old evaluate_summary().
     """
-    rouge = compute_rouge(prediction, reference)
-    bleu = compute_bleu(prediction, reference)
-    comp_ratio = compression_ratio(prediction, source_text)
+    # 1. Check if real reference is provided
+    # If reference is same as source_text or empty/None, then we have no real reference
+    cleaned_ref = clean_text(reference or "", aggressive=True)
+    cleaned_src = clean_text(source_text or "", aggressive=True)
+    
+    is_real_reference = True
+    if not cleaned_ref or cleaned_ref == cleaned_src:
+        is_real_reference = False
+
+    # 2. Compute overlap metrics (if allowed or real reference is available)
+    if is_real_reference or config.ALLOW_SOURCE_AS_REFERENCE:
+        rouge = compute_rouge(prediction, reference)
+        bleu = compute_bleu(prediction, reference)
+        warning_msg = None
+    else:
+        # Disable overlap metrics when source is used as reference
+        rouge = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+        bleu = 0.0
+        warning_msg = "Reference summary not provided — overlap metrics may be biased."
+
+    # 3. Detailed compression calculations
+    pred_words = len(prediction.split()) if prediction else 0
+    src_words = len(source_text.split()) if source_text else 1
+    
+    from src.preprocess import split_sentences
+    pred_sents = len(split_sentences(prediction)) if prediction else 0
+    src_sents = len(split_sentences(source_text)) if source_text else 1
+
+    comp_ratio = round(pred_words / max(1, src_words), 4)
+    compression_details = {
+        "token_compression": round(pred_words / max(1, src_words), 4),
+        "sentence_compression": round(pred_sents / max(1, src_sents), 4),
+        "percent_reduction": round(100.0 * (1.0 - (pred_words / max(1, src_words))), 2),
+    }
 
     # Submit heavy metrics to background thread
+    # Use fallback if reference is not real (we can still compute semantic similarity vs source, which is valuable!)
     future: Future = _HEAVY_POOL.submit(_compute_heavy, prediction, reference)
     try:
         heavy = future.result(timeout=timeout)
@@ -243,6 +275,14 @@ def evaluate_summary(
         logger.warning("Heavy metrics error: %s", exc)
         heavy = _NULL_HEAVY.copy()
 
+    # Placeholders for Human Evaluation (fluency, readability, coherence, consistency)
+    human_eval = {
+        "readability": 0.0,
+        "fluency": 0.0,
+        "factual_consistency": 0.0,
+        "coherence": 0.0,
+    }
+
     return {
         "rouge1": rouge["rouge1"],
         "rouge2": rouge["rouge2"],
@@ -253,7 +293,11 @@ def evaluate_summary(
         "bertscore_f1": heavy["bertscore_f1"],
         "semantic_similarity": heavy["semantic_similarity"],
         "compression_ratio": comp_ratio,
+        "compression_details": compression_details,
         "processing_time": round(processing_time, 4),
+        "warning": warning_msg,
+        "is_biased": not is_real_reference,
+        "human_eval_ready": human_eval,
     }
 
 
@@ -265,22 +309,43 @@ def evaluate_summary_fast(
 ) -> tuple[dict, Future]:
     """
     Return ROUGE/BLEU immediately plus a Future for heavy metrics.
-
-    Use this in streaming endpoints where you want to push ROUGE/BLEU to the
-    client right away and heavy metrics later once the Future resolves.
-
-    Usage:
-        fast_metrics, heavy_future = evaluate_summary_fast(...)
-        # stream fast_metrics to client ...
-        try:
-            heavy = heavy_future.result(timeout=30)
-            fast_metrics.update(heavy)
-        except TimeoutError:
-            pass
     """
-    rouge = compute_rouge(prediction, reference)
-    bleu = compute_bleu(prediction, reference)
-    comp_ratio = compression_ratio(prediction, source_text)
+    cleaned_ref = clean_text(reference or "", aggressive=True)
+    cleaned_src = clean_text(source_text or "", aggressive=True)
+    
+    is_real_reference = True
+    if not cleaned_ref or cleaned_ref == cleaned_src:
+        is_real_reference = False
+
+    if is_real_reference or config.ALLOW_SOURCE_AS_REFERENCE:
+        rouge = compute_rouge(prediction, reference)
+        bleu = compute_bleu(prediction, reference)
+        warning_msg = None
+    else:
+        rouge = {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+        bleu = 0.0
+        warning_msg = "Reference summary not provided — overlap metrics may be biased."
+
+    pred_words = len(prediction.split()) if prediction else 0
+    src_words = len(source_text.split()) if source_text else 1
+    
+    from src.preprocess import split_sentences
+    pred_sents = len(split_sentences(prediction)) if prediction else 0
+    src_sents = len(split_sentences(source_text)) if source_text else 1
+
+    comp_ratio = round(pred_words / max(1, src_words), 4)
+    compression_details = {
+        "token_compression": round(pred_words / max(1, src_words), 4),
+        "sentence_compression": round(pred_sents / max(1, src_sents), 4),
+        "percent_reduction": round(100.0 * (1.0 - (pred_words / max(1, src_words))), 2),
+    }
+
+    human_eval = {
+        "readability": 0.0,
+        "fluency": 0.0,
+        "factual_consistency": 0.0,
+        "coherence": 0.0,
+    }
 
     base = {
         "rouge1": rouge["rouge1"],
@@ -289,7 +354,11 @@ def evaluate_summary_fast(
         "rougeLsum": rouge["rougeLsum"],
         "bleu": bleu,
         "compression_ratio": comp_ratio,
+        "compression_details": compression_details,
         "processing_time": round(processing_time, 4),
+        "warning": warning_msg,
+        "is_biased": not is_real_reference,
+        "human_eval_ready": human_eval,
         **_NULL_HEAVY,  # placeholders until future resolves
     }
     future: Future = _HEAVY_POOL.submit(_compute_heavy, prediction, reference)
