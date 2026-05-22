@@ -360,28 +360,9 @@ def _chart_payload(results: list[dict]) -> dict:
     }
 
 
-# ─────────────────────────── Public entry point ────────────────────────────
+# ─────────────────────────── Compare payload assembly ─────────────────────
 
-def summarize_all(
-    text: str,
-    reference: str | None = None,
-    algorithms: list[str] | None = None,
-    sentence_count: int = 5,
-    max_output_length: int = config.MAX_OUTPUT_LENGTH,
-    use_cache: bool = False,
-) -> dict:
-    """
-    Run all requested algorithms and return a unified comparison payload.
-
-    Extractive algorithms run concurrently; abstractive models run sequentially
-    on the GPU (one at a time) to avoid VRAM exhaustion.
-    """
-    del use_cache  # reserved for future Redis caching
-
-    cleaned = clean_text(text, aggressive=True)
-    if not cleaned or count_words(cleaned) < 5:
-        raise ValueError("Input text is empty or too short after preprocessing.")
-
+def _normalize_algorithm_keys(algorithms: list[str] | None) -> list[str]:
     selected = algorithms or DEFAULT_ALGORITHMS
     normalized_keys: list[str] = []
     for key in selected:
@@ -389,28 +370,49 @@ def summarize_all(
             normalized_keys.append(resolve_algorithm(key).key)
         except KeyError:
             logger.warning("Ignoring unsupported algorithm: %s", key)
+    return normalized_keys or DEFAULT_ALGORITHMS.copy()
 
-    if not normalized_keys:
-        normalized_keys = DEFAULT_ALGORITHMS
 
-    reference_text = clean_text(reference, aggressive=True) if reference else cleaned
+def _prepare_compare(
+    text: str,
+    reference: str | None,
+    algorithms: list[str] | None,
+    sentence_count: int,
+    max_output_length: int,
+) -> tuple[str, str, bool, list[str], list[str], list[str], int, int]:
+    cleaned = clean_text(text, aggressive=True)
+    if not cleaned or count_words(cleaned) < 5:
+        raise ValueError("Input text is empty or too short after preprocessing.")
 
-    # Split by group for targeted scheduling
+    normalized_keys = _normalize_algorithm_keys(algorithms)
+    reference_provided = bool(reference and clean_text(reference, aggressive=True))
+    reference_text = clean_text(reference, aggressive=True) if reference_provided else cleaned
     extractive_keys = [k for k in normalized_keys if k in EXTRACTIVE_ALGORITHMS]
     abstractive_keys = [k for k in normalized_keys if k in ABSTRACTIVE_ALGORITHMS]
-
-    t_total = time.perf_counter()
-    results = _run_all_parallel(
-        cleaned, reference_text,
-        extractive_keys, abstractive_keys,
-        sentence_count, max_output_length,
-    )
-    total_wall = time.perf_counter() - t_total
-    logger.info(
-        "🏁 summarize_all complete: %d algorithms in %.3f s  (ext=%d abs=%d)",
-        len(results), total_wall, len(extractive_keys), len(abstractive_keys),
+    return (
+        cleaned,
+        reference_text,
+        reference_provided,
+        normalized_keys,
+        extractive_keys,
+        abstractive_keys,
+        sentence_count,
+        max_output_length,
     )
 
+
+def _assemble_compare_result(
+    cleaned: str,
+    reference_provided: bool,
+    normalized_keys: list[str],
+    extractive_keys: list[str],
+    abstractive_keys: list[str],
+    results: list[dict],
+    sentence_count: int,
+    max_output_length: int,
+    total_wall: float,
+    reference_text: str,
+) -> dict:
     ranking = _rank_results(results)
     best_key = ranking[0]["key"] if ranking else None
 
@@ -439,8 +441,8 @@ def summarize_all(
             ),
         }
 
-    is_biased = not bool(reference)
-    
+    is_biased = not reference_provided
+
     research_analysis = {
         "extractive_insights": (
             "Extractive models (TextRank, LexRank, LSA) guarantee 100% factual consistency because they select "
@@ -487,13 +489,78 @@ def summarize_all(
         "meta": {
             "input_words": count_words(cleaned),
             "input_sentences": len(split_sentences(cleaned)),
-            "reference_provided": bool(reference),
+            "reference_provided": reference_provided,
             "reference_words": count_words(reference_text),
             "sentence_count": sentence_count,
             "max_output_length": max_output_length,
             "warning": "Reference summary not provided — overlap metrics may be biased." if is_biased else None
         },
     }
+
+
+# ─────────────────────────── Public entry point ────────────────────────────
+
+def summarize_all(
+    text: str,
+    reference: str | None = None,
+    algorithms: list[str] | None = None,
+    sentence_count: int = 5,
+    max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    use_cache: bool = False,
+) -> dict:
+    """
+    Run all requested algorithms and return a unified comparison payload.
+
+    Extractive algorithms run concurrently; abstractive models run sequentially
+    on the GPU (one at a time) to avoid VRAM exhaustion.
+    """
+    del use_cache  # reserved for future Redis caching
+
+    (
+        cleaned,
+        reference_text,
+        reference_provided,
+        normalized_keys,
+        extractive_keys,
+        abstractive_keys,
+        sentence_count,
+        max_output_length,
+    ) = _prepare_compare(text, reference, algorithms, sentence_count, max_output_length)
+
+    t_total = time.perf_counter()
+    results = _run_all_parallel(
+        cleaned,
+        reference_text,
+        extractive_keys,
+        abstractive_keys,
+        sentence_count,
+        max_output_length,
+    )
+    total_wall = time.perf_counter() - t_total
+    logger.info(
+        "🏁 summarize_all complete: %d algorithms in %.3f s  (ext=%d abs=%d)",
+        len(results),
+        total_wall,
+        len(extractive_keys),
+        len(abstractive_keys),
+    )
+    return _assemble_compare_result(
+        cleaned,
+        reference_provided,
+        normalized_keys,
+        extractive_keys,
+        abstractive_keys,
+        results,
+        sentence_count,
+        max_output_length,
+        total_wall,
+        reference_text,
+    )
+
+
+def _sse(event: str, **payload) -> str:
+    body = {"event": event, **payload}
+    return f"data: {json.dumps(body, ensure_ascii=False)}\n\n"
 
 
 # ─────────────────────────── SSE streaming helper ──────────────────────────
@@ -506,23 +573,77 @@ def stream_compare(
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
 ):
     """
-    Server-Sent Events generator that yields one JSON event per algorithm result.
-    The frontend receives each result as soon as it is ready (no full wait).
+    Server-Sent Events generator — yields running/done per algorithm as completed.
     """
-    algo_list = algorithms or DEFAULT_ALGORITHMS
-    yield (
-        f"data: {json.dumps({'event': 'start', 'algorithms': algo_list}, ensure_ascii=False)}\n\n"
-    )
     try:
-        result = summarize_all(text, reference, algo_list, sentence_count, max_output_length)
-        for row in result["results"]:
-            yield (
-                f"data: {json.dumps({'event': 'done', 'algorithm': row['key'], 'result': row}, ensure_ascii=False)}\n\n"
+        (
+            cleaned,
+            reference_text,
+            reference_provided,
+            normalized_keys,
+            extractive_keys,
+            abstractive_keys,
+            sentence_count,
+            max_output_length,
+        ) = _prepare_compare(text, reference, algorithms, sentence_count, max_output_length)
+    except ValueError as exc:
+        yield _sse("error", error=str(exc))
+        return
+
+    execution_order = extractive_keys + abstractive_keys
+    yield _sse("start", algorithms=execution_order, total=len(execution_order))
+
+    results_by_key: dict[str, dict] = {}
+    t_total = time.perf_counter()
+
+    try:
+        if extractive_keys:
+            with ThreadPoolExecutor(
+                max_workers=min(len(extractive_keys), config.EXTRACTIVE_WORKERS),
+                thread_name_prefix="ext_stream",
+            ) as pool:
+                futures = {
+                    pool.submit(
+                        _evaluate_result,
+                        key,
+                        cleaned,
+                        reference_text,
+                        sentence_count,
+                        max_output_length,
+                    ): key
+                    for key in extractive_keys
+                }
+                for key in extractive_keys:
+                    yield _sse("running", algorithm=key, index=execution_order.index(key) + 1, total=len(execution_order))
+                for future in as_completed(futures):
+                    key = futures[future]
+                    row = future.result()
+                    results_by_key[key] = row
+                    yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
+
+        for key in abstractive_keys:
+            yield _sse("running", algorithm=key, index=execution_order.index(key) + 1, total=len(execution_order))
+            row = _evaluate_result(
+                key, cleaned, reference_text, sentence_count, max_output_length
             )
-        yield (
-            f"data: {json.dumps({'event': 'finished', 'data': result}, ensure_ascii=False)}\n\n"
+            results_by_key[key] = row
+            yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
+
+        ordered = [results_by_key[k] for k in execution_order if k in results_by_key]
+        total_wall = time.perf_counter() - t_total
+        payload = _assemble_compare_result(
+            cleaned,
+            reference_provided,
+            normalized_keys,
+            extractive_keys,
+            abstractive_keys,
+            ordered,
+            sentence_count,
+            max_output_length,
+            total_wall,
+            reference_text,
         )
+        yield _sse("finished", data=payload)
     except Exception as exc:
-        yield (
-            f"data: {json.dumps({'event': 'error', 'error': str(exc)}, ensure_ascii=False)}\n\n"
-        )
+        logger.exception("stream_compare failed")
+        yield _sse("error", error=str(exc))

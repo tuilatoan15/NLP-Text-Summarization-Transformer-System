@@ -113,6 +113,7 @@ def train_model(args) -> dict:
         pad_to_multiple_of=8 if torch.cuda.is_available() else None,
     )
 
+    save_strategy = "no" if args.no_save else "steps"
     training_args = Seq2SeqTrainingArguments(
         output_dir=str(output_dir / "checkpoints"),
         num_train_epochs=args.epochs,
@@ -125,10 +126,10 @@ def train_model(args) -> dict:
         label_smoothing_factor=0.1,
         eval_strategy="steps",
         eval_steps=args.eval_steps,
-        save_strategy="steps",
+        save_strategy=save_strategy,
         save_steps=args.save_steps,
         save_total_limit=2,
-        load_best_model_at_end=True,
+        load_best_model_at_end=not args.no_save,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         predict_with_generate=True,
@@ -152,8 +153,9 @@ def train_model(args) -> dict:
 
     trainer.train()
     metrics = trainer.evaluate()
-    trainer.save_model(str(output_dir))
-    tokenizer.save_pretrained(str(output_dir))
+    if not args.no_save:
+        trainer.save_model(str(output_dir))
+        tokenizer.save_pretrained(str(output_dir))
     save_json(
         {
             "algorithm": algorithm.key,
@@ -189,6 +191,11 @@ def parse_args():
     parser.add_argument("--logging_steps", type=int, default=50)
     parser.add_argument("--early_stopping_patience", type=int, default=3)
     parser.add_argument("--no_cache", action="store_true")
+    parser.add_argument(
+        "--no_save",
+        action="store_true",
+        help="Skip checkpoint and final model saves (smoke tests when disk is low).",
+    )
     return parser.parse_args()
 
 

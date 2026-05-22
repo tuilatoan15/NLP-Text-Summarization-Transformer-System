@@ -27,10 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src import config
-from src.dashboard import summarize_all
+from src.dashboard import stream_compare, summarize_all
 from src.file_parser import SUPPORTED_EXTENSIONS, extract_text_from_file
 from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
@@ -299,6 +300,7 @@ async def root():
         "endpoints": [
             "/summarize",
             "/summarize/compare",
+            "/summarize/compare/stream",
             "/summarize/files",
             "/summarize/files/compare",
             "/models",
@@ -385,6 +387,27 @@ async def summarize_compare(request_body: CompareRequest):
         request_body.algorithms,
         request_body.extractive_sentences,
         request_body.max_abstractive_length,
+    )
+
+
+@app.post("/summarize/compare/stream", tags=["Summarization"])
+async def summarize_compare_stream(request_body: CompareRequest):
+    """SSE stream: start → running → done (per algorithm) → finished."""
+    text = _ensure_text(request_body.text)
+    return StreamingResponse(
+        stream_compare(
+            text=text,
+            reference=request_body.reference,
+            algorithms=request_body.algorithms,
+            sentence_count=request_body.extractive_sentences,
+            max_output_length=request_body.max_abstractive_length,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
