@@ -37,10 +37,6 @@ function byKey(key) {
   return ALGORITHMS.find(item => item.key === key) || { key, name: key, group: 'extractive', color: '#64748b' };
 }
 
-function groupLabel(group) {
-  return group === 'abstractive' ? 'Abstractive' : 'Extractive';
-}
-
 function initialRunState(keys) {
   return Object.fromEntries(keys.map(key => [key, { status: STATUS.queued, result: null, error: null }]));
 }
@@ -73,6 +69,9 @@ async function consumeCompareStream(response, onEvent) {
 }
 
 const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
+  const { t } = useApp();
+  const groupLabel = (group) => (group === 'abstractive' ? t('groupAbstractive') : t('groupExtractive'));
+
   const toggle = (key) => {
     if (disabled) return;
     setSelected(current =>
@@ -85,8 +84,12 @@ const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
       {['extractive', 'abstractive'].map(group => (
         <section key={group} className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-600">{groupLabel(group)}</h3>
-            <span className="text-xs text-gray-500">{selected.filter(key => byKey(key).group === group).length}/3</span>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              {groupLabel(group)}
+            </h3>
+            <span className="text-xs text-[var(--text-faint)]">
+              {selected.filter(key => byKey(key).group === group).length}/3
+            </span>
           </div>
           <div className="grid gap-2">
             {ALGORITHMS.filter(item => item.group === group).map(item => {
@@ -99,8 +102,8 @@ const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
                   onClick={() => toggle(item.key)}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition ${
                     isSelected
-                      ? 'bg-blue-50 border-blue-200 text-blue-600'
-                      : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                      ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
+                      : 'bg-[var(--surface-elevated)] border-[var(--border)] text-[var(--text-muted)] hover:border-blue-300 dark:hover:border-blue-700'
                   } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ background: item.color }} />
@@ -117,16 +120,17 @@ const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
 };
 
 const StatusBadge = ({ status }) => {
+  const { t } = useApp();
   const map = {
-    [STATUS.idle]: { label: 'Chờ chạy', className: 'bg-gray-100 text-gray-600' },
-    [STATUS.queued]: { label: 'Đang chờ', className: 'bg-slate-100 text-slate-600' },
-    [STATUS.running]: { label: 'Đang chạy', className: 'bg-blue-100 text-blue-700 algo-badge-pulse' },
-    [STATUS.done]: { label: 'Hoàn tất', className: 'bg-emerald-100 text-emerald-700' },
-    [STATUS.error]: { label: 'Lỗi', className: 'bg-red-100 text-red-700' },
+    [STATUS.idle]: { label: t('statusIdle'), className: 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400' },
+    [STATUS.queued]: { label: t('statusQueued'), className: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400' },
+    [STATUS.running]: { label: t('statusRunning'), className: 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 algo-badge-pulse' },
+    [STATUS.done]: { label: t('statusDone'), className: 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' },
+    [STATUS.error]: { label: t('statusError'), className: 'bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300' },
   };
   const item = map[status] || map[STATUS.idle];
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${item.className}`}>
+    <span className={`ui-badge ${item.className}`}>
       {status === STATUS.running && <Loader2 size={12} className="animate-spin" />}
       {item.label}
     </span>
@@ -134,6 +138,7 @@ const StatusBadge = ({ status }) => {
 };
 
 const AlgorithmCard = ({ algoKey, state, rank }) => {
+  const { t } = useApp();
   const meta = byKey(algoKey);
   const row = state.result;
   const isRunning = state.status === STATUS.running;
@@ -141,8 +146,8 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
 
   return (
     <article
-      className={`algo-card rounded-xl border bg-white dark:bg-slate-900 p-4 transition-all duration-300 ${
-        isRunning ? 'algo-card-running border-blue-300 dark:border-blue-600 shadow-md shadow-blue-100 dark:shadow-blue-900/30' : 'border-gray-200 dark:border-slate-700'
+      className={`algo-card ui-card p-4 transition-all duration-300 ${
+        isRunning ? 'algo-card-running border-blue-300 dark:border-blue-600 shadow-md shadow-blue-100 dark:shadow-blue-900/30' : ''
       } ${isDone ? 'algo-card-done' : ''}`}
       style={{ '--algo-color': meta.color }}
     >
@@ -153,49 +158,64 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
             style={{ background: meta.color }}
           />
           <div className="min-w-0">
-            <h3 className="font-semibold text-gray-900 truncate">{meta.name}</h3>
-            <p className="text-xs text-gray-500 capitalize">{meta.group}</p>
+            <h3 className="font-semibold text-[var(--text)] truncate">{meta.name}</h3>
+            <p className="text-xs text-[var(--text-muted)] capitalize">{meta.group}</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <StatusBadge status={state.status} />
           {rank != null && isDone && (
-            <span className="text-xs text-amber-600 font-medium">#{rank} xếp hạng</span>
+            <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+              {t('pgRank', { rank })}
+            </span>
           )}
         </div>
       </header>
 
       {isRunning && (
-        <div className="mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-sm text-blue-800 flex items-center gap-2">
+        <div className="mb-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 px-3 py-2 text-sm text-blue-800 dark:text-blue-200 flex items-center gap-2">
           <Loader2 size={16} className="animate-spin shrink-0" />
-          <span>Đang tóm tắt văn bản…</span>
+          <span>{t('pgSummarizing')}</span>
         </div>
       )}
 
       {state.status === STATUS.queued && (
-        <p className="text-sm text-gray-400 italic">Sẽ chạy sau các thuật toán trước…</p>
+        <p className="text-sm text-[var(--text-faint)] italic">{t('pgWillRun')}</p>
       )}
 
       {state.status === STATUS.error && (
-        <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{state.error || 'Không thể chạy thuật toán này.'}</p>
+        <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-lg p-2">
+          {state.error || t('pgAlgoError')}
+        </p>
       )}
 
       {isDone && row && (
         <div className="space-y-3 algo-summary-reveal">
-          <p className="text-sm text-gray-800 leading-relaxed border-l-4 pl-3" style={{ borderColor: meta.color }}>
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed border-l-4 pl-3" style={{ borderColor: meta.color }}>
             {row.summary || '—'}
           </p>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="px-2 py-1 rounded-md bg-gray-100 text-gray-700">
+            <span className="px-2 py-1 rounded-md bg-[var(--surface-inset)] text-[var(--text-secondary)]">
               <Clock size={12} className="inline mr-1 -mt-0.5" />
               {(row.processing_time ?? row.time_seconds ?? 0).toFixed(2)}s
             </span>
-            <span className="px-2 py-1 rounded-md bg-gray-100 text-gray-700">ROUGE-L {pct(metric(row, 'rougeL'))}</span>
-            <span className="px-2 py-1 rounded-md bg-gray-100 text-gray-700">BERT {pct(metric(row, 'bertscore_f1'))}</span>
-            <span className="px-2 py-1 rounded-md bg-gray-100 text-gray-700">{row.word_count ?? 0} từ</span>
+            <span className="px-2 py-1 rounded-md bg-[var(--surface-inset)] text-[var(--text-secondary)]">
+              ROUGE-L {pct(metric(row, 'rougeL'))}
+            </span>
+            <span className="px-2 py-1 rounded-md bg-[var(--surface-inset)] text-[var(--text-secondary)]">
+              BERT {pct(metric(row, 'bertscore_f1'))}
+            </span>
+            <span className="px-2 py-1 rounded-md bg-[var(--surface-inset)] text-[var(--text-secondary)]">
+              {t('pgWords', { count: row.word_count ?? 0 })}
+            </span>
+            {row.length_ratio_percent != null && (
+              <span className="px-2 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300">
+                {t('pgLengthOfSource', { pct: row.length_ratio_percent })}
+              </span>
+            )}
           </div>
           {row.warning_badge && (
-            <p className="text-xs text-amber-700 flex items-center gap-1">
+            <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1">
               <AlertCircle size={14} /> {row.warning_badge}
             </p>
           )}
@@ -203,76 +223,82 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
       )}
 
       {state.status === STATUS.idle && (
-        <p className="text-sm text-gray-400">Nhấn &quot;Chạy so sánh&quot; để xem bản tóm tắt.</p>
+        <p className="text-sm text-[var(--text-faint)]">{t('pgClickRun')}</p>
       )}
     </article>
   );
 };
 
 const RunProgress = ({ runningKey, completed, total, loading }) => {
+  const { t } = useApp();
   const pctDone = total ? Math.round((completed / total) * 100) : 0;
   const current = runningKey ? byKey(runningKey).name : null;
 
   return (
     <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
+        <div className="flex items-center gap-2 text-sm font-medium text-blue-900 dark:text-blue-100">
           {loading ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
           {loading
-            ? (current ? `Đang chạy: ${current}` : 'Đang khởi tạo…')
-            : 'Sẵn sàng chạy so sánh'}
+            ? (current ? t('pgProgressRunning', { name: current }) : t('pgProgressInit'))
+            : t('pgProgressReady')}
         </div>
-        <span className="text-sm font-semibold text-blue-700">{completed}/{total}</span>
+        <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{completed}/{total}</span>
       </div>
-      <div className="h-2 rounded-full bg-blue-100 overflow-hidden">
+      <div className="h-2 rounded-full bg-blue-100 dark:bg-blue-900/50 overflow-hidden">
         <div
-          className="h-full rounded-full bg-blue-600 transition-all duration-500 ease-out algo-progress-bar"
+          className="h-full rounded-full bg-blue-600 dark:bg-blue-500 transition-all duration-500 ease-out algo-progress-bar"
           style={{ width: `${loading ? Math.max(pctDone, runningKey ? 8 : 4) : 0}%` }}
         />
       </div>
-      <p className="text-xs text-blue-800/80">
-        {loading
-          ? 'Kết quả hiển thị ngay khi từng thuật toán hoàn thành — không cần chờ toàn bộ.'
-          : 'Chọn thuật toán bên trái và bấm Chạy so sánh.'}
+      <p className="text-xs text-blue-800/80 dark:text-blue-200/70">
+        {loading ? t('pgProgressHint') : t('pgProgressHintIdle')}
       </p>
     </div>
   );
 };
 
 const ComparisonTable = ({ rows }) => {
+  const { t } = useApp();
   if (!rows.length) return null;
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="border-b border-gray-200 px-4 py-3 bg-gray-50">
-        <h3 className="text-sm font-semibold text-gray-900">Bảng metrics (sau khi hoàn tất)</h3>
+    <div className="ui-card overflow-hidden">
+      <div className="border-b border-[var(--border)] px-4 py-3 bg-[var(--surface-inset)]">
+        <h3 className="text-sm font-semibold text-[var(--text)]">{t('pgMetricsTable')}</h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-xs uppercase text-gray-600 border-b border-gray-200">
+          <thead className="ui-table-head border-b">
             <tr>
-              <th className="px-4 py-3 text-left">Model</th>
-              <th className="px-4 py-3">ROUGE-1</th>
-              <th className="px-4 py-3">ROUGE-2</th>
-              <th className="px-4 py-3">ROUGE-L</th>
-              <th className="px-4 py-3">BERTScore</th>
-              <th className="px-4 py-3">Thời gian</th>
+              <th className="px-4 py-3 text-left">{t('colModel')}</th>
+              <th className="px-4 py-3">{t('colRouge1')}</th>
+              <th className="px-4 py-3">{t('colRouge2')}</th>
+              <th className="px-4 py-3">{t('colRougeL')}</th>
+              <th className="px-4 py-3">{t('colBert')}</th>
+              <th className="px-4 py-3">{t('colLength')}</th>
+              <th className="px-4 py-3">{t('colTime')}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-[var(--border-subtle)]">
             {rows.map(row => (
-              <tr key={row.key} className="hover:bg-gray-50">
-                <td className="px-4 py-3 font-medium">
+              <tr key={row.key} className="ui-table-row">
+                <td className="px-4 py-3 font-medium text-[var(--text)]">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full" style={{ background: byKey(row.key).color }} />
                     {row.algorithm}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-center">{pct(metric(row, 'rouge1'))}</td>
-                <td className="px-4 py-3 text-center">{pct(metric(row, 'rouge2'))}</td>
-                <td className="px-4 py-3 text-center">{pct(metric(row, 'rougeL'))}</td>
-                <td className="px-4 py-3 text-center">{pct(metric(row, 'bertscore_f1'))}</td>
-                <td className="px-4 py-3 text-center">{(row.processing_time ?? 0).toFixed(2)}s</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">{pct(metric(row, 'rouge1'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">{pct(metric(row, 'rouge2'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">{pct(metric(row, 'rougeL'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">{pct(metric(row, 'bertscore_f1'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">
+                  {row.length_ratio_percent != null ? `${row.length_ratio_percent}%` : '—'}
+                </td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)]">
+                  {(row.processing_time ?? 0).toFixed(2)}s
+                </td>
               </tr>
             ))}
           </tbody>
@@ -288,6 +314,8 @@ const Playground = () => {
   const [reference, setReference] = useState('');
   const [files, setFiles] = useState([]);
   const [selected, setSelected] = useState(ALGORITHMS.map(item => item.key));
+  const [lengthRatio, setLengthRatio] = useState(50);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [sentenceCount, setSentenceCount] = useState(5);
   const [maxLength, setMaxLength] = useState(150);
   const [loading, setLoading] = useState(false);
@@ -309,6 +337,16 @@ const Playground = () => {
     if (fromResult.length) return fromResult;
     return selected;
   }, [rows, selected]);
+
+  const sourceWordCount = useMemo(() => {
+    if (!text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  }, [text]);
+
+  const targetWordCount = useMemo(
+    () => Math.max(5, Math.round((sourceWordCount * lengthRatio) / 100)),
+    [sourceWordCount, lengthRatio],
+  );
 
   function applyBatchResults(data, keys) {
     const next = { ...initialRunState(keys) };
@@ -337,6 +375,9 @@ const Playground = () => {
         algorithms: selected,
         extractive_sentences: sentenceCount,
         max_abstractive_length: maxLength,
+        target_length_ratio: lengthRatio,
+        use_length_ratio: !advancedOpen,
+        save_result: true,
       }),
     });
 
@@ -385,6 +426,8 @@ const Playground = () => {
     form.append('algorithms', JSON.stringify(selected));
     form.append('extractive_sentences', String(sentenceCount));
     form.append('max_abstractive_length', String(maxLength));
+    form.append('target_length_ratio', String(lengthRatio));
+    form.append('save_result', 'true');
 
     setRunState(prev => {
       const next = { ...prev };
@@ -461,28 +504,28 @@ const Playground = () => {
   return (
     <div className="space-y-6 pb-12">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">{t('playgroundTitle')}</h1>
-        <p className="text-sm text-gray-500 dark:text-slate-400">{t('playgroundSubtitle')}</p>
+        <h1 className="ui-page-title mb-1">{t('playgroundTitle')}</h1>
+        <p className="ui-page-subtitle">{t('playgroundSubtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 p-6 h-fit lg:sticky lg:top-4">
+        <div className="ui-card p-6 h-fit lg:sticky lg:top-4">
           <form onSubmit={runComparison} className="space-y-5">
             <section className="space-y-2">
-              <label className="block text-sm font-semibold text-gray-900">Văn bản</label>
+              <label className="ui-label">{t('pgText')}</label>
               <textarea
                 value={text}
                 disabled={files.length > 0 || loading}
                 onChange={(e) => setText(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                placeholder="Dán văn bản tiếng Việt..."
+                className="ui-textarea"
+                placeholder={t('pgTextPlaceholder')}
                 rows={6}
               />
             </section>
 
             <section className="space-y-2">
-              <label className="block text-sm font-semibold text-gray-900">Hoặc tải file (PDF, DOCX, TXT)</label>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-500 transition">
+              <label className="ui-label">{t('pgFile')}</label>
+              <div className="border-2 border-dashed border-[var(--border)] rounded-lg p-4 text-center cursor-pointer hover:border-blue-500 dark:hover:border-blue-500 transition bg-[var(--surface-inset)]">
                 <input
                   type="file"
                   multiple
@@ -492,21 +535,24 @@ const Playground = () => {
                   id="file-upload"
                   accept=".pdf,.docx,.txt,.doc"
                 />
-                <label htmlFor="file-upload" className="cursor-pointer">
+                <label htmlFor="file-upload" className="cursor-pointer text-sm text-[var(--text-muted)]">
                   {files.length > 0
-                    ? `${files.length} file(s) selected`
-                    : 'Nhấp để chọn file hoặc kéo thả'}
+                    ? t('pgFileSelected', { count: files.length })
+                    : t('pgFilePick')}
                 </label>
               </div>
               {files.length > 0 && (
                 <div className="space-y-2">
                   {files.map((f, i) => (
-                    <div key={i} className="text-sm text-gray-600 flex justify-between items-center p-2 bg-gray-50 rounded">
-                      <span>{f.name}</span>
+                    <div
+                      key={i}
+                      className="text-sm text-[var(--text-secondary)] flex justify-between items-center p-2 bg-[var(--surface-inset)] rounded-lg"
+                    >
+                      <span className="truncate mr-2">{f.name}</span>
                       <button
                         type="button"
                         onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
-                        className="text-red-600 hover:text-red-700"
+                        className="text-red-600 dark:text-red-400 hover:text-red-700 shrink-0"
                       >
                         ×
                       </button>
@@ -517,60 +563,104 @@ const Playground = () => {
             </section>
 
             <section className="space-y-2">
-              <label className="block text-sm font-semibold text-gray-900">Tham khảo (tùy chọn)</label>
+              <label className="ui-label">{t('pgReference')}</label>
               <textarea
                 value={reference}
                 disabled={loading}
                 onChange={(e) => setReference(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                placeholder="Dùng để tính ROUGE..."
+                className="ui-textarea"
+                placeholder={t('pgReferencePlaceholder')}
                 rows={3}
               />
             </section>
 
             <section className="space-y-2">
-              <label className="block text-sm font-semibold text-gray-900">Thuật toán</label>
+              <label className="ui-label">{t('pgAlgorithms')}</label>
               <AlgorithmSelector selected={selected} setSelected={setSelected} disabled={loading} />
             </section>
 
-            <section className="grid grid-cols-2 gap-3">
-              <label className="space-y-2">
-                <span className="block text-xs font-semibold text-gray-600 uppercase">Sentences</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  disabled={loading}
-                  value={sentenceCount}
-                  onChange={(e) => setSentenceCount(Number(e.target.value))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
-                />
-              </label>
-              <label className="space-y-2">
-                <span className="block text-xs font-semibold text-gray-600 uppercase">Max Tokens</span>
-                <input
-                  type="number"
-                  min="24"
-                  max="512"
-                  disabled={loading}
-                  value={maxLength}
-                  onChange={(e) => setMaxLength(Number(e.target.value))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50"
-                />
-              </label>
+            <section className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase">
+                  {t('pgLengthRatio')}
+                </span>
+                <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{lengthRatio}%</span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                disabled={loading || advancedOpen}
+                value={lengthRatio}
+                onChange={(e) => setLengthRatio(Number(e.target.value))}
+                className="ui-range"
+              />
+              <p className="text-xs text-[var(--text-muted)]">
+                {t('pgLengthTarget', {
+                  target: targetWordCount,
+                  source: sourceWordCount || '—',
+                })}
+                {result?.meta?.target_words != null && (
+                  <> {t('pgLengthLastRun', { words: result.meta.target_words })}</>
+                )}
+              </p>
+            </section>
+
+            <section className="space-y-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setAdvancedOpen(v => !v)}
+                className="text-xs font-semibold text-[var(--text-muted)] hover:text-blue-600 dark:hover:text-blue-400 transition"
+              >
+                {advancedOpen ? t('pgAdvancedHide') : t('pgAdvancedShow')}
+              </button>
+              {advancedOpen && (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-2">
+                    <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase">
+                      {t('pgSentences')}
+                    </span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      disabled={loading}
+                      value={sentenceCount}
+                      onChange={(e) => setSentenceCount(Number(e.target.value))}
+                      className="ui-input"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase">
+                      {t('pgMaxTokens')}
+                    </span>
+                    <input
+                      type="number"
+                      min="24"
+                      max="512"
+                      disabled={loading}
+                      value={maxLength}
+                      onChange={(e) => setMaxLength(Number(e.target.value))}
+                      className="ui-input"
+                    />
+                  </label>
+                </div>
+              )}
             </section>
 
             <button
               type="submit"
               disabled={loading || selected.length === 0 || (!text.trim() && !files.length)}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className="ui-btn-primary w-full"
             >
               {loading ? <RefreshCcw className="animate-spin" size={17} /> : <Play size={17} />}
               {loading ? t('running') : t('runCompare')}
             </button>
 
             {error && (
-              <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg flex gap-2">
+              <div className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 p-3 rounded-lg flex gap-2 border border-red-200 dark:border-red-800/50">
                 <AlertCircle size={18} className="shrink-0" />
                 <span>{error}</span>
               </div>
@@ -598,7 +688,7 @@ const Playground = () => {
           </div>
 
           {result?.warning && (
-            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <p className="text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-4 py-3">
               {result.warning}
             </p>
           )}
@@ -606,9 +696,9 @@ const Playground = () => {
           {rows.length > 0 && <ComparisonTable rows={rows} />}
 
           {!loading && !rows.length && Object.keys(runState).length === 0 && (
-            <div className="rounded-xl border border-dashed border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 p-12 text-center">
-              <Sparkles className="mx-auto text-gray-300 mb-3" size={32} />
-              <p className="text-gray-500">Chạy so sánh để xem bản tóm tắt từng thuật toán</p>
+            <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-elevated)] p-12 text-center">
+              <Sparkles className="mx-auto text-[var(--text-faint)] mb-3" size={32} />
+              <p className="text-[var(--text-muted)]">{t('pgEmptyState')}</p>
             </div>
           )}
         </div>

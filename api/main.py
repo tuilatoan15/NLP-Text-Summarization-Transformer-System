@@ -31,7 +31,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src import config
+from src.analytics import get_dashboard_payload, list_recent_results
 from src.dashboard import stream_compare, summarize_all
+from src.storage import persist_compare_result
 from src.file_parser import SUPPORTED_EXTENSIONS, extract_text_from_file
 from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
@@ -63,6 +65,14 @@ class CompareRequest(BaseModel):
     algorithms: list[str] = Field(default_factory=lambda: DEFAULT_ALGORITHMS.copy())
     extractive_sentences: int = Field(default=5, ge=1, le=20)
     max_abstractive_length: int = Field(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512)
+    target_length_ratio: int = Field(
+        default=50,
+        ge=10,
+        le=100,
+        description="Target summary length as % of source word count (10–100).",
+    )
+    use_length_ratio: bool = Field(default=True)
+    save_result: bool = Field(default=True)
 
     @field_validator("text", "reference", mode="before")
     @classmethod
@@ -184,15 +194,23 @@ def _compare_or_400(
     algorithms: list[str],
     extractive_sentences: int,
     max_abstractive_length: int,
+    target_length_ratio: int = 50,
+    use_length_ratio: bool = True,
+    save_result: bool = True,
 ) -> dict:
     try:
-        return summarize_all(
+        compare = summarize_all(
             text=text,
             reference=reference,
             algorithms=algorithms,
             sentence_count=extractive_sentences,
             max_output_length=max_abstractive_length,
+            target_length_ratio=target_length_ratio,
+            use_length_ratio=use_length_ratio,
         )
+        if save_result:
+            compare["storage"] = persist_compare_result(compare)
+        return compare
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -306,6 +324,8 @@ async def root():
             "/models",
             "/health",
             "/metrics",
+            "/analytics/dashboard",
+            "/analytics/history",
         ],
     }
 
@@ -356,6 +376,17 @@ async def models():
     return {"models": list_algorithms()}
 
 
+@app.get("/analytics/dashboard", tags=["Analytics"])
+async def analytics_dashboard(time_range: str = "30d", limit: int = 15):
+    """Aggregated metrics and recent comparison runs from storage/results."""
+    return get_dashboard_payload(time_range=time_range, history_limit=limit)
+
+
+@app.get("/analytics/history", tags=["Analytics"])
+async def analytics_history(limit: int = 30):
+    return {"items": list_recent_results(limit)}
+
+
 # ─────────────────────────── Summarization endpoints ──────────────────────
 # All four endpoints below are interface-compatible with the old api/main.py.
 
@@ -374,6 +405,7 @@ async def summarize(request_body: SummarizeRequest):
         unique_algos,
         request_body.extractive_sentences,
         request_body.max_abstractive_length,
+        save_result=request_body.save_result,
     )
     return _legacy_response(compare, requested_model=model_key)
 
@@ -387,6 +419,9 @@ async def summarize_compare(request_body: CompareRequest):
         request_body.algorithms,
         request_body.extractive_sentences,
         request_body.max_abstractive_length,
+        target_length_ratio=request_body.target_length_ratio,
+        use_length_ratio=request_body.use_length_ratio,
+        save_result=request_body.save_result,
     )
 
 
@@ -401,6 +436,9 @@ async def summarize_compare_stream(request_body: CompareRequest):
             algorithms=request_body.algorithms,
             sentence_count=request_body.extractive_sentences,
             max_output_length=request_body.max_abstractive_length,
+            target_length_ratio=request_body.target_length_ratio,
+            use_length_ratio=request_body.use_length_ratio,
+            save_result=request_body.save_result,
         ),
         media_type="text/event-stream",
         headers={
@@ -437,6 +475,8 @@ async def summarize_files_compare(
     algorithms: Optional[str] = Form(default=None),
     extractive_sentences: int = Form(default=5, ge=1, le=20),
     max_abstractive_length: int = Form(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512),
+    target_length_ratio: int = Form(default=50, ge=10, le=100),
+    save_result: bool = Form(default=True),
 ):
     text, documents = await _read_uploads(files)
     selected = DEFAULT_ALGORITHMS.copy()
@@ -446,7 +486,15 @@ async def summarize_files_compare(
             selected = parsed if isinstance(parsed, list) else selected
         except Exception:
             selected = [p.strip() for p in algorithms.split(",") if p.strip()]
-    result = _compare_or_400(text, reference, selected, extractive_sentences, max_abstractive_length)
+    result = _compare_or_400(
+        text,
+        reference,
+        selected,
+        extractive_sentences,
+        max_abstractive_length,
+        target_length_ratio=target_length_ratio,
+        save_result=save_result,
+    )
     result["documents"] = documents
     return result
 

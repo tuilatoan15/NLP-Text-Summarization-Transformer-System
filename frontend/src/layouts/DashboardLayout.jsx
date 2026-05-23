@@ -5,7 +5,7 @@ import Header from './Header';
 
 const DashboardLayout = () => {
   return (
-    <div className="flex h-screen bg-[#F8F9FA] dark:bg-slate-950 overflow-hidden text-gray-800 dark:text-slate-200 font-sans transition-colors duration-200">
+    <div className="flex h-screen overflow-hidden font-sans transition-colors duration-200 bg-[var(--surface-muted)] text-[var(--text)]">
       {/* Sidebar is fixed width */}
       <Sidebar />
       

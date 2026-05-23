@@ -1,214 +1,289 @@
 """
-analytics.py — Tập hợp các hàm tổng hợp metrics cho dashboard.
-
-Các hàm chính:
- - _load_all_results(): đọc tất cả JSON trong `storage/results`
- - compute_dashboard_metrics(): trả về counters, trung bình ROUGE, token stats
- - get_visualization_data(): trả dữ liệu sẵn cho biểu đồ frontend
- - list_recent_results(): liệt kê metadata các kết quả đã lưu
-
-File format: dựa trên `storage.persist_result` và payloads từ API.
+analytics.py — Aggregate persisted comparison runs for the dashboard UI.
 """
 
+from __future__ import annotations
+
 import json
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean
-from typing import List
+from typing import Any
 
-from src.utils import ensure_dir
-
-
-RESULT_DIR    = Path("storage/results")
-BENCHMARK_DIR = Path("storage/benchmark_results")
+from src.storage import RESULT_DIR
 
 
-def _load_all_results() -> List[dict]:
+def _load_all_results() -> list[dict]:
     if not RESULT_DIR.exists():
         return []
     files = sorted(RESULT_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
-    results = []
-    for p in files:
+    results: list[dict] = []
+    for path in files:
         try:
-            results.append(json.loads(p.read_text(encoding="utf-8")))
+            results.append(json.loads(path.read_text(encoding="utf-8")))
         except Exception:
             continue
     return results
 
 
-def list_recent_results(limit: int = 20) -> List[dict]:
-    items = _load_all_results()
-    out = []
-    for r in items[-limit:][::-1]:
-        out.append({
-            "result_id": r.get("result_id"),
-            "created_at": r.get("created_at"),
-            "meta": r.get("meta") or {},
-            "summary_count": len(r.get("documents", [])) if r.get("documents") else (len(r.get("results", [])) if r.get("results") else 1),
-            "storage_path": r.get("storage", {}).get("local_path") if isinstance(r.get("storage"), dict) else None,
-        })
-    return out
+def _parse_created_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
 
 
-def compute_dashboard_metrics() -> dict:
-    items = _load_all_results()
-    total = len(items)
-    if total == 0:
-        return {
-            "total_summaries": 0,
-            "total_processing_time_seconds": 0,
-            "top_models": [],
-            "avg_rouge": {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0},
-            "token_stats": {},
-            "compression": {},
-        }
+def _filter_by_range(items: list[dict], time_range: str) -> list[dict]:
+    if time_range in ("all", ""):
+        return items
+    days = {"7d": 7, "30d": 30, "90d": 90}.get(time_range, 30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    filtered = []
+    for item in items:
+        created = _parse_created_at(item.get("created_at"))
+        if created is None or created >= cutoff:
+            filtered.append(item)
+    return filtered
 
-    model_counts = {}
-    rouge1_list = []
-    rouge2_list = []
-    rougeL_list = []
-    processing_times = []
-    input_lengths = []
-    summary_lengths = []
 
-    for r in items:
-        # processing_time may be top-level or per-document
-        pt = r.get("processing_time_seconds") or 0
-        if pt:
-            processing_times.append(float(pt))
-
-        # models used
-        model_name = None
-        if isinstance(r.get("controls"), dict):
-            model_name = r["controls"].get("model_name")
-        # fallback: some payloads store meta info
-        meta = r.get("meta") or {}
-        if not model_name and meta.get("model_name"):
-            model_name = meta.get("model_name")
-        if model_name:
-            model_counts[model_name] = model_counts.get(model_name, 0) + 1
-
-        # aggregate rouge if present in different formats
-        if r.get("scores") and isinstance(r.get("scores"), dict):
-            # scores from single-document pipeline: scores.extractive & abstractive
-            try:
-                ext = r["scores"].get("extractive", {})
-                rouge1_list.append(ext.get("rouge1", 0.0) or 0.0)
-                rouge2_list.append(ext.get("rouge2", 0.0) or 0.0)
-                rougeL_list.append(ext.get("rougeL", 0.0) or 0.0)
-            except Exception:
-                pass
-
-        # from compare results: r['results'] list
-        if r.get("results") and isinstance(r.get("results"), list):
-            for alg in r["results"]:
-                rouge = alg.get("rouge") or {}
-                rouge1_list.append(rouge.get("rouge1", 0.0) or 0.0)
-                rouge2_list.append(rouge.get("rouge2", 0.0) or 0.0)
-                rougeL_list.append(rouge.get("rougeL", 0.0) or 0.0)
-                # length
-                summary_lengths.append(alg.get("length_words") or 0)
-
-        # tokens
-        wc = (r.get("word_count") or {}).get("input") or meta.get("input_words")
-        if wc:
-            try:
-                input_lengths.append(int(wc))
-            except Exception:
-                pass
-
-        # try best summary length
-        if r.get("word_count"):
-            try:
-                summary_lengths.append(int(r["word_count"].get("best", 0) or 0))
-            except Exception:
-                pass
-
-    avg = lambda lst: (mean(lst) if lst else 0.0)
-
-    top_models = sorted(model_counts.items(), key=lambda x: -x[1])
-
-    compression = {}
-    if sum(input_lengths) > 0:
-        compression["avg_compression_ratio"] = round(sum(summary_lengths) / sum(input_lengths), 3) if sum(summary_lengths) > 0 else 0.0
-    else:
-        compression["avg_compression_ratio"] = 0.0
-
-    # BERTScore aggregate
-    bertscore_list = []
-    for r in items:
-        if r.get("results") and isinstance(r.get("results"), list):
-            for alg in r["results"]:
-                bs = alg.get("bertscore") or {}
-                if bs.get("f1"):
-                    bertscore_list.append(float(bs["f1"]))
-
+def _algorithm_metrics_from_row(alg: dict) -> dict:
+    metrics = alg.get("metrics") or {}
+    rouge = alg.get("rouge") or {}
+    bert = alg.get("bertscore") or {}
     return {
-        "total_summaries": total,
-        "total_processing_time_seconds": round(sum(processing_times), 2),
-        "top_models": [{"model": k, "count": v} for k, v in top_models[:10]],
-        "avg_rouge": {"rouge1": round(avg(rouge1_list), 4), "rouge2": round(avg(rouge2_list), 4), "rougeL": round(avg(rougeL_list), 4)},
-        "avg_bertscore_f1": round(avg(bertscore_list), 4),
-        "token_stats": {"min_input": min(input_lengths) if input_lengths else 0, "max_input": max(input_lengths) if input_lengths else 0, "median_input": sorted(input_lengths)[len(input_lengths)//2] if input_lengths else 0},
-        "compression": compression,
+        "rouge1": float(metrics.get("rouge1") or rouge.get("rouge1") or 0.0),
+        "rouge2": float(metrics.get("rouge2") or rouge.get("rouge2") or 0.0),
+        "rougeL": float(metrics.get("rougeL") or rouge.get("rougeL") or 0.0),
+        "bertscore_f1": float(
+            metrics.get("bertscore_f1") or bert.get("f1") or alg.get("bertscore_f1") or 0.0
+        ),
+        "processing_time": float(
+            metrics.get("processing_time") or alg.get("processing_time") or alg.get("time_seconds") or 0.0
+        ),
+        "length_ratio_percent": float(alg.get("length_ratio_percent") or 0.0),
     }
 
 
-def get_visualization_data() -> dict:
-    """Trả dữ liệu tổng hợp cho các biểu đồ frontend (ROUGE, time, length per model)."""
+def list_recent_results(limit: int = 20) -> list[dict]:
     items = _load_all_results()
-    model_buckets = {}
-    for r in items:
-        # try to determine model
-        model = None
-        if isinstance(r.get("controls"), dict):
-            model = r["controls"].get("model_name")
-        if not model and r.get("results"):
-            # take names from results
-            for alg in r["results"]:
-                m = alg.get("algorithm")
-                if m:
-                    model_buckets.setdefault(m, {"rougeL": [], "time": [], "length": []})
-                    rouge = alg.get("rouge") or {}
-                    model_buckets[m]["rougeL"].append(rouge.get("rougeL", 0.0) or 0.0)
-                    model_buckets[m]["time"].append(alg.get("time_seconds", 0.0) or 0.0)
-                    model_buckets[m]["length"].append(alg.get("length_words", 0) or 0)
-        else:
-            if model:
-                # single pipeline result
-                scores = r.get("scores") or {}
-                if isinstance(scores, dict):
-                    ext = scores.get("extractive") or {}
-                    model_buckets.setdefault(model, {"rougeL": [], "time": [], "length": []})
-                    model_buckets[model]["rougeL"].append(ext.get("rougeL", 0.0) or 0.0)
-                    model_buckets[model]["time"].append(r.get("processing_time_seconds", 0.0) or 0.0)
-                    model_buckets[model]["length"].append((r.get("word_count") or {}).get("best", 0) or 0)
-
-    labels = list(model_buckets.keys())
-    rouge_avg = [round(mean(model_buckets[m]["rougeL"]), 4) if model_buckets[m]["rougeL"] else 0.0 for m in labels]
-    time_avg = [round(mean(model_buckets[m]["time"]), 3) if model_buckets[m]["time"] else 0.0 for m in labels]
-    length_avg = [int(round(mean(model_buckets[m]["length"]))) if model_buckets[m]["length"] else 0 for m in labels]
-
-    return {"labels": labels, "rougeL_avg": rouge_avg, "time_avg": time_avg, "length_avg": length_avg}
+    out: list[dict] = []
+    for record in items[-limit:][::-1]:
+        meta = record.get("meta") or {}
+        best = record.get("best_model") or {}
+        if not best and record.get("ranking"):
+            best = record["ranking"][0]
+        out.append(
+            {
+                "result_id": record.get("result_id"),
+                "created_at": record.get("created_at"),
+                "type": record.get("type", "compare"),
+                "input_words": meta.get("input_words", 0),
+                "target_length_ratio": meta.get("target_length_ratio"),
+                "target_words": meta.get("target_words"),
+                "algorithm_count": len(record.get("results") or []),
+                "best_algorithm": best.get("algorithm"),
+                "best_score": best.get("combined_score"),
+                "text_preview": record.get("text_preview") or meta.get("input_preview", ""),
+                "processing_time_seconds": record.get("processing_time_seconds")
+                or (record.get("performance") or {}).get("total_wall_time_s"),
+                "storage_path": str(RESULT_DIR / f"{record.get('result_id')}.json")
+                if record.get("result_id")
+                else None,
+            }
+        )
+    return out
 
 
-def list_benchmark_results() -> List[dict]:
-    """Đọc tất cả file benchmark từ storage/benchmark_results/."""
-    if not BENCHMARK_DIR.exists():
+def compute_dashboard_metrics(time_range: str = "30d") -> dict:
+    items = _filter_by_range(_load_all_results(), time_range)
+    if not items:
+        return {
+            "total_runs": 0,
+            "total_algorithm_outputs": 0,
+            "total_processing_time_seconds": 0.0,
+            "avg_target_length_ratio": 0.0,
+            "avg_actual_length_ratio": 0.0,
+            "top_models": [],
+            "avg_rouge": {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0},
+            "avg_bertscore_f1": 0.0,
+        }
+
+    model_counts: dict[str, int] = defaultdict(int)
+    rouge1_list: list[float] = []
+    rouge2_list: list[float] = []
+    rougeL_list: list[float] = []
+    bert_list: list[float] = []
+    processing_times: list[float] = []
+    target_ratios: list[float] = []
+    actual_ratios: list[float] = []
+    total_outputs = 0
+
+    for record in items:
+        pt = record.get("processing_time_seconds") or (record.get("performance") or {}).get(
+            "total_wall_time_s"
+        )
+        if pt:
+            processing_times.append(float(pt))
+
+        meta = record.get("meta") or {}
+        if meta.get("target_length_ratio") is not None:
+            target_ratios.append(float(meta["target_length_ratio"]))
+
+        for alg in record.get("results") or []:
+            total_outputs += 1
+            name = alg.get("algorithm") or alg.get("key") or "unknown"
+            model_counts[name] += 1
+            m = _algorithm_metrics_from_row(alg)
+            rouge1_list.append(m["rouge1"])
+            rouge2_list.append(m["rouge2"])
+            rougeL_list.append(m["rougeL"])
+            bert_list.append(m["bertscore_f1"])
+            if m["length_ratio_percent"]:
+                actual_ratios.append(m["length_ratio_percent"])
+
+    avg = lambda lst: (mean(lst) if lst else 0.0)
+
+    return {
+        "total_runs": len(items),
+        "total_algorithm_outputs": total_outputs,
+        "total_processing_time_seconds": round(sum(processing_times), 2),
+        "avg_target_length_ratio": round(avg(target_ratios), 1),
+        "avg_actual_length_ratio": round(avg(actual_ratios), 1),
+        "top_models": [
+            {"model": k, "count": v} for k, v in sorted(model_counts.items(), key=lambda x: -x[1])[:10]
+        ],
+        "avg_rouge": {
+            "rouge1": round(avg(rouge1_list), 4),
+            "rouge2": round(avg(rouge2_list), 4),
+            "rougeL": round(avg(rougeL_list), 4),
+        },
+        "avg_bertscore_f1": round(avg(bert_list), 4),
+    }
+
+
+def get_model_performance(time_range: str = "30d") -> list[dict]:
+    items = _filter_by_range(_load_all_results(), time_range)
+    buckets: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {
+            "rouge1": [],
+            "rouge2": [],
+            "rougeL": [],
+            "bertscore_f1": [],
+            "length_ratio_percent": [],
+            "processing_time": [],
+        }
+    )
+
+    for record in items:
+        for alg in record.get("results") or []:
+            name = alg.get("algorithm") or alg.get("key") or "unknown"
+            m = _algorithm_metrics_from_row(alg)
+            for key, value in m.items():
+                buckets[name][key].append(value)
+
+    rows = []
+    for model, stats in buckets.items():
+        rows.append(
+            {
+                "model": model,
+                "count": len(stats["rougeL"]),
+                "rouge1": round(mean(stats["rouge1"]), 4) if stats["rouge1"] else 0.0,
+                "rouge2": round(mean(stats["rouge2"]), 4) if stats["rouge2"] else 0.0,
+                "rougeL": round(mean(stats["rougeL"]), 4) if stats["rougeL"] else 0.0,
+                "bertScore": round(mean(stats["bertscore_f1"]), 4) if stats["bertscore_f1"] else 0.0,
+                "avgLengthRatio": round(mean(stats["length_ratio_percent"]), 1)
+                if stats["length_ratio_percent"]
+                else 0.0,
+                "avgTime": round(mean(stats["processing_time"]), 3) if stats["processing_time"] else 0.0,
+            }
+        )
+    return sorted(rows, key=lambda r: -r["rougeL"])
+
+
+def get_runs_timeseries(time_range: str = "30d") -> list[dict]:
+    items = _filter_by_range(_load_all_results(), time_range)
+    by_day: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"date": "", "runs": 0, "avgRougeL": [], "avgBertScore": [], "avgLengthRatio": []}
+    )
+
+    for record in items:
+        created = _parse_created_at(record.get("created_at"))
+        day = (created or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        bucket = by_day[day]
+        bucket["date"] = day
+        bucket["runs"] += 1
+        meta = record.get("meta") or {}
+        if meta.get("target_length_ratio") is not None:
+            bucket["avgLengthRatio"].append(float(meta["target_length_ratio"]))
+
+        rouge_vals = []
+        bert_vals = []
+        for alg in record.get("results") or []:
+            m = _algorithm_metrics_from_row(alg)
+            rouge_vals.append(m["rougeL"])
+            bert_vals.append(m["bertscore_f1"])
+        if rouge_vals:
+            bucket["avgRougeL"].append(mean(rouge_vals))
+        if bert_vals:
+            bucket["avgBertScore"].append(mean(bert_vals))
+
+    series = []
+    for day in sorted(by_day.keys()):
+        b = by_day[day]
+        series.append(
+            {
+                "date": day,
+                "count": b["runs"],
+                "avgRougeL": round(mean(b["avgRougeL"]), 4) if b["avgRougeL"] else 0.0,
+                "avgBertScore": round(mean(b["avgBertScore"]), 4) if b["avgBertScore"] else 0.0,
+                "avgLengthRatio": round(mean(b["avgLengthRatio"]), 1) if b["avgLengthRatio"] else 0.0,
+            }
+        )
+    return series
+
+
+def get_visualization_data(time_range: str = "30d") -> dict:
+    return {
+        "model_performance": get_model_performance(time_range),
+        "timeseries": get_runs_timeseries(time_range),
+    }
+
+
+def get_dashboard_payload(time_range: str = "30d", history_limit: int = 15) -> dict:
+    return {
+        "metrics": compute_dashboard_metrics(time_range),
+        "visualization": get_visualization_data(time_range),
+        "recent_runs": list_recent_results(history_limit),
+        "time_range": time_range,
+    }
+
+
+def list_benchmark_results() -> list[dict]:
+    benchmark_dir = RESULT_DIR.parent / "benchmark_results"
+    if not benchmark_dir.exists():
         return []
     results = []
-    for p in sorted(BENCHMARK_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+    for path in sorted(benchmark_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
             agg = data.get("aggregate", data)
-            results.append({
-                "filename": p.name,
-                "dataset": agg.get("dataset_name"),
-                "model": agg.get("model_name"),
-                "samples": agg.get("samples_evaluated"),
-                "timestamp": agg.get("timestamp"),
-                "comparison": agg.get("comparison_all_algorithms", []),
-                "key_findings": agg.get("key_findings", []),
-            })
+            results.append(
+                {
+                    "filename": path.name,
+                    "dataset": agg.get("dataset_name"),
+                    "model": agg.get("model_name"),
+                    "samples": agg.get("samples_evaluated"),
+                    "timestamp": agg.get("timestamp"),
+                    "comparison": agg.get("comparison_all_algorithms", []),
+                    "key_findings": agg.get("key_findings", []),
+                }
+            )
         except Exception:
             continue
     return results

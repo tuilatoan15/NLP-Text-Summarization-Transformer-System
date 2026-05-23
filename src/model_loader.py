@@ -137,27 +137,40 @@ class ModelRegistry:
             algorithm.key, tok_vocab, model_vocab, model.config.vocab_size,
         )
 
-        # NEVER auto-resize ViT5 embeddings. Safe fallback to original pretrained tokenizer if mismatch.
-        if len(tokenizer) != model.config.vocab_size or model_vocab != tok_vocab:
-            logger.warning(
-                f"[{algorithm.key}] tokenizer/model vocab mismatch (len={len(tokenizer)}, config={model.config.vocab_size}, embed={model_vocab})"
-            )
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(
-                    algorithm.model_name,
-                    use_fast=False,
-                    legacy=True,
-                )
-                if algorithm.key == "vit5":
-                    tokenizer.clean_up_tokenization_spaces = True
-                return tokenizer
-            except Exception as exc:
-                logger.error("[%s] Failed to load fallback hub tokenizer: %s", algorithm.key, exc)
+        loaded_from_hub = model_path == algorithm.model_name
 
-        # For non-ViT5 models, fallback or resize if difference is small and config allows
+        # Fine-tuned local checkpoints: keep paired tokenizer, resize embeddings if needed.
+        if algorithm.key in {"mt5", "bartpho"} and not loaded_from_hub:
+            diff = abs(model_vocab - tok_vocab)
+            if diff <= 256 and model_vocab != tok_vocab:
+                model.resize_token_embeddings(tok_vocab)
+                logger.info("[%s] Aligned embeddings to local tokenizer size %d", algorithm.key, tok_vocab)
+            return tokenizer
+
+        # NEVER auto-resize ViT5 embeddings. Safe fallback to hub tokenizer when loading pretrained.
+        if algorithm.key == "vit5" and loaded_from_hub:
+            if len(tokenizer) != model.config.vocab_size or model_vocab != tok_vocab:
+                logger.warning(
+                    "[%s] tokenizer/model vocab mismatch (len=%d, config=%d, embed=%d)",
+                    algorithm.key,
+                    len(tokenizer),
+                    model.config.vocab_size,
+                    model_vocab,
+                )
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        algorithm.model_name,
+                        use_fast=False,
+                        legacy=True,
+                    )
+                    tokenizer.clean_up_tokenization_spaces = True
+                    return tokenizer
+                except Exception as exc:
+                    logger.error("[%s] Failed to load fallback hub tokenizer: %s", algorithm.key, exc)
+
         if algorithm.key != "vit5":
             diff = abs(model_vocab - tok_vocab)
-            if diff <= 256:
+            if diff <= 256 and model_vocab != tok_vocab:
                 model.resize_token_embeddings(tok_vocab)
                 logger.warning("[%s] Resized token embeddings to %d", algorithm.key, tok_vocab)
                 return tokenizer

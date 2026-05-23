@@ -41,14 +41,14 @@ const Header = () => {
   }, [notifOpen, setNotifOpen]);
 
   return (
-    <header className="bg-white dark:bg-slate-900 border-b border-gray-100 dark:border-slate-800 h-16 flex items-center justify-between px-6 sticky top-0 z-20 w-full">
+    <header className="bg-[var(--surface-elevated)] border-b border-[var(--border)] h-16 flex items-center justify-between px-6 sticky top-0 z-20 w-full transition-colors duration-200 backdrop-blur-sm bg-opacity-95 dark:bg-opacity-95">
       <div className="flex-1 max-w-xl">
         <div className="relative group">
           <Search className="w-4 h-4 text-gray-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder={t('searchPlaceholder')}
-            className="w-full bg-gray-50 dark:bg-slate-800 border border-transparent dark:border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 transition-all"
+            className="ui-input !pl-10 bg-[var(--surface-inset)] border-transparent focus:border-[var(--border)]"
           />
           <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1">
             <kbd className="border border-gray-200 dark:border-slate-600 rounded px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 shadow-sm">Ctrl</kbd>

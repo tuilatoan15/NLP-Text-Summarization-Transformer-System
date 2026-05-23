@@ -36,7 +36,6 @@ export function AppProvider({ children }) {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     localStorage.setItem(STORAGE_THEME, theme);
-    document.body.style.backgroundColor = theme === 'dark' ? '#0f172a' : '#f9fafb';
   }, [theme]);
 
   useEffect(() => {

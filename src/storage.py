@@ -26,6 +26,25 @@ def save_upload_file(file_obj, filename: str) -> Path:
     return destination
 
 
+def persist_compare_result(compare: dict[str, Any], *, input_preview: str | None = None) -> dict:
+    """Persist a multi-algorithm comparison run for dashboard history."""
+    meta = compare.get("meta") or {}
+    preview = (input_preview or meta.get("input_preview") or "")[:500]
+    payload = {
+        "type": "compare",
+        "algorithms": compare.get("algorithms", []),
+        "results": compare.get("results", []),
+        "ranking": compare.get("ranking", []),
+        "best_model": compare.get("best_model"),
+        "meta": meta,
+        "performance": compare.get("performance", {}),
+        "warning": compare.get("warning"),
+        "text_preview": preview,
+        "processing_time_seconds": (compare.get("performance") or {}).get("total_wall_time_s", 0),
+    }
+    return persist_result(payload)
+
+
 def persist_result(payload: dict[str, Any]) -> dict:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     result_id = payload.get("result_id") or uuid4().hex

@@ -56,11 +56,15 @@ def tokenize_batch(examples, tokenizer, model_key: str, max_input_len: int, max_
 
 
 def build_compute_metrics(tokenizer):
+    vocab_size = int(getattr(tokenizer, "vocab_size", len(tokenizer)))
+
     def compute_metrics(eval_pred):
         predictions, labels = eval_pred
         if isinstance(predictions, tuple):
             predictions = predictions[0]
+        predictions = np.clip(np.asarray(predictions), 0, vocab_size - 1)
         labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+        labels = np.clip(np.asarray(labels), 0, vocab_size - 1)
         decoded_preds = tokenizer.batch_decode(
             predictions,
             skip_special_tokens=True,
@@ -76,6 +80,20 @@ def build_compute_metrics(tokenizer):
         return compute_rouge_batch(decoded_preds, decoded_labels)
 
     return compute_metrics
+
+
+def _training_schedule(args, train_size: int) -> dict:
+    """Pick eval/save cadence from dataset size (tuned for ~2000 VNExpress samples)."""
+    steps_per_epoch = max(
+        1,
+        train_size // max(1, args.batch_size * args.gradient_accumulation_steps),
+    )
+    eval_steps = args.eval_steps
+    save_steps = args.save_steps
+    if args.auto_schedule:
+        eval_steps = max(50, min(250, steps_per_epoch // 3))
+        save_steps = eval_steps
+    return {"eval_steps": eval_steps, "save_steps": save_steps, "steps_per_epoch": steps_per_epoch}
 
 
 def train_model(args) -> dict:
@@ -96,6 +114,14 @@ def train_model(args) -> dict:
         dataset_name=args.dataset_name,
         max_samples=args.max_samples,
         use_cache=not args.no_cache,
+    )
+    schedule = _training_schedule(args, len(dataset["train"]))
+    logger.info(
+        "Training schedule: train=%s val=%s steps/epoch≈%s eval/save every %s steps",
+        len(dataset["train"]),
+        len(dataset["validation"]),
+        schedule["steps_per_epoch"],
+        schedule["eval_steps"],
     )
 
     tokenized = dataset.map(
@@ -125,21 +151,22 @@ def train_model(args) -> dict:
         weight_decay=args.weight_decay,
         label_smoothing_factor=0.1,
         eval_strategy="steps",
-        eval_steps=args.eval_steps,
+        eval_steps=schedule["eval_steps"],
         save_strategy=save_strategy,
-        save_steps=args.save_steps,
+        save_steps=schedule["save_steps"],
         save_total_limit=2,
         load_best_model_at_end=not args.no_save,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        predict_with_generate=True,
-        generation_max_length=64,
+        predict_with_generate=not args.skip_rouge_eval,
+        generation_max_length=args.max_target_tokens,
         fp16=torch.cuda.is_available(),
         dataloader_num_workers=0,
         logging_steps=args.logging_steps,
         report_to="none",
     )
 
+    compute_metrics = None if args.skip_rouge_eval else build_compute_metrics(tokenizer)
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
@@ -147,7 +174,7 @@ def train_model(args) -> dict:
         eval_dataset=tokenized["validation"],
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=build_compute_metrics(tokenizer),
+        compute_metrics=compute_metrics,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience)],
     )
 
@@ -188,6 +215,11 @@ def parse_args():
     parser.add_argument("--max_target_tokens", type=int, default=64)
     parser.add_argument("--eval_steps", type=int, default=500)
     parser.add_argument("--save_steps", type=int, default=500)
+    parser.add_argument(
+        "--auto_schedule",
+        action="store_true",
+        help="Derive eval/save steps from train set size (recommended for 2000-sample runs).",
+    )
     parser.add_argument("--logging_steps", type=int, default=50)
     parser.add_argument("--early_stopping_patience", type=int, default=3)
     parser.add_argument("--no_cache", action="store_true")
@@ -195,6 +227,11 @@ def parse_args():
         "--no_save",
         action="store_true",
         help="Skip checkpoint and final model saves (smoke tests when disk is low).",
+    )
+    parser.add_argument(
+        "--skip_rouge_eval",
+        action="store_true",
+        help="Use eval_loss only (faster on CPU; skips generate+ROUGE during training).",
     )
     return parser.parse_args()
 

@@ -29,6 +29,7 @@ import re
 import threading
 import time
 from collections import defaultdict
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
 
@@ -119,7 +120,23 @@ def _run_abstractive(
         summary = summarizer.summarize(text, max_output_length=max_output_length)
 
     fallback_used = not summary
-    if fallback_used:
+    if summary:
+        from src.output_validator import is_garbled_abstractive, validate_output
+
+        validation = validate_output(
+            summary,
+            require_vietnamese=key in {"vit5", "mt5"},
+        )
+        if validation["is_corrupted"] or is_garbled_abstractive(summary):
+            logger.warning(
+                "[%s] Bad output (%s) — TextRank fallback",
+                key,
+                validation.get("quality_warning") or "garbled",
+            )
+            summary = _fallback_summary(text, sentence_count)
+            fallback_used = True
+
+    if fallback_used and not summary:
         summary = _fallback_summary(text, sentence_count)
         logger.warning("[%s] Empty generation — using TextRank fallback", key)
 
@@ -147,6 +164,8 @@ def _evaluate_result(
     reference: str,
     sentence_count: int,
     max_output_length: int,
+    target_words: int | None = None,
+    source_words: int | None = None,
 ) -> dict:
     """Build a full result row for a single algorithm (extractive OR abstractive)."""
     algorithm = resolve_algorithm(key)
@@ -169,6 +188,11 @@ def _evaluate_result(
         summary = _fallback_summary(text, sentence_count)
         explainability = {"error": error, "fallback_used": True}
 
+    if target_words and summary:
+        from src.length_control import trim_summary_to_word_budget
+
+        summary = trim_summary_to_word_budget(summary, target_words)
+
     duration = time.perf_counter() - start
     logger.info(
         "⏱  [%s] inference done in %.3f s  words_out=%d",
@@ -178,21 +202,27 @@ def _evaluate_result(
     metrics = evaluate_summary(summary, reference, text, duration)
     metrics["combined_score"] = _combined_score(metrics)
 
+    src_w = source_words or count_words(text)
+    from src.length_control import length_ratio_percent
+
+    actual_length_ratio = length_ratio_percent(count_words(summary), src_w)
+
     # 5. Handle mT5 experimental state
     is_experimental = False
     warning_badge = None
     if algorithm.key == "mt5" and config.MT5_EXPERIMENTAL:
         is_experimental = True
         warning_badge = "Experimental Baseline"
-        # If output length is substantial, also check for latin char ratio to see if it's junk
         if summary:
-            # Measure ratio of standard english-only ASCII letters over total letters to catch multilingual leaks
-            total_letters = len(re.findall(r'[a-zA-Z]', summary))
-            total_vi_letters = len(re.findall(r'[a-zA-ZÀ-ỹĐđ]', summary))
-            # If standard English chars are heavily dominant compared to Vietnamese chars, it's likely multilingual junk
-            if total_letters > 0 and (total_letters / max(1, total_vi_letters)) > 0.85:
+            from src.output_validator import is_multilingual_garbage
+
+            local_dir = Path(algorithm.local_dir or "")
+            has_finetuned = local_dir.exists() and any(local_dir.iterdir())
+            if is_multilingual_garbage(summary, require_vietnamese=not has_finetuned):
                 warning_badge = "Experimental (Corrupt Multilingual)"
-        logger.warning("[%s] Marked as experimental baseline — ranking contribution disabled", algorithm.key)
+            elif has_finetuned:
+                warning_badge = "mT5 Fine-tuned"
+        logger.debug("[%s] experimental flag=%s badge=%s", algorithm.key, is_experimental, warning_badge)
 
     return {
         "key": algorithm.key,
@@ -200,6 +230,8 @@ def _evaluate_result(
         "group": algorithm.group,
         "summary": summary,
         "word_count": count_words(summary),
+        "length_ratio_percent": actual_length_ratio,
+        "target_words": target_words,
         "metrics": metrics,
         "rouge": {
             "rouge1": metrics["rouge1"],
@@ -235,6 +267,8 @@ def _run_all_parallel(
     abstractive_keys: list[str],
     sentence_count: int,
     max_output_length: int,
+    target_words: int,
+    source_words: int,
 ) -> list[dict]:
     """
     Strategy
@@ -258,7 +292,14 @@ def _run_all_parallel(
         ) as ext_pool:
             ext_futures = {
                 ext_pool.submit(
-                    _evaluate_result, key, text, reference, sentence_count, max_output_length
+                    _evaluate_result,
+                    key,
+                    text,
+                    reference,
+                    sentence_count,
+                    max_output_length,
+                    target_words,
+                    source_words,
                 ): key
                 for key in extractive_keys
             }
@@ -275,7 +316,14 @@ def _run_all_parallel(
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="abs_gpu") as abs_pool:
             abs_futures = {
                 abs_pool.submit(
-                    _evaluate_result, key, text, reference, sentence_count, max_output_length
+                    _evaluate_result,
+                    key,
+                    text,
+                    reference,
+                    sentence_count,
+                    max_output_length,
+                    target_words,
+                    source_words,
                 ): key
                 for key in abstractive_keys
             }
@@ -379,10 +427,24 @@ def _prepare_compare(
     algorithms: list[str] | None,
     sentence_count: int,
     max_output_length: int,
-) -> tuple[str, str, bool, list[str], list[str], list[str], int, int]:
+    target_length_ratio: int | None = None,
+    use_length_ratio: bool = True,
+) -> tuple[str, str, bool, list[str], list[str], list[str], int, int, int, int, dict]:
     cleaned = clean_text(text, aggressive=True)
     if not cleaned or count_words(cleaned) < 5:
         raise ValueError("Input text is empty or too short after preprocessing.")
+
+    from src.length_control import compute_length_targets
+
+    length_meta = compute_length_targets(
+        cleaned,
+        target_length_ratio if target_length_ratio is not None else 100,
+        sentence_count=sentence_count if not use_length_ratio else None,
+        max_output_length=max_output_length if not use_length_ratio else None,
+    )
+    if use_length_ratio and target_length_ratio is not None:
+        sentence_count = length_meta["sentence_count"]
+        max_output_length = length_meta["max_output_length"]
 
     normalized_keys = _normalize_algorithm_keys(algorithms)
     reference_provided = bool(reference and clean_text(reference, aggressive=True))
@@ -398,6 +460,9 @@ def _prepare_compare(
         abstractive_keys,
         sentence_count,
         max_output_length,
+        length_meta["target_words"],
+        length_meta["target_length_ratio"],
+        length_meta,
     )
 
 
@@ -412,7 +477,10 @@ def _assemble_compare_result(
     max_output_length: int,
     total_wall: float,
     reference_text: str,
+    target_length_ratio: int = 100,
+    length_controls: dict | None = None,
 ) -> dict:
+    input_words = count_words(cleaned)
     ranking = _rank_results(results)
     best_key = ranking[0]["key"] if ranking else None
 
@@ -487,13 +555,17 @@ def _assemble_compare_result(
             "abstractive_count": len(abstractive_keys),
         },
         "meta": {
-            "input_words": count_words(cleaned),
+            "input_words": input_words,
             "input_sentences": len(split_sentences(cleaned)),
+            "input_preview": cleaned[:400],
             "reference_provided": reference_provided,
             "reference_words": count_words(reference_text),
             "sentence_count": sentence_count,
             "max_output_length": max_output_length,
-            "warning": "Reference summary not provided — overlap metrics may be biased." if is_biased else None
+            "target_length_ratio": target_length_ratio,
+            "target_words": (length_controls or {}).get("target_words"),
+            "length_controls": length_controls or {},
+            "warning": "Reference summary not provided — overlap metrics may be biased." if is_biased else None,
         },
     }
 
@@ -506,6 +578,8 @@ def summarize_all(
     algorithms: list[str] | None = None,
     sentence_count: int = 5,
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    target_length_ratio: int = 50,
+    use_length_ratio: bool = True,
     use_cache: bool = False,
 ) -> dict:
     """
@@ -525,8 +599,20 @@ def summarize_all(
         abstractive_keys,
         sentence_count,
         max_output_length,
-    ) = _prepare_compare(text, reference, algorithms, sentence_count, max_output_length)
+        target_words,
+        target_length_ratio,
+        length_controls,
+    ) = _prepare_compare(
+        text,
+        reference,
+        algorithms,
+        sentence_count,
+        max_output_length,
+        target_length_ratio=target_length_ratio,
+        use_length_ratio=use_length_ratio,
+    )
 
+    source_words = count_words(cleaned)
     t_total = time.perf_counter()
     results = _run_all_parallel(
         cleaned,
@@ -535,6 +621,8 @@ def summarize_all(
         abstractive_keys,
         sentence_count,
         max_output_length,
+        target_words,
+        source_words,
     )
     total_wall = time.perf_counter() - t_total
     logger.info(
@@ -555,6 +643,8 @@ def summarize_all(
         max_output_length,
         total_wall,
         reference_text,
+        target_length_ratio,
+        length_controls,
     )
 
 
@@ -571,6 +661,9 @@ def stream_compare(
     algorithms: list[str] | None = None,
     sentence_count: int = 5,
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
+    target_length_ratio: int = 50,
+    use_length_ratio: bool = True,
+    save_result: bool = True,
 ):
     """
     Server-Sent Events generator — yields running/done per algorithm as completed.
@@ -585,11 +678,23 @@ def stream_compare(
             abstractive_keys,
             sentence_count,
             max_output_length,
-        ) = _prepare_compare(text, reference, algorithms, sentence_count, max_output_length)
+            target_words,
+            target_length_ratio,
+            length_controls,
+        ) = _prepare_compare(
+            text,
+            reference,
+            algorithms,
+            sentence_count,
+            max_output_length,
+            target_length_ratio=target_length_ratio,
+            use_length_ratio=use_length_ratio,
+        )
     except ValueError as exc:
         yield _sse("error", error=str(exc))
         return
 
+    source_words = count_words(cleaned)
     execution_order = extractive_keys + abstractive_keys
     yield _sse("start", algorithms=execution_order, total=len(execution_order))
 
@@ -610,6 +715,8 @@ def stream_compare(
                         reference_text,
                         sentence_count,
                         max_output_length,
+                        target_words,
+                        source_words,
                     ): key
                     for key in extractive_keys
                 }
@@ -624,7 +731,13 @@ def stream_compare(
         for key in abstractive_keys:
             yield _sse("running", algorithm=key, index=execution_order.index(key) + 1, total=len(execution_order))
             row = _evaluate_result(
-                key, cleaned, reference_text, sentence_count, max_output_length
+                key,
+                cleaned,
+                reference_text,
+                sentence_count,
+                max_output_length,
+                target_words,
+                source_words,
             )
             results_by_key[key] = row
             yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
@@ -642,7 +755,13 @@ def stream_compare(
             max_output_length,
             total_wall,
             reference_text,
+            target_length_ratio,
+            length_controls,
         )
+        if save_result:
+            from src.storage import persist_compare_result
+
+            payload["storage"] = persist_compare_result(payload)
         yield _sse("finished", data=payload)
     except Exception as exc:
         logger.exception("stream_compare failed")

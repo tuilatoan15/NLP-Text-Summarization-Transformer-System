@@ -16,22 +16,22 @@ const Sidebar = () => {
   ];
 
   return (
-    <aside className="w-64 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col h-screen fixed left-0 top-0 z-30">
+    <aside className="w-64 bg-[var(--surface-elevated)] border-r border-[var(--border)] flex flex-col h-screen fixed left-0 top-0 z-30 transition-colors duration-200">
       <div className="p-6">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-lg">
+          <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-xl shadow-sm shadow-blue-500/20">
             <LineChart className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-gray-900 dark:text-slate-100 leading-tight">{t('appName')}</h1>
-            <p className="text-xs text-gray-500 dark:text-slate-400">{t('appTagline')}</p>
+            <h1 className="font-bold text-[var(--text)] leading-tight">{t('appName')}</h1>
+            <p className="text-xs text-[var(--text-muted)]">{t('appTagline')}</p>
           </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         <div className="mb-6">
-          <p className="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider mb-3 px-2">
+          <p className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider mb-3 px-2">
             {t('navSectionOverview')}
           </p>
           <nav className="space-y-1">
@@ -44,8 +44,8 @@ const Sidebar = () => {
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isActive
-                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400'
-                        : 'text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-slate-100'
+                        ? 'bg-[var(--accent-muted)] text-blue-600 dark:text-blue-400'
+                        : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)] hover:text-[var(--text)]'
                     }`
                   }
                 >
@@ -58,23 +58,33 @@ const Sidebar = () => {
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider mb-3 px-2">
+          <p className="text-xs font-semibold text-[var(--text-faint)] uppercase tracking-wider mb-3 px-2">
             {t('navSectionCore')}
           </p>
           <nav className="space-y-1">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 dark:text-slate-600 cursor-not-allowed">
-              <MessageSquare className="w-4 h-4" />
-              {t('navChat')}
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[var(--text-faint)] cursor-not-allowed opacity-70">
+              <span className="flex items-center gap-3">
+                <MessageSquare className="w-4 h-4" />
+                {t('navChat')}
+              </span>
+              <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--surface-inset)]">
+                {t('comingSoon')}
+              </span>
             </div>
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 dark:text-slate-600 cursor-not-allowed">
-              <Library className="w-4 h-4" />
-              {t('navRag')}
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[var(--text-faint)] cursor-not-allowed opacity-70">
+              <span className="flex items-center gap-3">
+                <Library className="w-4 h-4" />
+                {t('navRag')}
+              </span>
+              <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--surface-inset)]">
+                {t('comingSoon')}
+              </span>
             </div>
           </nav>
         </div>
       </div>
 
-      <div className="p-4 border-t border-gray-100 dark:border-slate-800 text-xs text-center text-gray-400 dark:text-slate-500">
+      <div className="p-4 border-t border-[var(--border)] text-xs text-center text-[var(--text-faint)]">
         v1.0.0-beta
       </div>
     </aside>

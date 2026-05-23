@@ -124,12 +124,19 @@ def _select_summary(
         }
         for idx in selected_idxs
     ]
-    summary = " ".join(item["sentence"] for item in selected)
+    from src.preprocess import dedupe_similar_sentences, fix_decimal_spacing
+
+    ordered_sentences = dedupe_similar_sentences([item["sentence"] for item in selected])
+    summary = fix_decimal_spacing(" ".join(ordered_sentences))
     return summary, selected
 
 
 def _prepare_sentences(text: str) -> list[str]:
-    return split_sentences(clean_text(text, aggressive=True))
+    from src.preprocess import dedupe_similar_sentences, is_editorial_noise_sentence
+
+    sentences = split_sentences(clean_text(text, aggressive=True))
+    filtered = [s for s in sentences if not is_editorial_noise_sentence(s)]
+    return dedupe_similar_sentences(filtered)
 
 
 def _details(summary: str, selected: list[dict], source_sentences: list[str], algorithm: str) -> dict:

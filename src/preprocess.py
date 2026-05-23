@@ -46,6 +46,14 @@ def remove_html_tags(text: str) -> str:
         return re.sub(r"<[^>]+>", " ", html.unescape(text))
 
 
+def fix_decimal_spacing(text: str) -> str:
+    """Repair decimals broken by punctuation spacing (4. 0 -> 4.0, 9, 25 -> 9,25)."""
+    text = re.sub(r"(\d)\s*\.\s*(\d)", r"\1.\2", text)
+    text = re.sub(r"(\d)\s*,\s*(\d)", r"\1,\2", text)
+    text = re.sub(r"(\d)\s*-\s*(\d)", r"\1-\2", text)
+    return text
+
+
 def normalize_punctuation(text: str) -> str:
     replacements = {
         "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
@@ -57,9 +65,11 @@ def normalize_punctuation(text: str) -> str:
     text = re.sub(r"([!?]){2,}", r"\1", text)
     text = re.sub(r"([,;:]){2,}", r"\1", text)
     text = re.sub(r"\.{3,}", "...", text)
+    # Do not insert spaces inside decimals (4.0, 3-3.5).
+    text = re.sub(r"(?<!\d)\.(?!\d)(?=[A-Za-zÀ-ỹĐđ])", ". ", text)
     text = re.sub(r"\s*([,;:!?])\s*", r"\1 ", text)
     text = re.sub(r"\s+\.", ".", text)
-    return text
+    return fix_decimal_spacing(text)
 
 
 def remove_noise_characters(text: str) -> str:
@@ -73,12 +83,82 @@ def remove_noise_characters(text: str) -> str:
 def normalize_whitespace(text: str) -> str:
     text = re.sub(r"[\r\t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"([.,;:!?])([^\s])", r"\1 \2", text)
     text = re.sub(rf"([{VI_LETTER_RE}])(\d)", r"\1 \2", text)
     text = re.sub(rf"(\d)([{VI_LETTER_RE}])", r"\1 \2", text)
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     text = re.sub(r"[ ]{2,}", " ", text)
     return "\n".join(line.strip() for line in text.splitlines()).strip()
+
+
+def strip_editorial_chrome(text: str) -> str:
+    """
+    Remove VnExpress-style UI noise: duplicate headlines, photo captions, carousel markers.
+    """
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    seen_headlines: set[str] = set()
+
+    for raw_line in re.split(r"[\r\n]+", text):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.fullmatch(r"\d{1,3}", line):
+            continue
+        if re.fullmatch(r"\d+\s*/\s*\d+", line):
+            continue
+        if re.search(r"\bảnh\s*:", line, flags=re.IGNORECASE):
+            continue
+        if re.search(
+            r"^[^.!?]{0,100},\s*tốt nghiệp ngành[^.!?]{0,120}\.\s*ảnh\s*:",
+            line,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        if re.search(r"^theo\s+(vne|vnexpress)", line, flags=re.IGNORECASE):
+            continue
+
+        headline_key = re.sub(r"\s+", " ", line.lower())[:140]
+        if len(line) < 140 and headline_key in seen_headlines:
+            continue
+        if len(line) < 140:
+            seen_headlines.add(headline_key)
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def is_editorial_noise_sentence(sentence: str) -> bool:
+    """True for captions, carousel markers, and other non-content sentences."""
+    s = (sentence or "").strip()
+    if not s or len(s) < 12:
+        return True
+    if re.fullmatch(r"\d{1,3}", s):
+        return True
+    if re.fullmatch(r"\d+\s*/\s*\d+", s):
+        return True
+    if re.search(r"\bảnh\s*:", s, flags=re.IGNORECASE):
+        return True
+    if re.search(r"nhân vật cung c[ấa]p", s, flags=re.IGNORECASE) and len(s) < 220:
+        return True
+    if s.count("Ảnh:") + s.count("ảnh:") >= 2:
+        return True
+    return False
+
+
+def dedupe_similar_sentences(sentences: list[str]) -> list[str]:
+    """Drop near-duplicate sentences while preserving order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for sentence in sentences:
+        key = re.sub(r"\s+", " ", sentence.lower().strip())[:160]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(sentence)
+    return unique
 
 
 def clean_text(text: str, aggressive: bool = False) -> str:
@@ -89,9 +169,11 @@ def clean_text(text: str, aggressive: bool = False) -> str:
     if aggressive:
         text = URL_RE.sub(" ", text)
         text = EMAIL_RE.sub(" ", text)
+        text = strip_editorial_chrome(text)
     text = normalize_punctuation(text)
     text = remove_noise_characters(text)
     text = normalize_whitespace(text)
+    text = fix_decimal_spacing(text)
     return text
 
 
@@ -229,7 +311,8 @@ def clean_generated_summary(text: str) -> str:
     # 9. Telex and Delimiter cleanup for ViT5 model output
     text = post_clean_vit5_telex(text)
 
-    return normalize_whitespace(text)
+    text = normalize_whitespace(text)
+    return fix_decimal_spacing(text)
 
 
 def post_clean_vit5_telex(text: str) -> str:

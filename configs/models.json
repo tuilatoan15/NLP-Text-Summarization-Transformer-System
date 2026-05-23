@@ -33,7 +33,8 @@
       "prefix": "summarize: ",
       "max_input_tokens": 512,
       "max_target_tokens": 128,
-      "recommended": false
+      "recommended": true,
+      "notes": "Fine-tune on VNExpress (2000 samples) before production use."
     },
     "bartpho": {
       "name": "BARTPho",
