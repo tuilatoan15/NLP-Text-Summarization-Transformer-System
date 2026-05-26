@@ -63,7 +63,7 @@ Extractive algorithms:
 - TextRank: graph ranking sentence importance.
 - LexRank: thresholded similarity graph.
 - LSA: latent semantic concept scoring.
-- TF-IDF ranking: planned additional baseline.
+- TF-IDF ranking: aggregate term-weight sentence baseline.
 
 Abstractive algorithms:
 

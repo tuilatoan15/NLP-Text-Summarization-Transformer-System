@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+      - name: Run pytest
+        env:
+          PRELOAD_MODELS: '0'
+          ENABLE_DB_PERSISTENCE: '0'
+        run: |
+          python -m pytest tests/test_document_intelligence.py tests/test_tfidf_extractive.py tests/test_explainability_api.py tests/test_hierarchical_summarize.py tests/test_hallucination_audit.py tests/test_extractive.py -q

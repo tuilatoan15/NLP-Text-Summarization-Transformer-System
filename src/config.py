@@ -146,6 +146,23 @@ NUM_EPOCHS = int(os.getenv("NUM_EPOCHS", "3"))
 WEIGHT_DECAY = float(os.getenv("WEIGHT_DECAY", "0.01"))
 WARMUP_STEPS = int(os.getenv("WARMUP_STEPS", "100"))
 
+# ─────────────────────────── INFRA ─────────────────────────
+DOCUMENT_INTELLIGENCE_DIR = Path(
+    os.getenv("DOCUMENT_INTELLIGENCE_DIR", str(STORAGE_DIR / "document_intelligence"))
+)
+DOCUMENT_INTELLIGENCE_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+REDIS_URL = os.getenv("REDIS_URL", "")
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "local").lower()
+CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "agentic")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "agentic-secret")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "documents")
+DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "BAAI/bge-m3")
+ENABLE_DB_PERSISTENCE = os.getenv("ENABLE_DB_PERSISTENCE", "0") == "1"
+
 # ─────────────────────────── LOGGING ───────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 

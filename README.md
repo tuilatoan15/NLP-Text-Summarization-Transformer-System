@@ -34,8 +34,18 @@ Hệ thống tóm tắt văn bản tiếng Việt toàn diện, tích hợp các
 ```
 NLP-Text-Summarization-Transformer-System/
 │
-├── api/
-│   └── main.py                ← FastAPI server & lifespan (Preload & Diagnostics)
+├── api/                       ← FastAPI routers (legacy entry: python -m api.main)
+├── backend/                   ← Modular backend (entry: python -m backend.app.main)
+│   ├── app/main.py
+│   └── services/              ← Redis cache, shared infra
+│
+├── summarizers/               ← Extractive + abstractive algorithm packages
+├── embeddings/                ← Sentence-transformers + FAISS/NumPy vector index
+├── evaluation/                ← ROUGE, BERTScore, semantic metrics
+├── visualization/             ← Dashboard chart payloads
+├── ai_models/                 ← Model registry aliases
+├── pipeline/ loaders/ preprocess/  ← Document ingest subsystem
+├── research/ datasets/ scripts/ docs/
 │
 ├── src/
 │   ├── config.py              ← Quản lý cấu hình tập trung (Env-based)
@@ -91,6 +101,8 @@ Backend hỗ trợ tự động tải trước các mô hình để sẵn sàng 
 ```bash
 $env:PYTHONIOENCODING="utf-8"
 python -m api.main
+# or modular entry:
+python -m backend.app.main
 ```
 
 * **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
@@ -107,6 +119,24 @@ npm run dev
 ```
 
 * Truy cập giao diện tại: [http://localhost:5173](http://localhost:5173)
+
+## 🔎 Document Intelligence routes (Iteration 2)
+
+Frontend is now split into dedicated routes under `/documents/*`:
+
+- `/documents/upload`
+- `/documents/analysis`
+- `/documents/compare`
+- `/documents/evaluation`
+- `/documents/search`
+- `/documents/explainability`
+- `/documents/notebook`
+
+New backend endpoints:
+
+- `GET /documents/{document_id}/explainability?algorithm=textrank`
+- `POST /documents/{document_id}/summarize/hierarchical`
+- `POST /documents/{document_id}/podcast/tts`
 
 ---
 

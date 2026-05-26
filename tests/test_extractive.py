@@ -6,7 +6,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from src.extractive import extractive_summarize, extractive_summarize_with_details, lexrank_summarize
+from src.extractive import (
+    extractive_summarize,
+    extractive_summarize_with_details,
+    lexrank_summarize,
+    tfidf_summarize,
+)
 
 SAMPLE = """
 Hội nghị thượng đỉnh G7 năm nay diễn ra tại Hiroshima, Nhật Bản với sự tham dự
@@ -67,3 +72,17 @@ class TestLexRankSummarize:
         result = lexrank_summarize(SAMPLE, sentence_count=3)
         assert isinstance(result, str)
         assert len(result.strip()) > 0
+
+
+class TestTfidfSummarize:
+    def test_returns_string(self):
+        result = tfidf_summarize(SAMPLE, sentence_count=3)
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+
+    def test_details_include_algorithm(self):
+        from src.extractive import summarize_extractive_algorithm
+
+        result = summarize_extractive_algorithm(SAMPLE, "tfidf", sentence_count=2)
+        assert result.get("algorithm") == "TF-IDF"
+        assert len(result.get("selected_sentences", [])) >= 1

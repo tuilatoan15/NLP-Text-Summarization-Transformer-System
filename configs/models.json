@@ -14,6 +14,11 @@
       "name": "LSA Summarizer",
       "sentence_count": 5,
       "notes": "SVD over TF-IDF sentence matrix."
+    },
+    "tfidf": {
+      "name": "TF-IDF Ranking",
+      "sentence_count": 5,
+      "notes": "Aggregate TF-IDF sentence scoring baseline."
     }
   },
   "abstractive": {

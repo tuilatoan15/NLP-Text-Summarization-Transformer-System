@@ -12,9 +12,12 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Web
 from pydantic import BaseModel, Field
 
 from src import config
-from src.document_intelligence import DEFAULT_ANALYSIS_ALGORITHMS, service
+from backend.services.document_service import DocumentService
+from src.document_intelligence import DEFAULT_ANALYSIS_ALGORITHMS
 from src.file_parser import SUPPORTED_EXTENSIONS
 from src.utils import logger
+
+service = DocumentService()
 
 
 router = APIRouter(prefix="/documents", tags=["Document Intelligence"])
@@ -28,6 +31,11 @@ class DocumentCompareRequest(BaseModel):
     max_abstractive_length: int = Field(default=180, ge=24, le=512)
 
 
+class HierarchicalRequest(BaseModel):
+    model_key: str = Field(default="vit5")
+    use_extractive_map: bool = Field(default=False)
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
@@ -35,7 +43,14 @@ class SearchRequest(BaseModel):
 
 @router.get("")
 async def list_documents(limit: int = Query(default=30, ge=1, le=100)):
-    return {"items": service.list_documents(limit=limit)}
+    return {"items": await service.list_documents_async(limit=limit)}
+
+
+@router.get("/embedding-models")
+async def list_embedding_models():
+    from embeddings.embedder import EmbeddingModelRegistry
+
+    return {"models": EmbeddingModelRegistry.list_models()}
 
 
 @router.post("/ingest")
@@ -52,7 +67,7 @@ async def ingest_document(
     content = await file.read()
     target.write_bytes(content)
     try:
-        payload = await _to_thread(service.ingest_file, target, include_embeddings=include_embeddings, embedding_model=embedding_model)
+        payload = await service.ingest_file_async(target, include_embeddings=include_embeddings, embedding_model=embedding_model)
         return payload
     except Exception as exc:
         logger.exception("Document ingest failed")
@@ -62,7 +77,7 @@ async def ingest_document(
 @router.get("/{document_id}")
 async def get_document(document_id: str):
     try:
-        return service.get_document(document_id)
+        return await service.get_document_async(document_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -78,8 +93,7 @@ async def semantic_search(document_id: str, request: SearchRequest):
 @router.post("/{document_id}/compare")
 async def compare_summaries(document_id: str, request: DocumentCompareRequest):
     try:
-        return await _to_thread(
-            service.compare_summaries,
+        return await service.compare_summaries_async(
             document_id,
             reference=request.reference,
             algorithms=request.algorithms,
@@ -94,10 +108,50 @@ async def compare_summaries(document_id: str, request: DocumentCompareRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/{document_id}/explainability")
+async def document_explainability(document_id: str, algorithm: str = Query(default="textrank")):
+    try:
+        return service.explain_extractive(document_id, algorithm)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/summarize/hierarchical")
+async def hierarchical_summary(document_id: str, request: HierarchicalRequest):
+    try:
+        return await _to_thread(
+            service.hierarchical_summarize,
+            document_id,
+            model_key=request.model_key,
+            use_extractive_map=request.use_extractive_map,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/podcast/tts")
+async def export_podcast_tts(document_id: str):
+    from backend.services.tts_service import TTSService
+    from backend.db.repository import DocumentRepository
+
+    try:
+        payload = await service.get_document_async(document_id)
+        script = (payload.get("analysis_assets") or {}).get("podcast") or {}
+        tts = TTSService().export_podcast(document_id, script)
+        repo = DocumentRepository()
+        if repo.enabled and tts.get("audio_uri"):
+            await repo.save_podcast_script(document_id, {**script, **tts}, tts.get("audio_uri"))
+        return tts
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/{document_id}/assets")
 async def document_assets(document_id: str):
     try:
-        payload = service.get_document(document_id)
+        payload = await service.get_document_async(document_id)
         return payload.get("analysis_assets") or service.generate_assets(payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -106,7 +160,7 @@ async def document_assets(document_id: str):
 @router.get("/{document_id}/visualization")
 async def document_visualization(document_id: str):
     try:
-        payload = service.get_document(document_id)
+        payload = await service.get_document_async(document_id)
         return payload.get("visualization") or service.build_visualization(payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -116,7 +170,7 @@ async def document_visualization(document_id: str):
 async def document_stream(websocket: WebSocket, document_id: str):
     await websocket.accept()
     try:
-        payload = service.get_document(document_id)
+        payload = await service.get_document_async(document_id)
         await websocket.send_json({"event": "loaded", "document_id": document_id, "metadata": payload.get("metadata", {})})
         while True:
             raw = await websocket.receive_text()
@@ -134,7 +188,48 @@ async def document_stream(websocket: WebSocket, document_id: str):
         return
     except Exception as exc:
         logger.exception("Document websocket failed")
-        await websocket.send_json({"event": "error", "detail": str(exc)})
+        try:
+            await websocket.send_json({"event": "error", "detail": str(exc)})
+        except Exception:
+            pass
+
+
+@router.get("/{document_id}/report/html")
+async def export_report_html(document_id: str):
+    from fastapi.responses import HTMLResponse
+    from backend.services.report_generator import ReportGenerator
+
+    try:
+        payload = await service.get_document_async(document_id)
+        compare_data = None
+        try:
+            compare_data = await service.compare_summaries_async(document_id)
+        except Exception:
+            pass
+        
+        html_content = ReportGenerator().generate_html(payload, compare_data)
+        return HTMLResponse(content=html_content, status_code=200)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{document_id}/report/markdown")
+async def export_report_markdown(document_id: str):
+    from fastapi.responses import PlainTextResponse
+    from backend.services.report_generator import ReportGenerator
+
+    try:
+        payload = await service.get_document_async(document_id)
+        compare_data = None
+        try:
+            compare_data = await service.compare_summaries_async(document_id)
+        except Exception:
+            pass
+        
+        md_content = ReportGenerator().generate_markdown(payload, compare_data)
+        return PlainTextResponse(content=md_content, status_code=200)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 async def _to_thread(fn, *args, **kwargs):

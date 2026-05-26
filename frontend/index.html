@@ -11,6 +11,40 @@
           if (t === 'dark') document.documentElement.classList.add('dark');
         } catch (e) {}
       })();
+      window.addEventListener('error', function(event) {
+        showError('Runtime Error', event.message, event.filename + ':' + event.lineno + ':' + event.colno, event.error ? event.error.stack : '');
+      });
+      window.addEventListener('unhandledrejection', function(event) {
+        showError('Unhandled Promise Rejection', event.reason, '', event.reason && event.reason.stack ? event.reason.stack : '');
+      });
+      function showError(title, message, loc, stack) {
+        var container = document.getElementById('error-overlay') || document.createElement('div');
+        container.id = 'error-overlay';
+        container.style.position = 'fixed';
+        container.style.top = '0';
+        container.style.left = '0';
+        container.style.width = '100%';
+        container.style.height = '100%';
+        container.style.backgroundColor = '#fff';
+        container.style.color = '#ef4444';
+        container.style.padding = '30px';
+        container.style.fontFamily = 'monospace';
+        container.style.zIndex = '999999';
+        container.style.overflow = 'auto';
+        container.style.boxSizing = 'border-box';
+        container.innerHTML = '<h1 style="font-size:24px;margin-bottom:10px;">🔴 ' + title + '</h1>' +
+          '<p style="font-size:16px;font-weight:bold;margin:10px 0;">' + message + '</p>' +
+          (loc ? '<p style="color:#6b7280;"><b>Location:</b> ' + loc + '</p>' : '') +
+          '<pre style="background:#f3f4f6;padding:15px;border-radius:6px;color:#1f2937;overflow-x:auto;white-space:pre-wrap;">' + (stack || 'No stack trace available') + '</pre>';
+        if (!container.parentElement) {
+          var checkBody = setInterval(function() {
+            if (document.body) {
+              clearInterval(checkBody);
+              document.body.appendChild(container);
+            }
+          }, 50);
+        }
+      }
     </script>
   </head>
   <body>
@@ -18,3 +52,4 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+

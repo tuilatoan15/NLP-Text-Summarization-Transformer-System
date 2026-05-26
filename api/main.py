@@ -146,7 +146,7 @@ app = FastAPI(
     version=config.API_VERSION,
     description=(
         "Research API for comparing Vietnamese text summarization algorithms. "
-        "Supports TextRank, LexRank, LSA (extractive) and ViT5, mT5, BARTPho (abstractive). "
+        "Supports TextRank, LexRank, LSA, TF-IDF (extractive) and ViT5, mT5, BARTPho (abstractive). "
         "All models are preloaded on startup for zero-latency inference."
     ),
     docs_url="/docs",
