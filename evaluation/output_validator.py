@@ -79,18 +79,17 @@ def is_multilingual_garbage(text: str, *, require_vietnamese: bool = False) -> b
 
     text_nfc = unicodedata.normalize("NFC", text)
     foreign_ratio = foreign_script_ratio(text_nfc)
-    if foreign_ratio >= 0.12:
-        return True
-
-    letters = [ch for ch in text_nfc if ch.isalpha()]
-    if len(letters) >= 4 and foreign_ratio > 0:
+    # Allow a reasonable ratio of foreign script characters (up to 15%) for mixed/scientific text
+    if foreign_ratio >= 0.15:
         return True
 
     if require_vietnamese:
         vi_ratio = vietnamese_letter_ratio(text_nfc)
-        if len(letters) >= 8 and vi_ratio < 0.08:
+        letters = [ch for ch in text_nfc if ch.isalpha()]
+        # Softened thresholds to prevent flagging short or low-accent valid texts
+        if len(letters) >= 15 and vi_ratio < 0.03:
             return True
-        if len(letters) >= 4 and vi_ratio == 0.0 and len(text_nfc.split()) >= 2:
+        if len(letters) >= 8 and vi_ratio == 0.0 and len(text_nfc.split()) >= 4:
             return True
 
     return False

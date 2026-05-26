@@ -6,6 +6,7 @@ import Overview from './pages/Overview';
 import Playground from './pages/Playground';
 import ModelSettings from './pages/ModelSettings';
 import Analytics from './pages/Analytics';
+import ComparisonPage from './pages/ComparisonPage';
 import DocumentLayout from './pages/documents/DocumentLayout';
 import DocumentUpload from './pages/documents/DocumentUpload';
 import DocumentAnalysis from './pages/documents/DocumentAnalysis';
@@ -23,6 +24,7 @@ const App = () => {
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<Overview />} />
             <Route path="/playground" element={<Playground />} />
+            <Route path="/comparison" element={<ComparisonPage />} />
             <Route path="/documents" element={<DocumentLayout />}>
               <Route index element={<Navigate to="upload" replace />} />
               <Route path="upload" element={<DocumentUpload />} />

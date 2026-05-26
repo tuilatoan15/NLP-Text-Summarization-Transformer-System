@@ -19,7 +19,22 @@ def _load_all_results() -> list[dict]:
     results: list[dict] = []
     for path in files:
         try:
-            results.append(json.loads(path.read_text(encoding="utf-8")))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            # Normalize dictionary-based results (from legacy/benchmark runs) to list-of-dicts
+            if isinstance(data.get("results"), dict):
+                norm_results = []
+                for k, v in data["results"].items():
+                    if isinstance(v, dict):
+                        item = {
+                            "key": k,
+                            "algorithm": k,
+                            "group": v.get("type") or ("extractive" if k in ["textrank", "lexrank", "lsa"] else "abstractive"),
+                            "metrics": v,
+                        }
+                        item.update(v)
+                        norm_results.append(item)
+                data["results"] = norm_results
+            results.append(data)
         except Exception:
             continue
     return results

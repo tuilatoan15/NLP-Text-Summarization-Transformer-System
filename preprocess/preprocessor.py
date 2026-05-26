@@ -287,10 +287,6 @@ def post_clean_vit5_telex(text: str) -> str:
     pattern_telex_leak = r"\b([a-zA-ZÀ-ỹđĐ]*[áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđĐ]+[a-zA-ZÀ-ỹđĐ]*)([jZzWwsrxf]+)\b"
     text = re.sub(pattern_telex_leak, r"\1", text)
     
-    uppercase_tonal_vowels = "ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼẾỀỂỄỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỶỸỸ"
-    pattern_uppercase_tonal_leak = rf"\b([a-zA-ZÀ-ỹđĐ]+?)([{uppercase_tonal_vowels}]+)[a-zA-ZÀ-ỹđĐ]*\b"
-    text = re.sub(pattern_uppercase_tonal_leak, r"\1", text)
-    
     specific_fixes = {
         r"\bmổi\b": "mỗi",
         r"\bmổij\b": "mỗi",

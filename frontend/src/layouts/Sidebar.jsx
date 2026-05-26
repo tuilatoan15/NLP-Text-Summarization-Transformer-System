@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Settings2, LineChart, PlaySquare, Library, MessageSquare,
+  LayoutDashboard, Settings2, LineChart, PlaySquare, Library, MessageSquare, Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -11,6 +11,7 @@ const Sidebar = () => {
   const navItems = [
     { nameKey: 'navOverview', path: '/', icon: LayoutDashboard },
     { nameKey: 'navPlayground', path: '/playground', icon: PlaySquare },
+    { nameKey: 'navComparison', path: '/comparison', icon: Zap, label: '🔬 Comparison' },
     { nameKey: 'navDocuments', path: '/documents', icon: Library },
     { nameKey: 'navAnalytics', path: '/analytics', icon: LineChart },
     { nameKey: 'navSettings', path: '/settings', icon: Settings2 },
