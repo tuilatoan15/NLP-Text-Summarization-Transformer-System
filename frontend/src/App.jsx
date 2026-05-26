@@ -6,6 +6,7 @@ import Overview from './pages/Overview';
 import Playground from './pages/Playground';
 import ModelSettings from './pages/ModelSettings';
 import Analytics from './pages/Analytics';
+import DocumentIntelligence from './pages/DocumentIntelligence';
 
 const App = () => {
   return (
@@ -15,6 +16,7 @@ const App = () => {
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<Overview />} />
           <Route path="/playground" element={<Playground />} />
+          <Route path="/documents" element={<DocumentIntelligence />} />
           <Route path="/settings" element={<ModelSettings />} />
           <Route path="/analytics" element={<Analytics />} />
         </Route>

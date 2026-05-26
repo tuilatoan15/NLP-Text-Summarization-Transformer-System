@@ -39,6 +39,7 @@ from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
 from src.preprocess import clean_text
 from src.utils import get_device_info, log_device_info, logger
+from api.document_intelligence import router as document_intelligence_router
 
 
 # ─────────────────────────── Request / Response schemas ────────────────────
@@ -160,6 +161,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(document_intelligence_router)
 
 
 # ─────────────────────────── Request logging middleware ────────────────────
@@ -321,6 +324,9 @@ async def root():
             "/summarize/compare/stream",
             "/summarize/files",
             "/summarize/files/compare",
+            "/documents/ingest",
+            "/documents/{document_id}/search",
+            "/documents/{document_id}/compare",
             "/models",
             "/health",
             "/metrics",

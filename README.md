@@ -142,3 +142,23 @@ Các checkpoint sẽ được tự động lưu trong thư mục `models/vit5-fi
 Dự án này phục vụ cho mục đích nghiên cứu học thuật và thực nghiệm các kỹ thuật xử lý ngôn ngữ tự nhiên tiếng Việt nâng cao.
 
 *© 2026 — Đồ án Nghiên cứu NLP Tiếng Việt.*
+<!-- Document Intelligence upgrade summary -->
+
+## AI Document Intelligence Upgrade
+
+This project now includes a research-grade Document Intelligence layer for "De tai 18: Tom tat van ban tu dong bang xu ly ngon ngu tu nhien".
+
+Core additions:
+
+- Production ingest pipeline for PDF/DOCX/TXT with PyMuPDF, pdfplumber, unstructured, python-docx, Mammoth and OCR fallback.
+- Semantic, heading-aware, token-aware chunking for long-document summarization and RAG.
+- Embedding wrapper and benchmark support for BGE-M3, multilingual-E5, Jina, Vietnamese SBERT and PhoBERT SimCSE.
+- FastAPI Document Intelligence router: `/documents/ingest`, `/documents/{document_id}/search`, `/documents/{document_id}/compare`, `/documents/{document_id}/assets`, `/documents/{document_id}/visualization`, and websocket streaming.
+- NotebookLM-style generated assets: overview, research report, quiz, flashcards, mindmap, presentation outline, podcast script, infographic, timeline and entity graph.
+- Citation grounding for every summary sentence and factual consistency checks.
+- New React research workspace at `/documents` with upload, semantic search, comparison charts, chunk graph, embedding map and citation viewer.
+- Docker Compose includes PostgreSQL, Redis, MinIO and ChromaDB service definitions.
+
+Architecture details: `docs/DOCUMENT_INTELLIGENCE_ARCHITECTURE.md`.
+Database schema: `docs/DATABASE_SCHEMA.sql`.
+Ingest details: `docs/INGEST_PIPELINE.md`.

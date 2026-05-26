@@ -1,0 +1,53 @@
+{
+  "enable_embeddings": true,
+  "fail_on_low_quality": false,
+  "output_embeddings_as_list": true,
+  "extraction": {
+    "pdf_primary_engine": "pymupdf",
+    "pdf_fallback_engines": ["pdfplumber", "unstructured"],
+    "docx_primary_engine": "python-docx",
+    "docx_use_mammoth_fallback": true,
+    "enable_ocr": true,
+    "ocr_languages": ["vie", "eng"],
+    "scanned_text_min_chars_per_page": 40,
+    "scanned_text_min_words_per_page": 8,
+    "preserve_tables": true,
+    "preserve_bullets": true,
+    "max_pages": null
+  },
+  "cleaning": {
+    "remove_headers_footers": true,
+    "min_repeated_header_pages": 2,
+    "normalize_unicode": true,
+    "remove_page_numbers": true,
+    "reconstruct_paragraphs": true,
+    "semantic_filtering": true,
+    "min_quality_score": 0.25
+  },
+  "chunking": {
+    "target_tokens": 420,
+    "min_tokens": 120,
+    "max_tokens": 640,
+    "overlap_tokens": 64,
+    "dynamic_size": true,
+    "respect_headings": true,
+    "split_long_paragraphs": true,
+    "semantic_model_name": null,
+    "semantic_similarity_threshold": 0.58,
+    "token_model_name": null,
+    "use_vietnamese_segmenter": false
+  },
+  "embedding": {
+    "model_name": "BAAI/bge-m3",
+    "batch_size": 8,
+    "device": null,
+    "normalize_embeddings": true,
+    "trust_remote_code": true,
+    "max_seq_length": 8192,
+    "use_fp16": true,
+    "show_progress": true,
+    "fallback_to_hashing": true,
+    "query_prefix": null,
+    "passage_prefix": null
+  }
+}

@@ -7,7 +7,7 @@ addopts = "-v --tb=short -ra"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
 
 [tool.coverage.run]
-source = ["src", "api"]
+source = ["src", "api", "loaders", "preprocess", "pipeline", "embeddings"]
 omit = ["tests/*", "venv/*", "*/__pycache__/*"]
 
 [tool.coverage.report]

@@ -34,7 +34,6 @@ os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
 
 import torch
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 from src import config
 from src.model_registry import ABSTRACTIVE_ALGORITHMS, AlgorithmConfig, resolve_model_path
@@ -71,8 +70,8 @@ def _should_use_fp16(device: torch.device) -> bool:
 @dataclass
 class LoadedModel:
     key: str
-    model: PreTrainedModel
-    tokenizer: PreTrainedTokenizerBase
+    model: Any
+    tokenizer: Any
     device: torch.device
     fp16: bool
     model_path: str
@@ -101,8 +100,10 @@ class ModelRegistry:
                 self._model_locks[key] = threading.Lock()
             return self._model_locks[key]
 
-    def _load_tokenizer(self, algorithm: AlgorithmConfig, model_path: str) -> PreTrainedTokenizerBase:
+    def _load_tokenizer(self, algorithm: AlgorithmConfig, model_path: str) -> Any:
         """Load tokenizer, falling back to HuggingFace Hub if local fails."""
+        from transformers import AutoTokenizer
+
         kwargs: dict[str, Any] = {"use_fast": False}
         try:
             return AutoTokenizer.from_pretrained(model_path, **kwargs)
@@ -117,11 +118,11 @@ class ModelRegistry:
 
     def _repair_vocab_mismatch(
         self,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
+        model: Any,
+        tokenizer: Any,
         algorithm: AlgorithmConfig,
         model_path: str,
-    ) -> PreTrainedTokenizerBase:
+    ) -> Any:
         """Detect and repair tokenizer/model vocabulary size mismatch."""
         model_vocab = int(model.get_input_embeddings().weight.shape[0])
         tok_vocab = len(tokenizer)
@@ -158,6 +159,8 @@ class ModelRegistry:
                     model_vocab,
                 )
                 try:
+                    from transformers import AutoTokenizer
+
                     tokenizer = AutoTokenizer.from_pretrained(
                         algorithm.model_name,
                         use_fast=False,
@@ -179,8 +182,8 @@ class ModelRegistry:
 
     def _patch_generation_config(
         self,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
+        model: Any,
+        tokenizer: Any,
     ) -> None:
         """Ensure generation tokens are set on the model config."""
         cfg = model.config
@@ -191,7 +194,7 @@ class ModelRegistry:
         if cfg.pad_token_id is None and tokenizer.pad_token_id is not None:
             cfg.pad_token_id = tokenizer.pad_token_id
 
-    def _maybe_compile(self, model: PreTrainedModel) -> PreTrainedModel:
+    def _maybe_compile(self, model: Any) -> Any:
         """Apply torch.compile() on PyTorch >= 2 if enabled via config."""
         if not config.USE_TORCH_COMPILE:
             return model
@@ -217,7 +220,9 @@ class ModelRegistry:
         load_kwargs: dict[str, Any] = {}
         if self.fp16:
             load_kwargs["dtype"] = torch.float16  # was torch_dtype in older transformers
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
+        from transformers import AutoModelForSeq2SeqLM
+
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
 
         tokenizer = self._repair_vocab_mismatch(model, tokenizer, algorithm, model_path)
         self._patch_generation_config(model, tokenizer)
@@ -323,11 +328,11 @@ def get_loaded_model(key: str) -> LoadedModel:
     return _registry.get(key)
 
 
-def get_model(key: str) -> PreTrainedModel:
+def get_model(key: str) -> Any:
     return _registry.get(key).model
 
 
-def get_tokenizer(key: str) -> PreTrainedTokenizerBase:
+def get_tokenizer(key: str) -> Any:
     return _registry.get(key).tokenizer
 
 

@@ -57,3 +57,58 @@ export async function getAnalyticsHistory(limit = 30) {
   if (!response.ok) throw new Error(`History failed: ${response.status}`);
   return response.json();
 }
+
+export async function ingestDocument(file, { includeEmbeddings = true, embeddingModel = 'hash' } = {}) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('include_embeddings', String(includeEmbeddings));
+  if (embeddingModel) form.append('embedding_model', embeddingModel);
+
+  const response = await fetch(`${API}/documents/ingest`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Document ingest failed: ${response.status} ${detail}`);
+  }
+  return response.json();
+}
+
+export async function searchDocument(documentId, query, topK = 5) {
+  const response = await fetch(`${API}/documents/${documentId}/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, top_k: topK }),
+  });
+  if (!response.ok) throw new Error(`Document search failed: ${response.status}`);
+  return response.json();
+}
+
+export async function compareDocumentSummaries(
+  documentId,
+  {
+    reference = null,
+    algorithms = ['textrank', 'lexrank', 'lsa'],
+    targetLengthRatio = 35,
+    extractiveSentences = 4,
+    maxAbstractiveLength = 160,
+  } = {},
+) {
+  const response = await fetch(`${API}/documents/${documentId}/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      reference,
+      algorithms,
+      target_length_ratio: targetLengthRatio,
+      extractive_sentences: extractiveSentences,
+      max_abstractive_length: maxAbstractiveLength,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Document compare failed: ${response.status} ${detail}`);
+  }
+  return response.json();
+}

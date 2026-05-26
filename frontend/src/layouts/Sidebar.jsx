@@ -11,6 +11,7 @@ const Sidebar = () => {
   const navItems = [
     { nameKey: 'navOverview', path: '/', icon: LayoutDashboard },
     { nameKey: 'navPlayground', path: '/playground', icon: PlaySquare },
+    { nameKey: 'navDocuments', path: '/documents', icon: Library },
     { nameKey: 'navAnalytics', path: '/analytics', icon: LineChart },
     { nameKey: 'navSettings', path: '/settings', icon: Settings2 },
   ];
