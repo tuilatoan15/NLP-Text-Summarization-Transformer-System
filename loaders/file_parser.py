@@ -1,4 +1,4 @@
-"""Extract text from uploaded TXT, PDF, and DOCX files."""
+"""Extract text from uploaded TXT, PDF, DOCX, and Markdown files."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from docx import Document
 from src.preprocess import clean_text
 
 
-SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx", ".md", ".markdown"}
 
 
 def extract_text_from_file(path: str | Path) -> str:
@@ -23,6 +23,8 @@ def extract_text_from_file(path: str | Path) -> str:
         text = _read_pdf(file_path)
     elif suffix == ".docx":
         text = _read_docx(file_path)
+    elif suffix in {".md", ".markdown"}:
+        text = _read_markdown(file_path)
     else:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise ValueError(f"Unsupported file type '{suffix}'. Supported types: {supported}")
@@ -60,3 +62,7 @@ def _read_docx(path: Path) -> str:
     document = Document(str(path))
     paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
     return "\n\n".join(paragraphs)
+
+
+def _read_markdown(path: Path) -> str:
+    return _read_txt(path)

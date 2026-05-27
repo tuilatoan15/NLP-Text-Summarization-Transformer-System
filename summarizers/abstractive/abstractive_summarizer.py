@@ -83,12 +83,9 @@ def _build_generation_preset(
     token_max = words_to_max_new_tokens(word_budget)
     token_min = min_new_tokens_for_budget(word_budget)
 
-    if key == "vit5":
-        gen_preset = config.GENERATION_CONFIGS.get("vit5", config.DEFAULT_GENERATION_CONFIG).copy()
-        gen_preset["repetition_penalty"] = 1.8
-        gen_preset["no_repeat_ngram_size"] = 3
-    else:
-        gen_preset = config.GENERATION_CONFIGS.get(key, config.DEFAULT_GENERATION_CONFIG).copy()
+    gen_preset = config.GENERATION_CONFIGS.get(key, config.DEFAULT_GENERATION_CONFIG).copy()
+    gen_preset.setdefault("repetition_penalty", 1.8 if key in {"vit5", "mt5", "bartpho"} else 1.3)
+    gen_preset.setdefault("no_repeat_ngram_size", 3)
 
     gen_preset["max_new_tokens"] = token_max
     gen_preset["min_new_tokens"] = token_min

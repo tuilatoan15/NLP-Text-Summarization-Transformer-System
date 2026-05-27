@@ -39,6 +39,7 @@ from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
 from src.preprocess import clean_text
 from src.utils import get_device_info, log_device_info, logger
+from api.document_chat import router as document_chat_router
 from api.document_intelligence import router as document_intelligence_router
 from api.research import router as research_router
 
@@ -164,6 +165,7 @@ app.add_middleware(
 )
 
 app.include_router(document_intelligence_router)
+app.include_router(document_chat_router)
 app.include_router(research_router)
 
 
@@ -329,6 +331,10 @@ async def root():
             "/documents/ingest",
             "/documents/{document_id}/search",
             "/documents/{document_id}/compare",
+            "/rag/documents/upload",
+            "/rag/documents",
+            "/rag/chat",
+            "/rag/chat/stream",
             "/models",
             "/health",
             "/metrics",

@@ -2,17 +2,14 @@ import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud, Brain, GitCompare, ChartColumn,
-  Search, Info, BookOpen, ChevronRight, Zap
+  Brain, GitCompare, ChartColumn,
+  Info, BookOpen, ChevronRight, Zap
 } from 'lucide-react';
 import { DocumentProvider, useDocumentContext } from '../../context/DocumentContext';
 
 const TABS = [
-  { to: 'upload',         label: 'Upload',         icon: UploadCloud },
-  { to: 'analysis',       label: 'Analysis',       icon: Brain,      reqDoc: true },
   { to: 'compare',        label: 'Compare',        icon: GitCompare, reqDoc: true },
   { to: 'evaluation',     label: 'Evaluation',     icon: ChartColumn,reqDoc: true },
-  { to: 'search',         label: 'Semantic Search',icon: Search,     reqDoc: true },
   { to: 'explainability', label: 'Explainability', icon: Info,       reqDoc: true },
   { to: 'notebook',       label: 'NotebookLM',     icon: BookOpen,   reqDoc: true },
 ];

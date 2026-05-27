@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Settings2, LineChart, PlaySquare, Library, MessageSquare, Zap,
+  LayoutDashboard, LineChart, PlaySquare, MessageSquare, Library,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -11,10 +11,8 @@ const Sidebar = () => {
   const navItems = [
     { nameKey: 'navOverview', path: '/', icon: LayoutDashboard },
     { nameKey: 'navPlayground', path: '/playground', icon: PlaySquare },
-    { nameKey: 'navComparison', path: '/comparison', icon: Zap, label: '🔬 Comparison' },
     { nameKey: 'navDocuments', path: '/documents', icon: Library },
     { nameKey: 'navAnalytics', path: '/analytics', icon: LineChart },
-    { nameKey: 'navSettings', path: '/settings', icon: Settings2 },
   ];
 
   return (
@@ -64,24 +62,19 @@ const Sidebar = () => {
             {t('navSectionCore')}
           </p>
           <nav className="space-y-1">
-            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[var(--text-faint)] cursor-not-allowed opacity-70">
-              <span className="flex items-center gap-3">
-                <MessageSquare className="w-4 h-4" />
-                {t('navChat')}
-              </span>
-              <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--surface-inset)]">
-                {t('comingSoon')}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-[var(--text-faint)] cursor-not-allowed opacity-70">
-              <span className="flex items-center gap-3">
-                <Library className="w-4 h-4" />
-                {t('navRag')}
-              </span>
-              <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--surface-inset)]">
-                {t('comingSoon')}
-              </span>
-            </div>
+            <NavLink
+              to="/chat"
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-[var(--accent-muted)] text-blue-600 dark:text-blue-400'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)] hover:text-[var(--text)]'
+                }`
+              }
+            >
+              <MessageSquare className="w-4 h-4" />
+              {t('navChat')}
+            </NavLink>
           </nav>
         </div>
       </div>
