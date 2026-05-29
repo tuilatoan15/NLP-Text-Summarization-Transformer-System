@@ -35,51 +35,59 @@ VALIDATION_RATIO = float(os.getenv("VALIDATION_RATIO", "0.1"))
 # ─────────────────────────── MODEL ─────────────────────────
 DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "VietAI/vit5-base")
 LOCAL_VIT5_DIR = Path(os.getenv("LOCAL_VIT5_DIR", str(MODEL_DIR / "vit5-finetuned")))
-MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "512"))
-MAX_TARGET_TOKENS = int(os.getenv("MAX_TARGET_TOKENS", "128"))
-MAX_OUTPUT_LENGTH = int(os.getenv("MAX_OUTPUT_LENGTH", "150"))
+MAX_INPUT_TOKENS = int(os.getenv("MAX_INPUT_TOKENS", "1024"))  # raised for BARTPho syllable tokenizer
+MAX_TARGET_TOKENS = int(os.getenv("MAX_TARGET_TOKENS", "256"))
+MAX_OUTPUT_LENGTH = int(os.getenv("MAX_OUTPUT_LENGTH", "200"))
 MIN_OUTPUT_LENGTH = int(os.getenv("MIN_OUTPUT_LENGTH", "20"))
 NUM_BEAMS = int(os.getenv("NUM_BEAMS", "4"))
 NO_REPEAT_NGRAM_SIZE = int(os.getenv("NO_REPEAT_NGRAM_SIZE", "3"))
+# Parallel chunk inference workers (abstractive long-text processing)
+ABSTRACTIVE_CHUNK_WORKERS = int(os.getenv("ABSTRACTIVE_CHUNK_WORKERS", "2"))
+# Max chunks per document (None = unlimited, bounded by memory)
+ABSTRACTIVE_MAX_CHUNKS = int(os.getenv("ABSTRACTIVE_MAX_CHUNKS", "16"))
 
 # ─────────────────────────── PER-MODEL GENERATION CONFIGS ──
 # Tuned individually to maximise output quality per architecture.
 # Keys must match ABSTRACTIVE_ALGORITHMS keys in model_registry.py
 GENERATION_CONFIGS: dict[str, dict] = {
-    # ViT5: fine-tuned Vietnamese T5 — prone to repetition loops, use aggressive
-    # deduplication (ngram_size=4, penalty=2.0) with conservative beam count.
+    # ViT5: T5 tiếng Việt fine-tuned.
+    # Repetition loop là lỗi #1 → penalty mạnh + ngram lớn.
+    # num_beams=2 giữ tốc độ ổn; penalty=2.5 + ngram=5 chặn vòng lặp hiệu quả.
     "vit5": dict(
-        max_new_tokens=80,
-        min_new_tokens=15,
+        max_new_tokens=120,
+        min_new_tokens=20,
         num_beams=2,
-        no_repeat_ngram_size=4,
-        repetition_penalty=2.0,
-        length_penalty=1.0,
+        no_repeat_ngram_size=5,
+        repetition_penalty=2.5,
+        length_penalty=1.05,
         early_stopping=True,
         do_sample=False,
     ),
-    # mT5: multilingual T5 — vocab mismatch makes beam search unstable;
-    # sampling is more robust for this checkpoint.
+    # mT5: đa ngôn ngữ — dùng sampling để tránh beam instability.
+    # temperature=0.7, top_p=0.85 cho output tập trung hơn.
+    # repetition_penalty=2.0 để chặn multilingual garbage.
     "mt5": dict(
         max_new_tokens=80,
         min_new_tokens=10,
-        num_beams=2,
+        num_beams=4,
         no_repeat_ngram_size=3,
-        repetition_penalty=1.5,
-        length_penalty=1.0,
+        repetition_penalty=3.0,
+        length_penalty=0.8,
         early_stopping=True,
         do_sample=False,
     ),
-    # BARTPho: syllable-level Vietnamese BART — most stable, allow longer output.
+    # BARTPho: BART syllable-level của VinAI.
+    # num_beams=4 cho diversity tốt; penalty cao để tránh hallucinate.
     "bartpho": dict(
-        max_new_tokens=120,
-        min_new_tokens=20,
+        max_new_tokens=160,
+        min_new_tokens=25,
         num_beams=4,
-        no_repeat_ngram_size=3,
-        repetition_penalty=1.2,
-        length_penalty=1.0,
+        no_repeat_ngram_size=5,
+        repetition_penalty=2.0,
+        length_penalty=1.2,
         early_stopping=True,
         do_sample=False,
+        forced_bos_token_id=None,
     ),
 }
 
@@ -102,12 +110,13 @@ DEFAULT_GENERATION_CONFIG: dict = dict(
 MT5_EXPERIMENTAL = os.getenv("MT5_EXPERIMENTAL", "1") == "1"
 MT5_LATIN_RATIO_THRESHOLD = float(os.getenv("MT5_LATIN_RATIO_THRESHOLD", "0.35"))
 
-# ─────────────────────────── GPU / DEVICE ──────────────────
+# ─────────────────────────────────── GPU / DEVICE ──────────────────
 PRELOAD_MODELS = os.getenv("PRELOAD_MODELS", "1") == "1"
 GPU_VRAM_LIMIT_GB = float(os.getenv("GPU_VRAM_LIMIT_GB", "4.0"))
 USE_FP16 = os.getenv("USE_FP16", "auto")   # "auto" | "1" | "0"
 USE_TORCH_COMPILE = os.getenv("USE_TORCH_COMPILE", "0") == "1"
-EXTRACTIVE_WORKERS = int(os.getenv("EXTRACTIVE_WORKERS", "3"))
+# Tăng workers cho extractive (chúng nhẹ, chạy song song hoàn toàn được)
+EXTRACTIVE_WORKERS = int(os.getenv("EXTRACTIVE_WORKERS", "4"))
 MAX_GPU_CONCURRENT = int(os.getenv("MAX_GPU_CONCURRENT", "1"))
 
 # ─────────────────────────── EVALUATION FAIRNESS ───────────

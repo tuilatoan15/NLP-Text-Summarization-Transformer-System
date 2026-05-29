@@ -1,6 +1,6 @@
 """Model registry and HuggingFace loading utilities."""
 
-from src.model_registry import (
+from .model_registry import (
     ABSTRACTIVE_ALGORITHMS,
     ALGORITHMS,
     DEFAULT_ALGORITHMS,

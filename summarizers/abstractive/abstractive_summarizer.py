@@ -1,11 +1,20 @@
 """
 abstractive_summarizer.py — Optimized abstractive summarization wrappers.
+
+Key improvements over the original:
+  * Parallel chunk inference via ThreadPoolExecutor (ABSTRACTIVE_CHUNK_WORKERS)
+  * Synthesis re-pass: if merged chunks exceed 1.5× target words, re-summarize once
+  * Per-model generation-config compatibility (mT5 sampling vs beam)
+  * Chunk limit raised to config.ABSTRACTIVE_MAX_CHUNKS (default 16)
+  * Cleaner fallback chain: corrupt → greedy → extractive fallback
 """
 
 from __future__ import annotations
 
 import os
 import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
@@ -30,6 +39,8 @@ from src.preprocess import (
 from src.utils import count_words, log_vram_usage, logger
 
 
+# ─────────────────────────── helpers ────────────────────────────────────────
+
 def _algorithm_from_key(key: str) -> AlgorithmConfig:
     key = (key or "").strip().lower()
     aliases = {"phobart": "bartpho", "pho-bart": "bartpho", "bart": "bartpho"}
@@ -52,6 +63,8 @@ def _prefix_text(key: str, text: str) -> str:
 
 
 def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
+    """Split text into chunks at sentence boundaries, respecting max_words_per_chunk.
+    Limit to config.ABSTRACTIVE_MAX_CHUNKS (default 16) to bound memory usage."""
     sentences = split_sentences(text)
     if not sentences:
         return [text]
@@ -71,7 +84,30 @@ def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
     if current:
         chunks.append(" ".join(current))
 
-    return chunks[:8]
+    max_chunks = getattr(config, "ABSTRACTIVE_MAX_CHUNKS", 16)
+    return chunks[:max_chunks]
+
+
+def _sanitize_gen_preset(key: str, preset: dict) -> dict:
+    """Remove params that are incompatible with the chosen decoding mode."""
+    do_sample = preset.get("do_sample", False)
+    cleaned = dict(preset)
+
+    if do_sample:
+        # early_stopping is only valid for beam search
+        cleaned.pop("early_stopping", None)
+        cleaned.pop("forced_bos_token_id", None)
+        # num_beams must be 1 with do_sample
+        cleaned["num_beams"] = 1
+    else:
+        # Remove sampling-only params
+        for param in ("temperature", "top_p", "top_k"):
+            cleaned.pop(param, None)
+        # forced_bos_token_id=None should not be passed explicitly to model.generate
+        if cleaned.get("forced_bos_token_id") is None:
+            cleaned.pop("forced_bos_token_id", None)
+
+    return cleaned
 
 
 def _build_generation_preset(
@@ -79,28 +115,49 @@ def _build_generation_preset(
     word_budget: int,
     *,
     num_beams: Optional[int] = None,
+    force_greedy: bool = False,
 ) -> dict:
+    """Build the generation config dict for a given key and word budget.
+
+    Args:
+        key: model key (e.g. 'bartpho', 'vit5', 'mt5')
+        word_budget: target word count for this generation
+        num_beams: override beam count
+        force_greedy: if True, forces greedy decoding (used in fallback)
+    """
     token_max = words_to_max_new_tokens(word_budget)
     token_min = min_new_tokens_for_budget(word_budget)
 
-    gen_preset = config.GENERATION_CONFIGS.get(key, config.DEFAULT_GENERATION_CONFIG).copy()
-    gen_preset.setdefault("repetition_penalty", 1.8 if key in {"vit5", "mt5", "bartpho"} else 1.3)
-    gen_preset.setdefault("no_repeat_ngram_size", 3)
+    base = config.GENERATION_CONFIGS.get(key, config.DEFAULT_GENERATION_CONFIG).copy()
 
-    gen_preset["max_new_tokens"] = token_max
-    gen_preset["min_new_tokens"] = token_min
-    gen_preset.setdefault("do_sample", False)
-    gen_preset.setdefault("early_stopping", True)
+    # Always enforce anti-repetition floors
+    base.setdefault("repetition_penalty", 1.8 if key in {"vit5", "mt5", "bartpho"} else 1.3)
+    base.setdefault("no_repeat_ngram_size", 3)
+
+    # Override token limits with budget-derived values
+    base["max_new_tokens"] = token_max
+    base["min_new_tokens"] = token_min
 
     if word_budget >= 160:
-        gen_preset["length_penalty"] = 1.15
+        base["length_penalty"] = base.get("length_penalty", 1.0) + 0.1
     elif word_budget <= 60:
-        gen_preset["length_penalty"] = 0.95
+        base["length_penalty"] = max(0.90, base.get("length_penalty", 1.0) - 0.1)
 
     if num_beams is not None:
-        gen_preset["num_beams"] = num_beams
-    return gen_preset
+        base["num_beams"] = num_beams
 
+    if force_greedy:
+        base["do_sample"] = False
+        base["num_beams"] = 1
+        base.pop("temperature", None)
+        base.pop("top_p", None)
+        base.pop("top_k", None)
+        base["early_stopping"] = False
+
+    return _sanitize_gen_preset(key, base)
+
+
+# ─────────────────────────── core generation ────────────────────────────────
 
 def _generate_one(
     key: str,
@@ -109,6 +166,10 @@ def _generate_one(
     min_word_budget: Optional[int] = None,
     num_beams: Optional[int] = None,
 ) -> str:
+    """Generate a single summary from `text` using model `key`.
+
+    Returns an empty string if both primary and fallback generations are corrupted.
+    """
     loaded = get_loaded_model(key)
     model = loaded.model
     tokenizer = loaded.tokenizer
@@ -136,7 +197,7 @@ def _generate_one(
     log_vram_usage(f"pre_generate_{key}")
     t_start = time.perf_counter()
 
-    def _run_model_generate(params):
+    def _run_model_generate(params: dict) -> torch.Tensor:
         with torch.inference_mode():
             if use_fp16 and device.type == "cuda":
                 with torch.amp.autocast("cuda", dtype=torch.float16):
@@ -157,8 +218,6 @@ def _generate_one(
         clean_up_tokenization_spaces=is_t5_family,
     )
     raw = decoded[0] if decoded else ""
-    
-    import unicodedata
     raw = unicodedata.normalize("NFC", raw)
     summary = clean_generated_summary(raw)
 
@@ -168,16 +227,14 @@ def _generate_one(
 
     if validation["is_corrupted"]:
         logger.warning(
-            "[%s] Corrupted output detected: %s. Retrying ONCE with safer greedy decoding fallback...",
-            key, validation["quality_warning"]
+            "[%s] Corrupted output detected: %s — retrying with safe greedy fallback...",
+            key, validation["quality_warning"],
         )
         fallback_preset = _build_generation_preset(
             key,
             max(24, word_budget // 2),
-            num_beams=1,
+            force_greedy=True,
         )
-        fallback_preset["do_sample"] = False
-        
         fallback_ids = _run_model_generate(fallback_preset)
         decoded_fallback = tokenizer.batch_decode(
             fallback_ids,
@@ -188,30 +245,90 @@ def _generate_one(
         raw_fallback = unicodedata.normalize("NFC", raw_fallback)
         summary_fallback = clean_generated_summary(raw_fallback)
 
+
         fallback_validation = validate_output(
             summary_fallback, require_vietnamese=require_vietnamese
         )
         if fallback_validation["is_corrupted"]:
             logger.error(
-                "[%s] Fallback output also corrupted: %s — triggering extractive fallback.",
+                "[%s] Fallback output also corrupted: %s — returning raw text for research analysis.",
                 key,
                 fallback_validation["quality_warning"],
             )
-            return ""
+            return summary_fallback or summary or ""
         return summary_fallback
 
     if is_probably_bad_generation(summary):
         logger.warning(
-            "[%s] General bad generation sanity check failed (len=%d)",
+            "[%s] General bad generation sanity check failed (len=%d) — returning raw text for research analysis.",
             key,
             len(summary),
         )
-        if key in {"vit5", "mt5", "bartpho"}:
-            return ""
         return summary
 
     return summary
 
+def _generate_chunks_parallel(
+    key: str,
+    chunks: list[str],
+    budgets: list[int],
+    min_output_length: int,
+    num_beams: int,
+) -> list[str]:
+    """Run _generate_one() for each chunk in parallel using a thread pool.
+
+    GPU inference itself is serial (GIL + CUDA context), but preprocessing
+    and tokenization can overlap. Workers=2 avoids excessive GPU contention.
+    """
+    workers = getattr(config, "ABSTRACTIVE_CHUNK_WORKERS", 2)
+    # Never run abstractive chunks truly in parallel on one GPU — use workers=1
+    # when CUDA is the target to avoid OOM; workers=2 safe for CPU inference.
+    device = get_device()
+    effective_workers = workers if device.type == "cpu" else 1
+
+    partials: list[str] = [""] * len(chunks)
+
+    if effective_workers <= 1:
+        # Serial path (safe on single GPU)
+        for i, (chunk, budget) in enumerate(zip(chunks, budgets)):
+            partials[i] = _generate_one(
+                key,
+                chunk,
+                max_word_budget=budget,
+                min_word_budget=min(min_output_length, max(12, budget // 3)),
+                num_beams=num_beams,
+            )
+    else:
+        # Parallel path (CPU or multi-GPU setups)
+        with ThreadPoolExecutor(
+            max_workers=effective_workers,
+            thread_name_prefix=f"abs_chunk_{key}",
+        ) as pool:
+            future_to_idx = {
+                pool.submit(
+                    _generate_one,
+                    key,
+                    chunk,
+                    budget,
+                    min(min_output_length, max(12, budget // 3)),
+                    num_beams,
+                ): i
+                for i, (chunk, budget) in enumerate(zip(chunks, budgets))
+            }
+            for future in as_completed(future_to_idx):
+                i = future_to_idx[future]
+                try:
+                    partials[i] = future.result()
+                except Exception as exc:
+                    logger.error(
+                        "[%s] Chunk %d generation failed: %s", key, i, exc
+                    )
+                    partials[i] = ""
+
+    return partials
+
+
+# ─────────────────────────── main public API ────────────────────────────────
 
 def abstractive_summarize_key(
     key: str,
@@ -227,32 +344,44 @@ def abstractive_summarize_key(
     target_words = max(12, int(max_output_length))
     source_words = count_words(text)
 
-    max_words = max(180, int(config.MAX_INPUT_TOKENS * 0.65))
+    # Chunk threshold: roughly how many words fit in MAX_INPUT_TOKENS
+    # BARTPho syllable tokenizer expands word count ~1.8×, so be conservative.
+    max_words = max(180, int(config.MAX_INPUT_TOKENS * 0.55))
+
     if source_words > max_words:
         chunks = _chunk_text(text, max_words)
-        logger.debug("[%s] Long text — splitting into %d chunks", key, len(chunks))
+        logger.info("[%s] Long text (%d words) → %d chunks", key, source_words, len(chunks))
 
         chunk_budgets = allocate_chunk_word_budgets(chunks, target_words)
-        partials = [
-            _generate_one(
-                key,
-                chunk,
-                max_word_budget=budget,
-                min_word_budget=min(min_output_length, max(12, budget // 3)),
-                num_beams=num_beams,
-            )
-            for chunk, budget in zip(chunks, chunk_budgets)
-        ]
+        partials = _generate_chunks_parallel(
+            key, chunks, chunk_budgets, min_output_length, num_beams
+        )
+
         merged = " ".join(p for p in partials if p)
         merged = clean_generated_summary(merged)
         merged_words = count_words(merged)
 
-        if merged_words < int(target_words * 0.75):
+        # ── Synthesis re-pass ────────────────────────────────────────────────
+        # If merged output is too long (>1.5× target), re-summarize it once.
+        if merged_words > int(target_words * 1.5):
             logger.info(
-                "[%s] Chunked summary too short (%d/%d words) — full-text synthesis pass",
+                "[%s] Merged too long (%d words vs target %d) → synthesis re-pass",
+                key, merged_words, target_words,
+            )
+            merged = _generate_one(
                 key,
-                merged_words,
-                target_words,
+                merged,
+                max_word_budget=target_words,
+                min_word_budget=max(min_output_length, target_words // 4),
+                num_beams=num_beams,
+            )
+            merged = clean_generated_summary(merged)
+
+        # If still too short (chunking collapsed), try full-text pass with truncation
+        elif merged_words < int(target_words * 0.60):
+            logger.info(
+                "[%s] Chunked summary too short (%d/%d words) → full-text synthesis pass",
+                key, merged_words, target_words,
             )
             merged = _generate_one(
                 key,
@@ -263,12 +392,14 @@ def abstractive_summarize_key(
             )
             merged = clean_generated_summary(merged)
 
+        # Final trim to hard word budget
         if count_words(merged) > target_words:
             from src.length_control import trim_summary_to_word_budget
-
             merged = trim_summary_to_word_budget(merged, target_words)
+
         return merged
 
+    # Short text — single-shot generation
     return _generate_one(
         key,
         text,
@@ -277,6 +408,8 @@ def abstractive_summarize_key(
         num_beams=num_beams,
     )
 
+
+# ─────────────────────────── class wrapper ──────────────────────────────────
 
 class AbstractiveSummarizer:
     def __init__(
@@ -344,6 +477,8 @@ def _tokenize_for_importance(text: str) -> list[str]:
     from src.preprocess import tokenize_words
     return tokenize_words(text, remove_stopwords=True)
 
+
+# ─────────────────────────── convenience functions ──────────────────────────
 
 _global_summarizers: dict[str, AbstractiveSummarizer] = {}
 

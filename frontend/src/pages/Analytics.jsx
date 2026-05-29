@@ -27,22 +27,31 @@ const rangeKey = (range) => {
 };
 
 const Analytics = () => {
-  const { t, locale, isDark } = useApp();
+  const { t, locale, isDark, analyticsCache, setAnalyticsCache } = useApp();
   const [timeRange, setTimeRange] = useState('30d');
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => analyticsCache['30d'] || null);
+  const [loading, setLoading] = useState(!analyticsCache['30d']);
   const [error, setError] = useState('');
   const chart = getChartTheme(isDark);
   const dLocale = dateLocale(locale);
 
   useEffect(() => {
+    if (analyticsCache[timeRange]) {
+      setData(analyticsCache[timeRange]);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError('');
       try {
         const payload = await getAnalyticsDashboard(timeRange, 20);
-        if (!cancelled) setData(payload);
+        if (!cancelled) {
+          setData(payload);
+          setAnalyticsCache(prev => ({ ...prev, [timeRange]: payload }));
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || t('analyticsLoadError'));
       } finally {
@@ -51,7 +60,7 @@ const Analytics = () => {
     }
     load();
     return () => { cancelled = true; };
-  }, [timeRange]);
+  }, [timeRange, analyticsCache, setAnalyticsCache]);
 
   const metrics = data?.metrics || {};
   const modelRows = data?.visualization?.model_performance || [];

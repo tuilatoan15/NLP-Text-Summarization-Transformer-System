@@ -82,10 +82,15 @@ html {
 
 @layer components {
   .ui-card {
-    @apply rounded-2xl border shadow-sm transition-colors duration-200;
+    @apply rounded-2xl border shadow-sm transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)];
     background-color: var(--surface-elevated);
     border-color: var(--border);
     box-shadow: var(--shadow-card);
+  }
+
+  .ui-card:hover {
+    @apply -translate-y-0.5 shadow-md;
+    border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
   }
 
   .ui-card-muted {
@@ -158,8 +163,50 @@ html {
   }
 
   .ui-range {
-    @apply w-full h-2 rounded-lg appearance-none cursor-pointer disabled:opacity-50;
-    accent-color: var(--accent);
+    @apply w-full h-2 rounded-lg appearance-none cursor-pointer disabled:opacity-50 transition-all duration-200;
+    outline: none;
+    border: 1px solid var(--border);
+  }
+
+  .ui-range::-webkit-slider-runnable-track {
+    @apply h-1.5 rounded-lg;
+    background: transparent;
+  }
+
+  .ui-range::-webkit-slider-thumb {
+    @apply appearance-none w-5 h-5 rounded-full border shadow-sm transition-all duration-150 ease-out;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    margin-top: -7px;
+  }
+
+  .ui-range::-webkit-slider-thumb:hover {
+    @apply scale-110 shadow-md;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .ui-range::-webkit-slider-thumb:active {
+    @apply scale-95;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .ui-range::-moz-range-track {
+    @apply h-1.5 rounded-lg;
+    background: transparent;
+  }
+
+  .ui-range::-moz-range-thumb {
+    @apply w-4 h-4 rounded-full border shadow-sm transition-all duration-150 ease-out;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+  }
+
+  .ui-range::-moz-range-thumb:hover {
+    @apply scale-110 shadow-md;
+    background: var(--accent);
+    border-color: var(--accent);
   }
 
   .ui-stat-label {

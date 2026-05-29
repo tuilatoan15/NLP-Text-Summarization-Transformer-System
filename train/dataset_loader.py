@@ -83,17 +83,34 @@ def load_from_huggingface(
     article_col: str = "text",
     title_col: str = "title",
     max_samples: int = DEFAULT_MAX_SAMPLES,
+    max_eval_samples: int = 200,
 ) -> DatasetDict:
     logger.info("Loading dataset from HuggingFace: %s", dataset_name)
     try:
-        raw_ds = load_dataset(dataset_name, split="train")
-    except Exception:
         raw = load_dataset(dataset_name)
-        first_split = "train" if "train" in raw else next(iter(raw.keys()))
-        raw_ds = raw[first_split]
+    except Exception as e:
+        logger.warning("load_dataset failed (%s), retrying with trust_remote_code...", e)
+        raw = load_dataset(dataset_name, trust_remote_code=True)
 
-    raw_ds = _limit_dataset(raw_ds, max_samples)
-    cleaned = _clean_dataset(raw_ds, article_col=article_col, title_col=title_col)
+    # Ưu tiên dùng validation split gốc nếu có (ví dụ: 8Opt/vietnamese-summarization-dataset-0001)
+    if "train" in raw and "validation" in raw:
+        train_ds = raw["train"]
+        val_ds = raw["validation"]
+        train_ds = _limit_dataset(train_ds, max_samples)
+        val_ds = _limit_dataset(val_ds, max_eval_samples)
+        cleaned_train = _clean_dataset(train_ds, article_col=article_col, title_col=title_col)
+        cleaned_val = _clean_dataset(val_ds, article_col=article_col, title_col=title_col)
+        logger.info(
+            "Using pre-split dataset: train=%d, validation=%d",
+            len(cleaned_train), len(cleaned_val),
+        )
+        return DatasetDict({"train": cleaned_train, "validation": cleaned_val})
+
+    # Fallback: chỉ có train split → tự split
+    first_split = "train" if "train" in raw else next(iter(raw.keys()))
+    train_ds = raw[first_split]
+    train_ds = _limit_dataset(train_ds, max_samples)
+    cleaned = _clean_dataset(train_ds, article_col=article_col, title_col=title_col)
     split = cleaned.train_test_split(test_size=DEFAULT_TEST_SPLIT, seed=42)
     return DatasetDict({"train": split["train"], "validation": split["test"]})
 
@@ -101,6 +118,7 @@ def load_from_huggingface(
 def load_vnexpress_dataset(
     local_csv_path: Optional[str] = None,
     max_samples: int = DEFAULT_MAX_SAMPLES,
+    max_eval_samples: int = 200,
     use_cache: bool = True,
     dataset_name: str = config.DATASET_NAME,
 ) -> DatasetDict:
@@ -118,7 +136,11 @@ def load_vnexpress_dataset(
     if local_csv_path:
         dataset = load_from_csv(local_csv_path, max_samples=max_samples)
     else:
-        dataset = load_from_huggingface(dataset_name=dataset_name, max_samples=max_samples)
+        dataset = load_from_huggingface(
+            dataset_name=dataset_name,
+            max_samples=max_samples,
+            max_eval_samples=max_eval_samples,
+        )
 
     if use_cache:
         dataset.save_to_disk(str(cache_path))

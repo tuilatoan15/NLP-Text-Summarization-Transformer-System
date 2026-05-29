@@ -1,7 +1,8 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
-  LayoutDashboard, LineChart, PlaySquare, MessageSquare, Library,
+  LayoutDashboard, LineChart, PlaySquare, MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -11,7 +12,6 @@ const Sidebar = () => {
   const navItems = [
     { nameKey: 'navOverview', path: '/', icon: LayoutDashboard },
     { nameKey: 'navPlayground', path: '/playground', icon: PlaySquare },
-    { nameKey: 'navDocuments', path: '/documents', icon: Library },
     { nameKey: 'navAnalytics', path: '/analytics', icon: LineChart },
   ];
 
@@ -42,15 +42,26 @@ const Sidebar = () => {
                   key={item.path}
                   to={item.path}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    `relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 z-10 ${
                       isActive
-                        ? 'bg-[var(--accent-muted)] text-blue-600 dark:text-blue-400'
-                        : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)] hover:text-[var(--text)]'
+                        ? 'text-blue-600 dark:text-blue-400 font-bold'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                     }`
                   }
                 >
-                  <Icon className="w-4 h-4" />
-                  {t(item.nameKey)}
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <motion.div
+                          layoutId="active-pill"
+                          className="absolute inset-0 bg-[var(--accent-muted)] rounded-lg -z-10"
+                          transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                        />
+                      )}
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span className="relative z-10">{t(item.nameKey)}</span>
+                    </>
+                  )}
                 </NavLink>
               );
             })}
@@ -65,15 +76,26 @@ const Sidebar = () => {
             <NavLink
               to="/chat"
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                `relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 z-10 ${
                   isActive
-                    ? 'bg-[var(--accent-muted)] text-blue-600 dark:text-blue-400'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)] hover:text-[var(--text)]'
+                    ? 'text-blue-600 dark:text-blue-400 font-bold'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                 }`
               }
             >
-              <MessageSquare className="w-4 h-4" />
-              {t('navChat')}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.div
+                      layoutId="active-pill"
+                      className="absolute inset-0 bg-[var(--accent-muted)] rounded-lg -z-10"
+                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <MessageSquare className="w-4 h-4 shrink-0" />
+                  <span className="relative z-10">{t('navChat')}</span>
+                </>
+              )}
             </NavLink>
           </nav>
         </div>

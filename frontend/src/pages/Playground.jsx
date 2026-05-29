@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Play, RefreshCcw, Check, Loader2, Clock, Sparkles, AlertCircle, FileText, UploadCloud
+  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Sliders
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -245,7 +245,7 @@ const RunProgress = ({ runningKey, completed, total, loading }) => {
     <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-bold text-blue-900 dark:text-blue-100">
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+          {loading ? <Loader2 size={16} className="animate-spin" /> : <Activity size={16} className="text-blue-500" />}
           {loading
             ? (current ? t('pgProgressRunning', { name: current }) : t('pgProgressInit'))
             : t('pgProgressReady')}
@@ -385,15 +385,16 @@ const Playground = () => {
     return targetWordCount;
   }, [files, targetWordCount, result, text]);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     setFiles(selectedFiles);
     setError('');
 
-    // Pre-populate TXT/MD contents client side to correctly compute word counts
     if (selectedFiles.length > 0) {
       const file = selectedFiles[0];
       const suffix = file.name.split('.').pop()?.toLowerCase();
+      
+      // If it is standard txt/md, read client side
       if (suffix === 'txt' || suffix === 'md') {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -402,6 +403,33 @@ const Playground = () => {
           }
         };
         reader.readAsText(file);
+      } else {
+        // PDF, Word, Doc, Docx: Extract from backend immediately
+        setLoading(true);
+        try {
+          const form = new FormData();
+          form.append('files', file);
+          const API = getAPI();
+          const response = await fetch(`${API}/summarize/files/extract`, { method: 'POST', body: form });
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(body || `HTTP ${response.status}`);
+          }
+          const { text: extractedText } = await response.json();
+          setText(extractedText);
+          
+          addNotification({
+            title: t('notifyFileExtracted', 'Đã trích xuất thành công'),
+            message: t('notifyFileExtractedMsg', 'Nội dung tài liệu đã được tải vào khung Văn bản.'),
+            type: 'success',
+            link: '/playground',
+            showBrowser: false,
+          });
+        } catch (err) {
+          setError(err.message || String(err));
+        } finally {
+          setLoading(false);
+        }
       }
     }
   };
@@ -417,7 +445,7 @@ const Playground = () => {
     setResult(data);
   }
 
-  async function runTextStream() {
+  async function runTextStream(textToUse = text, docMetadata = null) {
     setRunState(initialRunState(selected));
     setCompletedCount(0);
     setRunningKey(null);
@@ -428,7 +456,7 @@ const Playground = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text,
+        text: textToUse,
         reference: reference || null,
         algorithms: selected,
         extractive_sentences: sentenceCount,
@@ -458,7 +486,8 @@ const Playground = () => {
         }));
       } else if (evt.event === 'finished') {
         setRunningKey(null);
-        setResult(evt.data);
+        const finalData = docMetadata ? { ...evt.data, documents: docMetadata } : evt.data;
+        setResult(finalData);
         setCompletedCount((evt.data?.results || []).length);
         const best = evt.data?.best_model?.algorithm || evt.data?.ranking?.[0]?.algorithm || '—';
         addNotification({
@@ -480,12 +509,6 @@ const Playground = () => {
   async function runFilesBatch() {
     const form = new FormData();
     files.forEach(file => form.append('files', file));
-    form.append('reference', reference);
-    form.append('algorithms', JSON.stringify(selected));
-    form.append('extractive_sentences', String(sentenceCount));
-    form.append('max_abstractive_length', String(maxLength));
-    form.append('target_length_ratio', String(lengthRatio));
-    form.append('save_result', 'true');
 
     setRunState(prev => {
       const next = { ...prev };
@@ -495,21 +518,19 @@ const Playground = () => {
     setRunningKey(selected[0] || null);
 
     const API = getAPI();
-    const response = await fetch(`${API}/summarize/files/compare`, { method: 'POST', body: form });
+    // 1. Extract text from uploaded files
+    const response = await fetch(`${API}/summarize/files/extract`, { method: 'POST', body: form });
     if (!response.ok) {
       const body = await response.text();
       throw new Error(body || `HTTP ${response.status}`);
     }
-    const data = await response.json();
-    applyBatchResults(data, selected);
-    const best = data?.best_model?.algorithm || data?.ranking?.[0]?.algorithm || '—';
-    addNotification({
-      title: t('notifyCompareDone'),
-      message: t('notifyCompareDoneMsg', { count: (data?.results || []).length, best }),
-      type: 'success',
-      link: '/playground',
-      showBrowser: true,
-    });
+    const { text: extractedText, documents } = await response.json();
+    
+    // Save to textbox so user can see it
+    setText(extractedText);
+    
+    // 2. Run streaming comparison over the extracted text
+    await runTextStream(extractedText, documents);
   }
 
   async function runComparison(event) {
@@ -530,11 +551,7 @@ const Playground = () => {
     });
 
     try {
-      if (files.length && !text.trim()) {
-        await runFilesBatch();
-      } else {
-        await runTextStream();
-      }
+      await runTextStream();
     } catch (err) {
       setError(err.message || String(err));
       addNotification({
@@ -559,35 +576,52 @@ const Playground = () => {
     }
   }
 
+  const fillPercent = ((lengthRatio - 10) / 90) * 100;
+
   return (
-    <div className="space-y-6 pb-12">
-      <div>
-        <h1 className="ui-page-title mb-1 flex items-center gap-2">
-          {t('playgroundTitle')}
-          <Sparkles className="w-5 h-5 text-blue-500 shrink-0" />
-        </h1>
-        <p className="ui-page-subtitle">{t('playgroundSubtitle')}</p>
+    <div className="space-y-5 pb-16">
+      {/* Title Header with Modern Micro-interactions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border-subtle)] pb-2">
+        <div>
+          <h1 className="ui-page-title mb-1 flex items-center gap-2 text-2xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
+            {t('playgroundTitle')}
+            <SlidersHorizontal className="w-5 h-5 text-blue-500 shrink-0 animate-pulse" />
+          </h1>
+          <p className="ui-page-subtitle text-xs text-[var(--text-muted)] font-medium">{t('playgroundSubtitle')}</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Control Panel */}
-        <div className="ui-card p-6 h-fit lg:sticky lg:top-4 bg-[var(--surface-elevated)] border-[var(--border)]">
-          <form onSubmit={runComparison} className="space-y-5">
-            <section className="space-y-2">
-              <label className="ui-label text-xs uppercase tracking-wider text-[var(--text-muted)]">{t('pgText')}</label>
-              <textarea
-                value={text}
-                disabled={loading}
-                onChange={(e) => setText(e.target.value)}
-                className="ui-textarea text-sm"
-                placeholder={t('pgTextPlaceholder')}
-                rows={6}
-              />
-            </section>
+      {/* Horizontal Top-row Control Panel (3 Symmetrical Columns) */}
+      <motion.div
+        initial={{ opacity: 0, y: -15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+        className="ui-card p-6 bg-[var(--surface-elevated)] border-[var(--border)] shadow-xl relative overflow-hidden"
+      >
+        {/* Subtle top ambient glow */}
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
+        
+        <form onSubmit={runComparison} className="space-y-6">
+          
+          {/* STEP 1: Sleek Horizontal Document Uploader (Full-width) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                <UploadCloud size={12} className="text-blue-500 animate-pulse" />
+                {t('pgFile')}
+              </label>
+              <span className="text-[9px] text-[var(--text-faint)] font-semibold">Định dạng hỗ trợ: PDF, DOCX, TXT</span>
+            </div>
 
-            <section className="space-y-2">
-              <label className="ui-label text-xs uppercase tracking-wider text-[var(--text-muted)]">{t('pgFile')}</label>
-              <div className="border-2 border-dashed border-[var(--border)] rounded-xl p-4 text-center cursor-pointer hover:border-blue-500 dark:hover:border-blue-500 transition bg-[var(--surface-inset)]">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center bg-[var(--surface-inset)] p-4 rounded-2xl border border-[var(--border-subtle)] shadow-inner">
+              <div className="md:col-span-2 space-y-1">
+                <h3 className="text-xs font-bold text-[var(--text)]">Tải tệp tin văn bản lên hệ thống</h3>
+                <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                  Văn bản sẽ được tự động trích xuất nội dung ngay lập tức và điền vào khung soạn thảo phía dưới. Rất tiện lợi cho các tài liệu dài.
+                </p>
+              </div>
+
+              <div className="relative">
                 <input
                   type="file"
                   multiple
@@ -597,185 +631,278 @@ const Playground = () => {
                   id="file-upload"
                   accept=".pdf,.docx,.txt,.doc"
                 />
-                <label htmlFor="file-upload" className="cursor-pointer text-xs text-[var(--text-secondary)] font-semibold flex flex-col items-center gap-1.5">
-                  <UploadCloud size={20} className="text-blue-500" />
+                <label
+                  htmlFor="file-upload"
+                  className="cursor-pointer text-xs text-[var(--text-secondary)] font-bold py-3 px-4 rounded-xl border-2 border-dashed border-[var(--border)] hover:border-blue-500 dark:hover:border-blue-500 hover:bg-blue-50/10 transition-all flex items-center justify-center gap-2 bg-[var(--surface-elevated)] shadow-sm hover:shadow"
+                >
+                  <UploadCloud size={16} className="text-blue-500" />
                   {files.length > 0
                     ? t('pgFileSelected', { count: files.length })
                     : t('pgFilePick')}
                 </label>
               </div>
-              
-              {files.length > 0 && (
-                <div className="space-y-1.5">
-                  {files.map((f, i) => (
-                    <div
-                      key={i}
-                      className="text-xs text-[var(--text-secondary)] flex justify-between items-center p-2.5 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-xl"
+            </div>
+
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {files.map((f, i) => (
+                  <div
+                    key={i}
+                    className="text-[10px] text-[var(--text-secondary)] flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-full shadow-sm"
+                  >
+                    <span className="truncate max-w-[200px] font-medium">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiles(files.filter((_, idx) => idx !== i));
+                        if (files.length === 1) setText(SAMPLE_TEXT);
+                      }}
+                      className="text-red-500 hover:text-red-600 font-bold text-xs cursor-pointer focus:outline-none transition-colors"
                     >
-                      <span className="truncate mr-2 font-medium">{f.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFiles(files.filter((_, idx) => idx !== i));
-                          if (files.length === 1) setText(SAMPLE_TEXT); // reset if last file is cleared
-                        }}
-                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 p-1 rounded-lg transition shrink-0 cursor-pointer"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-2">
-              <label className="ui-label text-xs uppercase tracking-wider text-[var(--text-muted)]">{t('pgReference')}</label>
-              <textarea
-                value={reference}
-                disabled={loading}
-                onChange={(e) => setReference(e.target.value)}
-                className="ui-textarea text-xs"
-                placeholder={t('pgReferencePlaceholder')}
-                rows={3}
-              />
-            </section>
-
-            <section className="space-y-2">
-              <label className="ui-label text-xs uppercase tracking-wider text-[var(--text-muted)]">{t('pgAlgorithms')}</label>
-              <AlgorithmSelector selected={selected} setSelected={setSelected} disabled={loading} />
-            </section>
-
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                  {t('pgLengthRatio')}
-                </span>
-                <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 rounded">{lengthRatio}%</span>
+                      ×
+                    </button>
+                  </div>
+                ))}
               </div>
-              <input
-                type="range"
-                min="10"
-                max="100"
-                step="5"
-                disabled={loading || advancedOpen}
-                value={lengthRatio}
-                onChange={(e) => setLengthRatio(Number(e.target.value))}
-                className="ui-range"
-              />
-              <p className="text-[10px] text-[var(--text-muted)] font-semibold leading-relaxed">
-                {t('pgLengthTarget', {
-                  target: displayTargetWords,
-                  source: displaySourceWords,
-                })}
-                {result?.meta?.target_words != null && (
-                  <> {t('pgLengthLastRun', { words: result.meta.target_words })}</>
-                )}
-              </p>
-            </section>
+            )}
+          </div>
 
-            <section className="space-y-2">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => setAdvancedOpen(v => !v)}
-                className="text-xs font-bold text-blue-500 hover:underline transition cursor-pointer"
-              >
-                {advancedOpen ? t('pgAdvancedHide') : t('pgAdvancedShow')}
-              </button>
-              {advancedOpen && (
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="space-y-2">
-                    <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase">
+          {/* STEP 2: Full-Width Rich Text Editor */}
+          <div className="space-y-2 flex flex-col w-full">
+            <div className="flex items-center justify-between">
+              <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                <FileText size={12} className="text-blue-500" />
+                {t('pgText')}
+              </label>
+              <span className="text-[10px] text-[var(--text-muted)] font-semibold bg-[var(--surface-inset)] px-2 py-0.5 rounded-md">
+                {t('pgWords', { count: sourceWordCount })}
+              </span>
+            </div>
+            <textarea
+              value={text}
+              disabled={loading}
+              onChange={(e) => setText(e.target.value)}
+              className="ui-textarea text-xs min-h-[420px] resize-y focus:ring-2 focus:ring-blue-500/20 w-full font-sans leading-relaxed p-4 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl shadow-sm"
+              placeholder={t('pgTextPlaceholder')}
+            />
+          </div>
+
+          {/* ROW 2: Two Columns for Reference Options (Left) and Algorithms / Trigger (Right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-5 border-t border-[var(--border-subtle)]">
+            
+            {/* Left Column (Reference, Length Ratio slider & Advanced Settings) */}
+            <div className="space-y-4 bg-[var(--surface-inset)] p-4 rounded-2xl border border-[var(--border-subtle)] flex flex-col justify-between">
+              <section className="space-y-2 flex flex-col">
+                <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                  <BookOpen size={12} className="text-blue-500" />
+                  {t('pgReference')}
+                </label>
+                <textarea
+                  value={reference}
+                  disabled={loading}
+                  onChange={(e) => setReference(e.target.value)}
+                  className="ui-textarea text-xs min-h-[90px] resize-none focus:ring-2 focus:ring-blue-500/20 w-full"
+                  placeholder={t('pgReferencePlaceholder')}
+                />
+              </section>
+
+              <section className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+                    {t('pgLengthRatio')}
+                  </span>
+                  <span className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 rounded">{lengthRatio}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  disabled={loading || advancedOpen}
+                  value={lengthRatio}
+                  onChange={(e) => setLengthRatio(Number(e.target.value))}
+                  className="ui-range"
+                  style={{
+                    background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${fillPercent}%, var(--surface-inset) ${fillPercent}%, var(--surface-inset) 100%)`
+                  }}
+                />
+                <p className="text-[9px] text-[var(--text-muted)] font-semibold leading-relaxed">
+                  {t('pgLengthTarget', {
+                    target: displayTargetWords,
+                    source: displaySourceWords,
+                  })}
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                    <Sliders size={12} className="text-blue-500" />
+                    Tùy chỉnh nâng cao
+                  </span>
+                  
+                  {/* Modern Toggle Switch */}
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setAdvancedOpen(v => !v)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      advancedOpen ? 'bg-blue-600' : 'bg-gray-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        advancedOpen ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div
+                  className={`grid grid-cols-2 gap-3 p-3 rounded-xl bg-[var(--surface-elevated)] border border-[var(--border-subtle)] transition-all duration-300 ${
+                    advancedOpen 
+                      ? 'opacity-100 scale-100' 
+                      : 'opacity-40 pointer-events-none scale-[0.99] bg-[var(--surface-inset)]/50'
+                  }`}
+                >
+                  <label className="space-y-1">
+                    <span className="block text-[9px] font-bold text-[var(--text-muted)] uppercase">
                       {t('pgSentences')}
                     </span>
                     <input
                       type="number"
                       min="1"
                       max="20"
-                      disabled={loading}
+                      disabled={loading || !advancedOpen}
                       value={sentenceCount}
                       onChange={(e) => setSentenceCount(Number(e.target.value))}
-                      className="ui-input py-1.5"
+                      className="ui-input py-1 text-xs text-center"
                     />
                   </label>
-                  <label className="space-y-2">
-                    <span className="block text-xs font-semibold text-[var(--text-muted)] uppercase">
-                      {t('pgMaxTokens')}
-                    </span>
+                  <div className="space-y-1 flex flex-col justify-end">
+                    <div className="flex items-center justify-between">
+                      <span className="block text-[9px] font-bold text-[var(--text-muted)] uppercase">
+                        {t('pgMaxTokens')}
+                      </span>
+                    </div>
                     <input
                       type="number"
                       min="24"
-                      max="512"
-                      disabled={loading}
+                      max="500"
+                      disabled={loading || !advancedOpen}
                       value={maxLength}
-                      onChange={(e) => setMaxLength(Number(e.target.value))}
-                      className="ui-input py-1.5"
+                      onChange={(e) => setMaxLength(Math.min(500, Math.max(24, Number(e.target.value) || 24)))}
+                      className="ui-input py-1 text-xs text-center"
                     />
-                  </label>
+                  </div>
                 </div>
-              )}
-            </section>
+              </section>
+            </div>
 
-            <button
-              type="submit"
-              disabled={loading || selected.length === 0 || (!text.trim() && !files.length)}
-              className="ui-btn-primary w-full py-3 rounded-xl shadow-md shadow-blue-600/10 cursor-pointer"
-            >
-              {loading ? <RefreshCcw className="animate-spin mr-1" size={15} /> : <Play className="mr-1" size={15} />}
-              {loading ? t('running') : t('runCompare')}
-            </button>
+            {/* Right Column (Algorithm Selection & Large Submit button) */}
+            <div className="space-y-4 flex flex-col justify-between">
+              <section className="space-y-2 flex-1">
+                <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                  <Activity size={12} className="text-blue-500" />
+                  {t('pgAlgorithms')}
+                </label>
+                <AlgorithmSelector selected={selected} setSelected={setSelected} disabled={loading} />
+              </section>
 
-            {error && (
-              <div className="text-red-600 dark:text-red-400 text-xs bg-red-50 dark:bg-red-950/30 p-3 rounded-xl flex gap-2 border border-red-200 dark:border-red-900">
-                <AlertCircle size={15} className="shrink-0" />
-                <span>{error}</span>
+              <div className="space-y-3">
+                <button
+                  type="submit"
+                  disabled={loading || selected.length === 0 || (!text.trim() && !files.length)}
+                  className={`ui-btn-primary w-full py-3.5 rounded-xl font-bold shadow-lg transition-all duration-300 relative overflow-hidden group cursor-pointer ${
+                    loading 
+                      ? 'opacity-80' 
+                      : 'hover:scale-[1.01] hover:shadow-blue-500/20 active:scale-[0.99]'
+                  }`}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 opacity-100 transition-opacity" />
+                  <span className="relative z-10 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider">
+                    {loading ? <RefreshCcw className="animate-spin" size={14} /> : <Play className="animate-pulse" size={14} />}
+                    {loading ? t('running') : t('runCompare')}
+                  </span>
+                </button>
+
+                {error && (
+                  <div className="text-red-600 dark:text-red-400 text-[10px] bg-red-50 dark:bg-red-950/30 p-2.5 rounded-lg flex gap-2 border border-red-200 dark:border-red-900/50">
+                    <AlertCircle size={12} className="shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
               </div>
-            )}
-          </form>
-        </div>
+            </div>
+            
+          </div>
+        </form>
+      </motion.div>
 
-        {/* Right Output Panels */}
-        <div className="lg:col-span-2 space-y-5">
-          <RunProgress
-            loading={loading}
-            runningKey={runningKey}
-            completed={completedCount}
-            total={selected.length}
-          />
+      {/* Stacked Results Section (Vertical below top inputs) */}
+      <div className="space-y-6">
+        
+        {/* Full-width elegant Progress indicator */}
+        <RunProgress
+          loading={loading}
+          runningKey={runningKey}
+          completed={completedCount}
+          total={selected.length}
+        />
 
-          <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            animate="show"
-            className="grid gap-4 sm:grid-cols-2"
-          >
-            {orderedKeys.map(key => (
+        {/* 3-column Symmetrical Wide Grid for Algorithm Result Cards */}
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+          className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+        >
+          {orderedKeys.map(key => (
+            <motion.div
+              key={key}
+              whileHover={loading ? {} : { y: -6, transition: { duration: 0.2 } }}
+              layout
+              className="relative rounded-2xl"
+            >
               <AlgorithmCard
-                key={key}
                 algoKey={key}
                 state={runState[key] || { status: STATUS.idle, result: null, error: null }}
                 rank={rankByKey[key]}
               />
-            ))}
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {result?.warning && (
+          <div className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-800/40 rounded-xl px-4 py-3 flex gap-2 items-center">
+            <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>{result.warning}</span>
+          </div>
+        )}
+
+        {/* Full-width Symmetrical Metrics Table */}
+        {rows.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <ComparisonTable rows={rows} />
           </motion.div>
+        )}
 
-          {result?.warning && (
-            <div className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-800/50 rounded-xl px-4 py-3 flex gap-2 items-center">
-              <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-              <span>{result.warning}</span>
-            </div>
-          )}
-
-          {rows.length > 0 && <ComparisonTable rows={rows} />}
-
-          {!loading && !rows.length && Object.keys(runState).length === 0 && (
-            <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-elevated)] p-12 text-center shadow-sm">
-              <Sparkles className="mx-auto text-[var(--text-faint)] mb-3 animate-pulse" size={28} />
-              <p className="text-xs text-[var(--text-muted)] font-semibold">{t('pgEmptyState')}</p>
-            </div>
-          )}
-        </div>
+        {/* Sleek Empty state */}
+        {!loading && !rows.length && Object.keys(runState).length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-elevated)] p-16 text-center shadow-sm"
+          >
+            <Terminal className="mx-auto text-[var(--text-faint)] mb-3 animate-pulse" size={32} />
+            <p className="text-xs text-[var(--text-muted)] font-bold">{t('pgEmptyState')}</p>
+          </motion.div>
+        )}
+        
       </div>
     </div>
   );

@@ -15,11 +15,13 @@ Changes vs old version
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sys
 import time
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -205,6 +207,7 @@ def _compare_or_400(
     use_length_ratio: bool = True,
     save_result: bool = True,
 ) -> dict:
+    """Sync wrapper — gọi từ executor thread, KHÔNG gọi trực tiếp từ async endpoint."""
     try:
         compare = summarize_all(
             text=text,
@@ -223,6 +226,27 @@ def _compare_or_400(
     except Exception as exc:
         logger.exception("Comparison failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+async def _compare_or_400_async(
+    text: str,
+    reference: str | None,
+    algorithms: list[str],
+    extractive_sentences: int,
+    max_abstractive_length: int,
+    target_length_ratio: int = 50,
+    use_length_ratio: bool = True,
+    save_result: bool = True,
+) -> dict:
+    """Async wrapper: offload blocking inference sang thread pool để giải phóng event loop."""
+    loop = asyncio.get_event_loop()
+    fn = partial(
+        _compare_or_400,
+        text, reference, algorithms,
+        extractive_sentences, max_abstractive_length,
+        target_length_ratio, use_length_ratio, save_result,
+    )
+    return await loop.run_in_executor(None, fn)
 
 
 def _legacy_response(compare: dict, requested_model: str) -> dict:
@@ -409,11 +433,10 @@ async def summarize(request_body: SummarizeRequest):
     text = _ensure_text(request_body.text)
     model_key = resolve_algorithm(request_body.model_name).key
     algorithms = [model_key, "textrank"] if model_key != "textrank" else ["textrank", "vit5"]
-    # Deduplicate while preserving order
     seen: set[str] = set()
     unique_algos = [a for a in algorithms if not (a in seen or seen.add(a))]  # type: ignore[func-returns-value]
 
-    compare = _compare_or_400(
+    compare = await _compare_or_400_async(
         text,
         request_body.reference,
         unique_algos,
@@ -427,7 +450,7 @@ async def summarize(request_body: SummarizeRequest):
 @app.post("/summarize/compare", tags=["Summarization"])
 async def summarize_compare(request_body: CompareRequest):
     text = _ensure_text(request_body.text)
-    return _compare_or_400(
+    return await _compare_or_400_async(
         text,
         request_body.reference,
         request_body.algorithms,
@@ -473,7 +496,7 @@ async def summarize_files(
 ):
     text, documents = await _read_uploads(files)
     model_key = resolve_algorithm(model_name).key
-    compare = _compare_or_400(
+    compare = await _compare_or_400_async(
         text, reference, ["textrank", model_key],
         extractive_sentences, max_abstractive_length,
     )
@@ -500,7 +523,7 @@ async def summarize_files_compare(
             selected = parsed if isinstance(parsed, list) else selected
         except Exception:
             selected = [p.strip() for p in algorithms.split(",") if p.strip()]
-    result = _compare_or_400(
+    result = await _compare_or_400_async(
         text,
         reference,
         selected,
@@ -511,6 +534,13 @@ async def summarize_files_compare(
     )
     result["documents"] = documents
     return result
+
+
+@app.post("/summarize/files/extract", tags=["Summarization"])
+async def extract_files_text(files: list[UploadFile] = File(...)):
+    """Extract text from uploaded files without summarizing them."""
+    text, documents = await _read_uploads(files)
+    return {"text": text, "documents": documents}
 
 
 # ─────────────────────────── Dev entrypoint ────────────────────────────────

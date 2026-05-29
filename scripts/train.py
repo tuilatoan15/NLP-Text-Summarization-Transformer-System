@@ -106,7 +106,9 @@ def train_model(args) -> dict:
 
     model_source = algorithm.model_name
     logger.info("Training %s from %s", algorithm.name, model_source)
-    tokenizer = AutoTokenizer.from_pretrained(model_source, use_fast=False)
+    # mT5 tokenizer_config.json có 'backend' field không tương thích với slow tokenizer
+    use_fast_tok = algorithm.key == "mt5"
+    tokenizer = AutoTokenizer.from_pretrained(model_source, use_fast=use_fast_tok)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_source)
 
     dataset = load_vnexpress_dataset(
@@ -160,7 +162,8 @@ def train_model(args) -> dict:
         greater_is_better=False,
         predict_with_generate=not args.skip_rouge_eval,
         generation_max_length=args.max_target_tokens,
-        fp16=torch.cuda.is_available(),
+        fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
+        bf16=torch.cuda.is_bf16_supported(),
         dataloader_num_workers=0,
         logging_steps=args.logging_steps,
         report_to="none",

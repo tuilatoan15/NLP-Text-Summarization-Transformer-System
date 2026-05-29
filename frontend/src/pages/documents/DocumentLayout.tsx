@@ -2,17 +2,17 @@ import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Brain, GitCompare, ChartColumn,
-  Info, BookOpen, ChevronRight, Zap
+  Brain, ChartColumn,
+  Info, ChevronRight, Zap
 } from 'lucide-react';
+
 import { DocumentProvider, useDocumentContext } from '../../context/DocumentContext';
 
 const TABS = [
-  { to: 'compare',        label: 'Compare',        icon: GitCompare, reqDoc: true },
   { to: 'evaluation',     label: 'Evaluation',     icon: ChartColumn,reqDoc: true },
   { to: 'explainability', label: 'Explainability', icon: Info,       reqDoc: true },
-  { to: 'notebook',       label: 'NotebookLM',     icon: BookOpen,   reqDoc: true },
 ];
+
 
 function LayoutInner() {
   const { document } = useDocumentContext();

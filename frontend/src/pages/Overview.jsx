@@ -25,15 +25,19 @@ const StatCard = ({ title, value, subtext, icon: Icon, color }) => (
 );
 
 const Overview = () => {
-  const { t, locale, isDark } = useApp();
-  const [health, setHealth] = useState(null);
-  const [metrics, setMetrics] = useState(null);
-  const [dashboard, setDashboard] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { t, locale, isDark, overviewCache, setOverviewCache } = useApp();
+  const [health, setHealth] = useState(() => overviewCache?.health || null);
+  const [metrics, setMetrics] = useState(() => overviewCache?.metrics || null);
+  const [dashboard, setDashboard] = useState(() => overviewCache?.dashboard || null);
+  const [loading, setLoading] = useState(!overviewCache);
   const chart = getChartTheme(isDark);
   const dLocale = dateLocale(locale);
 
   useEffect(() => {
+    if (overviewCache) {
+      setLoading(false);
+      return;
+    }
     async function fetchData() {
       try {
         const [healthData, metricsData, dash] = await Promise.all([
@@ -44,6 +48,7 @@ const Overview = () => {
         setHealth(healthData);
         setMetrics(metricsData);
         setDashboard(dash);
+        setOverviewCache({ health: healthData, metrics: metricsData, dashboard: dash });
       } catch (err) {
         console.error('Failed to fetch overview data:', err);
       } finally {
@@ -51,7 +56,7 @@ const Overview = () => {
       }
     }
     fetchData();
-  }, []);
+  }, [overviewCache, setOverviewCache]);
 
   const dashMetrics = dashboard?.metrics || {};
   const timeseries = dashboard?.visualization?.timeseries || [];

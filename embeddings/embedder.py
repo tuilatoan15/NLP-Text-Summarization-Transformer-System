@@ -111,7 +111,9 @@ class SentenceTransformerEmbedder:
 
         model = self._load_model()
         if model is None:
-            vectors = self._hash_embeddings(texts)
+            defaults = EmbeddingModelRegistry.defaults_for(self.config.model_name)
+            dimension = int(defaults.get("dimension", 384))
+            vectors = self._hash_embeddings(texts, dimension=dimension)
             return EmbeddingBatchResult(
                 embeddings=vectors,
                 model_name="hash-fallback",

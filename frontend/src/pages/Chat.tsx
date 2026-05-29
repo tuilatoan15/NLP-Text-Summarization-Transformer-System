@@ -21,10 +21,10 @@ export default function Chat() {
   const [messages, setMessages] = useState<RAGMessage[]>([]);
   const [inputQuery, setInputQuery] = useState('');
   
-  // Advanced Ingestion Settings
-  const [chunkSize, setChunkSize] = useState(500);
+  // Advanced Ingestion Settings (Cố định ở tầng State, không hiển thị trên UI)
+  const [chunkSize, setChunkSize] = useState(512);
   const [chunkOverlap, setChunkOverlap] = useState(80);
-  const [ingestionModel, setIngestionModel] = useState('bge-m3');
+  const [ingestionModel, setIngestionModel] = useState('intfloat/multilingual-e5-large');
 
   // Ingestion loading & files
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -33,12 +33,12 @@ export default function Chat() {
   
   // Embedding models list & active RAG configuration
   const [embeddingModels, setEmbeddingModels] = useState<string[]>([]);
-  const [ragModel, setRagModel] = useState('bge-m3');
-  const [topK, setTopK] = useState(5);
-  const [threshold, setThreshold] = useState(0.25);
+  const [ragModel, setRagModel] = useState('intfloat/multilingual-e5-large');
+  const [topK, setTopK] = useState(4);
+  const [threshold, setThreshold] = useState(0.35);
   const [retrievalMode, setRetrievalMode] = useState<'hybrid' | 'embedding' | 'bm25'>('hybrid');
   const [useReranking, setUseReranking] = useState(true);
-  const [temperature, setTemperature] = useState(0.2);
+  const [temperature, setTemperature] = useState(0.15);
 
   // Active generation/interaction states
   const [chatLoading, setChatLoading] = useState(false);
@@ -47,8 +47,8 @@ export default function Chat() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
-  // Right Panel tabs
-  const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'citations'>('settings');
+  // Right Panel: Chỉ hiển thị tab dẫn nguồn ('citations') theo thiết kế tối giản mới
+  const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'citations'>('citations');
 
   // --- Initial Data Load ---
   useEffect(() => {
@@ -479,60 +479,7 @@ export default function Chat() {
                 )}
               </motion.div>
 
-              {/* Ingestion Parameters Accordion */}
-              <details className="group border border-[var(--border)] rounded-xl bg-[var(--surface-muted)] overflow-hidden transition-all">
-                <summary className="flex items-center justify-between p-2.5 text-xs font-bold text-[var(--text-secondary)] cursor-pointer hover:bg-[var(--surface-inset)]">
-                  <span className="flex items-center gap-1.5">
-                    <Settings size={12} /> Cấu hình Chunk & Model
-                  </span>
-                  <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
-                </summary>
-                
-                <div className="p-3 border-t border-[var(--border)] space-y-3 bg-[var(--surface-elevated)]">
-                  <div>
-                    <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">
-                      Kích thước chunk (tokens)
-                    </label>
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="range" min="100" max="1500" step="50"
-                        value={chunkSize} onChange={(e) => setChunkSize(Number(e.target.value))}
-                        className="ui-range flex-1"
-                      />
-                      <span className="text-xs font-mono font-bold w-12 text-right">{chunkSize}</span>
-                    </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">
-                      Độ trùng lặp chunk (overlap)
-                    </label>
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type="range" min="0" max="400" step="10"
-                        value={chunkOverlap} onChange={(e) => setChunkOverlap(Number(e.target.value))}
-                        className="ui-range flex-1"
-                      />
-                      <span className="text-xs font-mono font-bold w-12 text-right">{chunkOverlap}</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1">
-                      Embedding Model nạp
-                    </label>
-                    <select
-                      value={ingestionModel}
-                      onChange={(e) => setIngestionModel(e.target.value)}
-                      className="ui-input py-1 text-xs"
-                    >
-                      {embeddingModels.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </details>
 
               <button
                 type="submit"
@@ -841,213 +788,90 @@ export default function Chat() {
           RIGHT PANEL: Citations Grounds & Parameters Settings
           ───────────────────────────────────────────────────────────── */}
       <section className="w-full lg:w-80 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5">
-        {/* Toggle tabs with sliding background pill indicator */}
-        <div className="border-b border-[var(--border)] bg-[var(--surface-muted)] p-1">
-          <div className="flex border border-[var(--border)] bg-[var(--surface-muted)] p-1 rounded-2xl relative overflow-hidden">
-            <button
-              onClick={() => setRightPanelTab('settings')}
-              className={`relative z-10 flex-grow flex-shrink flex-basis-0 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                rightPanelTab === 'settings' ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
-              }`}
-            >
-              {rightPanelTab === 'settings' && (
-                <motion.div
-                  layoutId="activeTabPill"
-                  className="absolute inset-0 bg-[var(--surface-elevated)] border border-[var(--border)]/50 shadow-sm rounded-xl"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              <span className="relative z-20 flex items-center gap-1.5">
-                <Sliders size={13} /> Tham số RAG
-              </span>
-            </button>
-            
-            <button
-              onClick={() => setRightPanelTab('citations')}
-              className={`relative z-10 flex-grow flex-shrink flex-basis-0 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                rightPanelTab === 'citations' ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
-              }`}
-            >
-              {rightPanelTab === 'citations' && (
-                <motion.div
-                  layoutId="activeTabPill"
-                  className="absolute inset-0 bg-[var(--surface-elevated)] border border-[var(--border)]/50 shadow-sm rounded-xl"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              <span className="relative z-20 flex items-center gap-1.5">
-                <ShieldCheck size={13} /> Dẫn nguồn ({activeCitations.length})
-              </span>
-            </button>
+        {/* Right Panel Header */}
+        <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-emerald-500 animate-pulse" />
+            <h2 className="text-sm font-bold text-[var(--text)]">Dẫn nguồn tham chiếu</h2>
           </div>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold font-mono">
+            {activeCitations.length} đoạn
+          </span>
         </div>
 
-        {/* Tab contents */}
+        {/* Citations Content list */}
         <div className="flex-1 overflow-y-auto p-4">
-          
-          {/* TAB 1: Advanced settings */}
-          {rightPanelTab === 'settings' && (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Mô hình truy vấn</p>
-                <select
-                  value={ragModel}
-                  onChange={(e) => setRagModel(e.target.value)}
-                  className="ui-input py-1.5 text-xs rounded-xl cursor-pointer"
-                >
-                  {embeddingModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+          <div className="space-y-3">
+            {activeCitations.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[var(--text-faint)]">
+                Chưa có trích dẫn từ tin nhắn phản hồi gần nhất. Gửi một tin nhắn để xem dẫn nguồn chi tiết.
               </div>
-
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Phương thức Retrieval</p>
-                <div className="grid grid-cols-3 gap-1 bg-[var(--surface-muted)] p-1 rounded-xl border border-[var(--border)]">
-                  {(['hybrid', 'embedding', 'bm25'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setRetrievalMode(mode)}
-                      className={`text-[10px] font-bold py-1.5 rounded-lg capitalize transition-all cursor-pointer ${
-                        retrievalMode === mode
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+            ) : (
+              <div className="space-y-3">
+                {activeCitations.map((cite, index) => {
+                  const isHighlighted = highlightedCitationId === cite.chunk_id;
+                  return (
+                    <motion.div
+                      key={cite.chunk_id}
+                      id={`citation-chunk-${cite.chunk_id}`}
+                      animate={{
+                        borderColor: isHighlighted ? 'var(--accent)' : 'var(--border)',
+                        backgroundColor: isHighlighted ? 'rgba(37,99,235,0.06)' : 'rgba(255,255,255,0)',
+                      }}
+                      transition={{ duration: 0.3 }}
+                      className={`p-3.5 rounded-xl border ${
+                        isHighlighted
+                          ? 'shadow-md shadow-blue-500/5 ring-1 ring-blue-500/20'
+                          : 'bg-[var(--surface-muted)]/50'
                       }`}
                     >
-                      {mode === 'hybrid' ? 'Hybrid' : mode === 'embedding' ? 'Vector' : 'BM25'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                      {/* Source Details Header */}
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-500 text-white font-mono uppercase">
+                          Nguồn #{index + 1}
+                        </span>
+                        <span className="text-[9px] font-bold text-[var(--text-faint)]">
+                          Hạng {cite.rank ?? (index + 1)}
+                        </span>
+                      </div>
 
-              <div className="h-px bg-[var(--border)]" />
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Số nguồn lấy (Top K)</span>
-                  <span className="font-mono text-blue-500">{topK} chunks</span>
-                </div>
-                <input
-                  type="range" min="1" max="15" step="1"
-                  value={topK} onChange={(e) => setTopK(Number(e.target.value))}
-                  className="ui-range"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Ngưỡng tương đồng</span>
-                  <span className="font-mono text-blue-500">{threshold.toFixed(2)}</span>
-                </div>
-                <input
-                  type="range" min="0.0" max="0.9" step="0.05"
-                  value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
-                  className="ui-range"
-                />
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Nhiệt độ (Temperature)</span>
-                  <span className="font-mono text-blue-500">{temperature.toFixed(1)}</span>
-                </div>
-                <input
-                  type="range" min="0.0" max="1.0" step="0.1"
-                  value={temperature} onChange={(e) => setTemperature(Number(e.target.value))}
-                  className="ui-range"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--surface-muted)] border border-[var(--border)]">
-                <div className="space-y-0.5">
-                  <p className="text-xs font-bold text-[var(--text)]">Sử dụng Reranking</p>
-                  <p className="text-[9px] text-[var(--text-muted)]">Tái định thứ hạng bằng Cross-Encoder</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={useReranking}
-                  onChange={(e) => setUseReranking(e.target.checked)}
-                  className="rounded border-[var(--border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: Grounding citations list */}
-          {rightPanelTab === 'citations' && (
-            <div className="space-y-3">
-              {activeCitations.length === 0 ? (
-                <div className="py-12 text-center text-xs text-[var(--text-faint)]">
-                  Chưa có trích dẫn từ tin nhắn phản hồi gần nhất. Gửi một tin nhắn để xem dẫn nguồn chi tiết.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {activeCitations.map((cite, index) => {
-                    const isHighlighted = highlightedCitationId === cite.chunk_id;
-                    return (
-                      <motion.div
-                        key={cite.chunk_id}
-                        id={`citation-chunk-${cite.chunk_id}`}
-                        animate={{
-                          borderColor: isHighlighted ? 'var(--accent)' : 'var(--border)',
-                          backgroundColor: isHighlighted ? 'rgba(37,99,235,0.06)' : 'rgba(255,255,255,0)',
-                        }}
-                        transition={{ duration: 0.3 }}
-                        className={`p-3.5 rounded-xl border ${
-                          isHighlighted
-                            ? 'shadow-md shadow-blue-500/5 ring-1 ring-blue-500/20'
-                            : 'bg-[var(--surface-muted)]/50'
-                        }`}
-                      >
-                        {/* Source Details Header */}
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-500 text-white font-mono uppercase">
-                            Nguồn #{index + 1}
+                      {/* File Name info */}
+                      <p className="text-[11px] font-bold text-[var(--text)] truncate flex items-center gap-1.5">
+                        <FileText size={12} className="text-blue-500 shrink-0" />
+                        {cite.filename}
+                        {cite.page !== null && (
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--surface-inset)] text-[var(--text-muted)] font-mono">
+                            Tr. {cite.page}
                           </span>
-                          <span className="text-[9px] font-bold text-[var(--text-faint)]">
-                            Hạng {cite.rank ?? (index + 1)}
-                          </span>
+                        )}
+                      </p>
+
+                      {/* Chunk Content Text */}
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed mt-2 p-2 bg-[var(--surface-elevated)] rounded-lg border border-[var(--border)]/60 max-h-[140px] overflow-y-auto whitespace-pre-wrap font-sans">
+                        {cite.text}
+                      </p>
+
+                      {/* Detail Scores */}
+                      <div className="mt-2.5 pt-2 border-t border-[var(--border)]/40 grid grid-cols-3 gap-1 text-center">
+                        <div className="p-1 rounded bg-[var(--surface-inset)]">
+                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Embed F1</p>
+                          <p className="text-xs font-mono font-bold text-blue-500">{(cite.embedding_score || 0).toFixed(3)}</p>
                         </div>
-
-                        {/* File Name info */}
-                        <p className="text-[11px] font-bold text-[var(--text)] truncate flex items-center gap-1.5">
-                          <FileText size={12} className="text-blue-500 shrink-0" />
-                          {cite.filename}
-                          {cite.page !== null && (
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--surface-inset)] text-[var(--text-muted)] font-mono">
-                              Tr. {cite.page}
-                            </span>
-                          )}
-                        </p>
-
-                        {/* Chunk Content Text */}
-                        <p className="text-xs text-[var(--text-secondary)] leading-relaxed mt-2 p-2 bg-[var(--surface-elevated)] rounded-lg border border-[var(--border)]/60 max-h-[140px] overflow-y-auto whitespace-pre-wrap font-sans">
-                          {cite.text}
-                        </p>
-
-                        {/* Detail Scores */}
-                        <div className="mt-2.5 pt-2 border-t border-[var(--border)]/40 grid grid-cols-3 gap-1 text-center">
-                          <div className="p-1 rounded bg-[var(--surface-inset)]">
-                            <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Embed F1</p>
-                            <p className="text-xs font-mono font-bold text-blue-500">{(cite.embedding_score || 0).toFixed(3)}</p>
-                          </div>
-                          <div className="p-1 rounded bg-[var(--surface-inset)]">
-                            <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">BM25</p>
-                            <p className="text-xs font-mono font-bold text-blue-500">{(cite.bm25_score || 0).toFixed(1)}</p>
-                          </div>
-                          <div className="p-1 rounded bg-[var(--surface-inset)]">
-                            <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Combined</p>
-                            <p className="text-xs font-mono font-bold text-emerald-500">{(cite.combined_score || 0).toFixed(3)}</p>
-                          </div>
+                        <div className="p-1 rounded bg-[var(--surface-inset)]">
+                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">BM25</p>
+                          <p className="text-xs font-mono font-bold text-blue-500">{(cite.bm25_score || 0).toFixed(1)}</p>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
+                        <div className="p-1 rounded bg-[var(--surface-inset)]">
+                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Combined</p>
+                          <p className="text-xs font-mono font-bold text-emerald-500">{(cite.combined_score || 0).toFixed(3)}</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

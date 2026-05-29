@@ -7,6 +7,22 @@ import unicodedata
 
 from src.utils import logger
 
+# Unicode script ranges for injection detection (non-Latin, non-Vietnamese)
+_FOREIGN_BLOCK_PATTERNS = re.compile(
+    r"["
+    r"\u1100-\u11FF"  # Hangul Jamo (Korean)
+    r"\uAC00-\uD7AF"  # Hangul Syllables (Korean)
+    r"\u0B80-\u0BFF"  # Tamil
+    r"\u0600-\u06FF"  # Arabic
+    r"\u0900-\u097F"  # Devanagari (Hindi)
+    r"\u4E00-\u9FFF"  # CJK Unified Ideographs (Chinese/Japanese)
+    r"\u3040-\u30FF"  # Hiragana/Katakana (Japanese)
+    r"\u0400-\u04FF"  # Cyrillic (Russian)
+    r"\u0370-\u03FF"  # Greek
+    r"\u0E00-\u0E7F"  # Thai
+    r"]"
+)
+
 
 def _is_vietnamese_latin_letter(ch: str) -> bool:
     if not ch.isalpha():
@@ -54,14 +70,10 @@ def is_garbled_abstractive(text: str) -> bool:
         return True
 
     short_tokens = sum(1 for w in words if len(w) <= 2)
-    if short_tokens / len(words) > 0.28:
+    if short_tokens / len(words) > 0.45:
         return True
 
     if re.search(r"\b(WỴ|nhóm!|sinh nhóm|Viet Q\.)\b", text_nfc, flags=re.IGNORECASE):
-        return True
-
-    weird_chars = len(re.findall(r"[ỖỸẸÈỴ]", text_nfc))
-    if weird_chars >= 2:
         return True
 
     broken_ascii = sum(
@@ -87,12 +99,84 @@ def is_multilingual_garbage(text: str, *, require_vietnamese: bool = False) -> b
         vi_ratio = vietnamese_letter_ratio(text_nfc)
         letters = [ch for ch in text_nfc if ch.isalpha()]
         # Softened thresholds to prevent flagging short or low-accent valid texts
-        if len(letters) >= 15 and vi_ratio < 0.03:
+        if len(letters) >= 20 and vi_ratio < 0.01:
             return True
-        if len(letters) >= 8 and vi_ratio == 0.0 and len(text_nfc.split()) >= 4:
+        if len(letters) >= 35 and vi_ratio == 0.0:
             return True
 
     return False
+
+
+def detect_poor_training_output(text: str) -> dict:
+    """Detect signs that the model was poorly trained for Vietnamese.
+
+    Returns a dict with:
+      - ``is_poor_training`` (bool): True if the output shows clear signs of
+        a poorly fine-tuned or undertrained model.
+      - ``reason`` (str | None): Human-readable explanation of the failure.
+
+    Catches the mT5 failure pattern: isolated Korean/Tamil/Arabic/CJK tokens
+    injected into an otherwise-Vietnamese text stream, which fall *below* the
+    15% foreign-ratio threshold but are still clearly wrong.
+    """
+    if not text or len(text.strip()) < 6:
+        return {"is_poor_training": False, "reason": None}
+
+    text_nfc = unicodedata.normalize("NFC", text)
+
+    # 1. Find any occurrence of a non-Latin/non-Vietnamese Unicode block character
+    foreign_tokens = _FOREIGN_BLOCK_PATTERNS.findall(text_nfc)
+    if foreign_tokens:
+        scripts_found: set[str] = set()
+        for ch in foreign_tokens:
+            try:
+                name = unicodedata.name(ch, "")
+                if "HANGUL" in name or "KOREAN" in name:
+                    scripts_found.add("Korean (Hangul)")
+                elif "TAMIL" in name:
+                    scripts_found.add("Tamil")
+                elif "ARABIC" in name:
+                    scripts_found.add("Arabic")
+                elif "CJK" in name or "HIRAGANA" in name or "KATAKANA" in name:
+                    scripts_found.add("Chinese/Japanese")
+                elif "DEVANAGARI" in name:
+                    scripts_found.add("Hindi (Devanagari)")
+                elif "CYRILLIC" in name:
+                    scripts_found.add("Cyrillic")
+                elif "GREEK" in name:
+                    scripts_found.add("Greek")
+                elif "THAI" in name:
+                    scripts_found.add("Thai")
+                else:
+                    scripts_found.add("Unknown foreign script")
+            except Exception:
+                scripts_found.add("Unknown foreign script")
+        scripts_str = ", ".join(sorted(scripts_found))
+        return {
+            "is_poor_training": True,
+            "reason": (
+                f"Model output contains foreign-script tokens ({scripts_str}) mixed into Vietnamese text. "
+                f"This is a strong sign of poor or incomplete fine-tuning for Vietnamese NLP."
+            ),
+        }
+
+    # 2. Check for tokenizer-artifact patterns: sequences of vowel-less clusters
+    # e.g. "tuha", "lytte", "vulnerக"
+    words = text_nfc.split()
+    # Flag words with no vowels that are entirely lowercase Latin (tokeniser debris)
+    vowel_pat = re.compile(r"[aeiouàáâãèéêìíòóôõùúýăđêôơưàáảạăắặầấảẽẹèéêệếềẻếỉỊịíọốồổốộờởợởớổờớộờổỏõòóôõùúụủưứựừữửụứừữử]", re.IGNORECASE)
+    debris_words = [w for w in words if re.fullmatch(r"[a-z]{3,}", w) and not vowel_pat.search(w)]
+    if len(debris_words) >= 2:
+        return {
+            "is_poor_training": True,
+            "reason": (
+                f"Model output contains {len(debris_words)} vowel-less ASCII token(s) "
+                f"({', '.join(debris_words[:3])}...) — likely SentencePiece tokenizer debris "
+                f"from an improperly aligned vocabulary during fine-tuning."
+            ),
+        }
+
+    return {"is_poor_training": False, "reason": None}
 
 
 def validate_output(text: str, *, require_vietnamese: bool = False) -> dict:

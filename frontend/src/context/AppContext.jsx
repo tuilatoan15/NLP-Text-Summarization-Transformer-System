@@ -31,6 +31,8 @@ export function AppProvider({ children }) {
   const [locale, setLocale] = useState(() => localStorage.getItem(STORAGE_LOCALE) || 'vie');
   const [notifications, setNotifications] = useState(() => loadJson(STORAGE_NOTIFICATIONS, []));
   const [notifOpen, setNotifOpen] = useState(false);
+  const [overviewCache, setOverviewCache] = useState(null);
+  const [analyticsCache, setAnalyticsCache] = useState({});
 
   useEffect(() => {
     const root = document.documentElement;
@@ -127,10 +129,15 @@ export function AppProvider({ children }) {
     clearNotifications,
     requestNotificationPermission,
     formatTimeAgo: (ts) => formatTimeAgo(ts, locale),
+    overviewCache,
+    setOverviewCache,
+    analyticsCache,
+    setAnalyticsCache,
   }), [
     theme, locale, notifications, notifOpen, unreadCount,
     toggleTheme, setLanguage, t, addNotification, markAsRead, markAllRead,
     clearNotifications, requestNotificationPermission,
+    overviewCache, analyticsCache,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

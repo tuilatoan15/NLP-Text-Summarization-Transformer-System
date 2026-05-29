@@ -72,16 +72,28 @@ class ModelRegistry:
     def _load_tokenizer(self, algorithm: AlgorithmConfig, model_path: str) -> Any:
         from transformers import AutoTokenizer
 
-        kwargs: dict[str, Any] = {"use_fast": False}
+        # mT5 tokenizer_config.json có trường 'backend' không tương thích với slow tokenizer
+        # → bắt buộc dùng use_fast=True cho mT5 để tránh lỗi "not a string"
+        # vit5 & bartpho dùng SentencePiece nên cần use_fast=False (slow tokenizer ổn định hơn)
+        use_fast = algorithm.key == "mt5"
+        kwargs: dict[str, Any] = {"use_fast": use_fast}
+
         try:
-            return AutoTokenizer.from_pretrained(model_path, **kwargs)
+            tok = AutoTokenizer.from_pretrained(model_path, **kwargs)
+            logger.info("[%s] Tokenizer loaded from local path (use_fast=%s): %s", algorithm.key, use_fast, type(tok).__name__)
+            return tok
         except Exception as exc:
+            logger.warning(
+                "[%s] Local tokenizer failed (%s) — trying hub fallback: %s",
+                algorithm.key, exc, algorithm.model_name,
+            )
             if model_path != algorithm.model_name and algorithm.model_name:
-                logger.warning(
-                    "[%s] Local tokenizer failed (%s) — falling back to hub: %s",
-                    algorithm.key, exc, algorithm.model_name,
-                )
-                return AutoTokenizer.from_pretrained(algorithm.model_name, **kwargs)
+                try:
+                    tok = AutoTokenizer.from_pretrained(algorithm.model_name, **kwargs)
+                    logger.info("[%s] Tokenizer loaded from hub (use_fast=%s)", algorithm.key, use_fast)
+                    return tok
+                except Exception as exc2:
+                    logger.error("[%s] Hub tokenizer also failed: %s", algorithm.key, exc2)
             raise
 
     def _repair_vocab_mismatch(

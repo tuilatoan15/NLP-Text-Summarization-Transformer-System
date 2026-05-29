@@ -41,6 +41,8 @@ models/
 data/*.csv
 data/*.json
 data/*.txt
+data/**/*.zip
+data/*.zip
 !data/.gitkeep
 logs/
 *.log

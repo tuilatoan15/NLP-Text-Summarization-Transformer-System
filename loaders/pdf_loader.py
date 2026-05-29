@@ -88,6 +88,56 @@ class PDFLoader:
     def _extract_with_pymupdf(self, path: Path) -> tuple[list[DocumentElement], dict[str, Any]]:
         try:
             import fitz
+            import pymupdf4llm
+        except Exception as exc:
+            logger.warning("pymupdf4llm or fitz unavailable: %s, falling back to traditional", exc)
+            return self._extract_with_pymupdf_traditional(path)
+
+        elements: list[DocumentElement] = []
+        metadata: dict[str, Any] = {}
+        
+        try:
+            document = fitz.open(str(path))
+            metadata = dict(document.metadata or {})
+            max_pages = self.config.max_pages or document.page_count
+            document.close()
+            
+            for page_index in range(1, max_pages + 1):
+                page_md = pymupdf4llm.to_markdown(str(path), pages=[page_index - 1], show_progress=False)
+                if not page_md:
+                    continue
+                
+                blocks = page_md.split("\n\n")
+                for block in blocks:
+                    block = block.strip()
+                    if not block:
+                        continue
+                    
+                    if block.startswith("#"):
+                        element_type = "heading"
+                    elif block.startswith(("- ", "* ", "+ ")) or BULLET_RE.match(block):
+                        element_type = "bullet"
+                    elif "|" in block and "-" in block:
+                        element_type = "table"
+                    else:
+                        element_type = "paragraph"
+                        
+                    elements.append(
+                        DocumentElement(
+                            text=normalize_unicode(block),
+                            element_type=element_type,
+                            page_number=page_index,
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("pymupdf4llm extraction failed for %s: %s, falling back to traditional", path, exc)
+            return self._extract_with_pymupdf_traditional(path)
+            
+        return elements, metadata
+
+    def _extract_with_pymupdf_traditional(self, path: Path) -> tuple[list[DocumentElement], dict[str, Any]]:
+        try:
+            import fitz
         except Exception as exc:
             logger.warning("PyMuPDF unavailable: %s", exc)
             return [], {}
@@ -103,7 +153,7 @@ class PDFLoader:
                     break
                 elements.extend(self._extract_pymupdf_page(page, page_index))
         except Exception as exc:
-            logger.warning("PyMuPDF extraction failed for %s: %s", path, exc)
+            logger.warning("PyMuPDF traditional extraction failed for %s: %s", path, exc)
         finally:
             document.close()
         return elements, metadata
@@ -119,8 +169,6 @@ class PDFLoader:
             ] if text.strip() else []
 
         for block in data.get("blocks", []):
-            if block.get("type") != 0:
-                continue
             lines: list[str] = []
             max_size = 0.0
             bold_votes = 0

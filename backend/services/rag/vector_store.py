@@ -46,7 +46,26 @@ class VectorStoreManager:
             for chunk in chunks
         ]
         documents = [chunk["text"] for chunk in chunks]
-        self.collection.upsert(ids=ids, embeddings=vectors, metadatas=metadatas, documents=documents)
+        try:
+            self.collection.upsert(ids=ids, embeddings=vectors, metadatas=metadatas, documents=documents)
+        except Exception as exc:
+            if "dimension" in str(exc).lower() or "expecting embedding" in str(exc).lower():
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("Dimension mismatch detected in ChromaDB collection during upsert. Recreating collection...")
+                try:
+                    self.client.delete_collection("rag_chunks")
+                    self.collection = self.client.create_collection(
+                        name="rag_chunks",
+                        metadata={"hnsw:space": "cosine"},
+                    )
+                    self.collection.upsert(ids=ids, embeddings=vectors, metadatas=metadatas, documents=documents)
+                    logger.info("ChromaDB collection successfully recreated with new dimension.")
+                    return
+                except Exception as inner_exc:
+                    logger.error("Failed to recreate ChromaDB collection on dimension mismatch: %s", inner_exc)
+                    raise inner_exc
+            raise exc
 
     def query(
         self,
@@ -62,12 +81,30 @@ class VectorStoreManager:
             return rows[:top_k]
 
         where = {"document_id": {"$in": document_ids}} if document_ids else None
-        result = self.collection.query(
-            query_embeddings=[query_vector],
-            n_results=max(top_k, 1),
-            where=where,
-            include=["distances", "documents", "metadatas", "embeddings"],
-        )
+        try:
+            result = self.collection.query(
+                query_embeddings=[query_vector],
+                n_results=max(top_k, 1),
+                where=where,
+                include=["distances", "documents", "metadatas", "embeddings"],
+            )
+        except Exception as exc:
+            if "dimension" in str(exc).lower() or "expecting embedding" in str(exc).lower():
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("Dimension mismatch detected during ChromaDB query. Recreating collection...")
+                try:
+                    self.client.delete_collection("rag_chunks")
+                    self.collection = self.client.create_collection(
+                        name="rag_chunks",
+                        metadata={"hnsw:space": "cosine"},
+                    )
+                    return []
+                except Exception as inner_exc:
+                    logger.error("Failed to recreate ChromaDB collection during query: %s", inner_exc)
+                    raise inner_exc
+            raise exc
+
         ids = result.get("ids", [[]])[0]
         distances = result.get("distances", [[]])[0]
         documents = result.get("documents", [[]])[0]

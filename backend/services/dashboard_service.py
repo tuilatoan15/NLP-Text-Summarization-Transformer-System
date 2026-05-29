@@ -76,6 +76,24 @@ def _fallback_summary(text: str, sentence_count: int) -> str:
     return summarize_extractive_algorithm(text, "textrank", sentence_count=sentence_count).get("summary", "")
 
 
+def _clean_incomplete_sentence(text: str) -> str:
+    """
+    Tự động tìm kiếm dấu chấm câu cuối cùng trong văn bản tóm tắt sinh ra 
+    và loại bỏ phần chữ thừa bị dở dang phía sau dấu chấm đó do chạm trần token.
+    """
+    text = (text or "").strip()
+    if not text:
+        return ""
+    import re
+    # Kiểm tra xem chuỗi đã kết thúc bằng một dấu chấm câu chuẩn (. ! ? … ” ") hay chưa
+    if re.search(r'[.!?…]["”]?\s*$', text):
+        return text
+    # Tìm kiếm tất cả các vị trí kết thúc câu trong chuỗi
+    ends = list(re.finditer(r'[.!?…]["”]?', text))
+    if not ends:
+        return text
+    # Cắt đến dấu kết thúc câu cuối cùng
+    return text[:ends[-1].end()].strip()
 def _run_abstractive(
     text: str,
     key: str,
@@ -86,27 +104,37 @@ def _run_abstractive(
     with _GPU_LOCK:
         summarizer = get_summarizer(model_name=key)
         summary = summarizer.summarize(text, max_output_length=max_output_length)
+        if summary:
+            summary = _clean_incomplete_sentence(summary)
 
-    fallback_used = not summary
+    fallback_used = False
+    training_quality: dict = {"is_poor_training": False, "reason": None}
+
     if summary:
         from src.output_validator import is_garbled_abstractive, validate_output
+        from evaluation.output_validator import detect_poor_training_output
 
+        training_quality = detect_poor_training_output(summary)
         validation = validate_output(
             summary,
             require_vietnamese=key in {"vit5", "mt5"},
         )
         if validation["is_corrupted"] or is_garbled_abstractive(summary):
             logger.warning(
-                "[%s] Bad output (%s) — TextRank fallback",
+                "[%s] Bad/corrupted output detected (%s) — returning raw output for scientific comparison.",
                 key,
                 validation.get("quality_warning") or "garbled",
             )
-            summary = _fallback_summary(text, sentence_count)
-            fallback_used = True
+        elif training_quality["is_poor_training"]:
+            logger.warning(
+                "[%s] Poor training quality detected: %s — returning raw output for scientific comparison.",
+                key,
+                training_quality["reason"],
+            )
 
-    if fallback_used and not summary:
-        summary = _fallback_summary(text, sentence_count)
-        logger.warning("[%s] Empty generation — using TextRank fallback", key)
+    if not summary:
+        logger.warning("[%s] Empty abstractive generation", key)
+        summary = ""
 
     log_vram_usage(f"after_{key}")
 
@@ -120,7 +148,8 @@ def _run_abstractive(
             "attention_available": False,
             "fallback_used": fallback_used,
             "token_importance": token_importance,
-        }
+        },
+        "training_quality": training_quality,
     }
 
 
@@ -141,10 +170,12 @@ def _evaluate_result(
     try:
         if algorithm.key in EXTRACTIVE_ALGORITHMS:
             summary, explainability = _run_extractive(text, algorithm.key, sentence_count)
+            training_quality: dict = {"is_poor_training": False, "reason": None}
         elif algorithm.key in ABSTRACTIVE_ALGORITHMS:
             summary, explainability = _run_abstractive(
                 text, algorithm.key, max_output_length, sentence_count
             )
+            training_quality = explainability.pop("training_quality", {"is_poor_training": False, "reason": None})
         else:
             raise KeyError(f"Unsupported algorithm: {algorithm.key}")
     except Exception as exc:
@@ -152,6 +183,7 @@ def _evaluate_result(
         error = str(exc)
         summary = _fallback_summary(text, sentence_count)
         explainability = {"error": error, "fallback_used": True}
+        training_quality = {"is_poor_training": False, "reason": None}
 
     if target_words and summary:
         from src.length_control import trim_summary_to_word_budget
@@ -184,6 +216,8 @@ def _evaluate_result(
             has_finetuned = local_dir.exists() and any(local_dir.iterdir())
             if is_multilingual_garbage(summary, require_vietnamese=not has_finetuned):
                 warning_badge = "Experimental (Corrupt Multilingual)"
+            elif training_quality.get("is_poor_training"):
+                warning_badge = "⚠️ Poor Training Quality"
             elif has_finetuned:
                 warning_badge = "mT5 Fine-tuned"
         logger.debug("[%s] experimental flag=%s badge=%s", algorithm.key, is_experimental, warning_badge)
@@ -212,6 +246,7 @@ def _evaluate_result(
         "explainability": explainability,
         "experimental": is_experimental,
         "warning_badge": warning_badge,
+        "training_quality": training_quality,
         "details": (
             explainability.get("extractive")
             or explainability.get("abstractive")
@@ -403,7 +438,7 @@ def _prepare_compare(
         abstractive_keys,
         sentence_count,
         max_output_length,
-        length_meta["target_words"],
+        length_meta["target_words"] if use_length_ratio else None,
         length_meta["target_length_ratio"],
         length_meta,
     )
