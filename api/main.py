@@ -44,6 +44,8 @@ from src.utils import get_device_info, log_device_info, logger
 from api.document_chat import router as document_chat_router
 from api.document_intelligence import router as document_intelligence_router
 from api.research import router as research_router
+from celery.result import AsyncResult
+from workers.tasks import summarize_task, compare_task
 
 
 # ─────────────────────────── Request / Response schemas ────────────────────
@@ -57,6 +59,7 @@ class SummarizeRequest(BaseModel):
     model_name: str = Field(default="vit5")
     save_result: bool = Field(default=False)
     analysis_mode: str = Field(default="research")
+    async_mode: bool = Field(default=False)
 
     @field_validator("text", "reference", mode="before")
     @classmethod
@@ -78,6 +81,7 @@ class CompareRequest(BaseModel):
     )
     use_length_ratio: bool = Field(default=True)
     save_result: bool = Field(default=True)
+    async_mode: bool = Field(default=False)
 
     @field_validator("text", "reference", mode="before")
     @classmethod
@@ -428,14 +432,61 @@ async def analytics_history(limit: int = 30):
 # ─────────────────────────── Summarization endpoints ──────────────────────
 # All four endpoints below are interface-compatible with the old api/main.py.
 
-@app.post("/summarize", response_model=SummarizeResponse, tags=["Summarization"])
+@app.get("/summarize/job/{job_id}", tags=["Summarization"])
+async def get_summarize_job(job_id: str):
+    """
+    Kiểm tra trạng thái và nhận kết quả của tác vụ tóm tắt chạy nền Celery.
+    Trạng thái có thể là: PENDING, STARTED, SUCCESS, FAILURE.
+    """
+    try:
+        res = AsyncResult(job_id)
+        response = {
+            "job_id": job_id,
+            "status": res.status,
+            "ready": res.ready(),
+        }
+        if res.ready():
+            if res.successful():
+                response["result"] = res.result
+            else:
+                response["error"] = str(res.result)
+        return response
+    except Exception as exc:
+        logger.error(f"Failed to query job status for {job_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Không thể kiểm tra trạng thái job: {exc}")
+
+
+@app.post("/summarize", tags=["Summarization"])
 async def summarize(request_body: SummarizeRequest):
     text = _ensure_text(request_body.text)
     model_key = resolve_algorithm(request_body.model_name).key
-    algorithms = [model_key, "textrank"] if model_key != "textrank" else ["textrank", "vit5"]
+    algorithms = [model_key, "textrank"] if model_key != "textrank" else ["textrank"]
     seen: set[str] = set()
-    unique_algos = [a for a in algorithms if not (a in seen or seen.add(a))]  # type: ignore[func-returns-value]
+    unique_algos = [a for a in algorithms if not (a in seen or seen.add(a))]
 
+    settings = {
+        "reference": request_body.reference,
+        "extractiveSentences": request_body.extractive_sentences,
+        "maxLength": request_body.max_abstractive_length,
+        "save_result": request_body.save_result,
+        "use_length_ratio": False
+    }
+
+    if request_body.async_mode:
+        try:
+            # Dispatch to Celery asynchronously
+            task = summarize_task.delay(text=text, model_type=model_key, settings=settings)
+            return {
+                "status": "queued",
+                "job_id": task.id,
+                "model_name": model_key,
+                "message": "Tác vụ tóm tắt đã được đưa vào hàng đợi xử lý nền."
+            }
+        except Exception as exc:
+            logger.warning(f"Failed to dispatch to Celery: {exc}. Falling back to sync threadpool.")
+
+    # Sync requests run in-process. Celery is only used for explicit async jobs so
+    # local development still works when Redis/a worker is not running.
     compare = await _compare_or_400_async(
         text,
         request_body.reference,
@@ -450,6 +501,29 @@ async def summarize(request_body: SummarizeRequest):
 @app.post("/summarize/compare", tags=["Summarization"])
 async def summarize_compare(request_body: CompareRequest):
     text = _ensure_text(request_body.text)
+    
+    settings = {
+        "reference": request_body.reference,
+        "extractiveSentences": request_body.extractive_sentences,
+        "maxLength": request_body.max_abstractive_length,
+        "target_length_ratio": request_body.target_length_ratio,
+        "use_length_ratio": request_body.use_length_ratio,
+        "save_result": request_body.save_result
+    }
+
+    if request_body.async_mode:
+        try:
+            task = compare_task.delay(text=text, models=request_body.algorithms, settings=settings)
+            return {
+                "status": "queued",
+                "job_id": task.id,
+                "message": "Tác vụ so sánh mô hình đã được đưa vào hàng đợi xử lý nền."
+            }
+        except Exception as exc:
+            logger.warning(f"Failed to dispatch compare to Celery: {exc}. Falling back to sync threadpool.")
+
+    # Sync requests run in-process. Celery is only used for explicit async jobs so
+    # local development still works when Redis/a worker is not running.
     return await _compare_or_400_async(
         text,
         request_body.reference,

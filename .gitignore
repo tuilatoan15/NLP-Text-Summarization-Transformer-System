@@ -38,6 +38,8 @@ models/
 *.onnx
 
 # Data & Logs
+cache/
+.cache/
 data/*.csv
 data/*.json
 data/*.txt

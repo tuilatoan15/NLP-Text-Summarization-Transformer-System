@@ -388,3 +388,57 @@ def detect_garbled_text(text: str, single_letter_threshold: float = 0.15) -> boo
 
 def fix_spaced_letters(text: str) -> str:
     return normalize_whitespace(text)
+
+
+def augment_text(text: str) -> str:
+    """Apply data augmentation to Vietnamese text for training diversity."""
+    if not text or len(text.split()) < 10:
+        return text
+
+    # 1. Simple Vietnamese synonym replacement mapping for common words
+    synonyms = {
+        " học tập ": " học ",
+        " bố ": " cha ",
+        " ba ": " cha ",
+        " mẹ ": " má ",
+        " xe hơi ": " ô tô ",
+        " quốc gia ": " đất nước ",
+        " nhanh chóng ": " mau chóng ",
+        " sử dụng ": " dùng ",
+        " cơ hội ": " dịp ",
+        " lo lắng ": " băn khoăn ",
+        " hỗ trợ ": " giúp đỡ ",
+        " phát triển ": " tiến bộ ",
+        " hoàn thành ": " xong ",
+        " chia sẻ ": " thổ lộ ",
+        " yêu cầu ": " đòi hỏi ",
+        " lo ngại ": " lo lắng ",
+        " kiến nghị ": " đề xuất ",
+        " kiểm tra ": " xem xét ",
+        " lập tức ": " ngay lập tức ",
+    }
+
+    import random
+
+    # Apply word replacements randomly with 20% probability per match
+    augmented = text
+    for word, syn in synonyms.items():
+        if word in augmented and random.random() < 0.2:
+            augmented = augmented.replace(word, syn)
+
+    # 2. Sentence shuffling for document body (with 15% probability)
+    # Don't shuffle if it's too short (less than 3 sentences)
+    if random.random() < 0.15:
+        try:
+            sentences = split_sentences(augmented, use_underthesea=False)
+            if len(sentences) >= 3:
+                # Keep first sentence intact (usually contains main topic), shuffle middle/last ones
+                first_sent = sentences[0]
+                rest_sents = sentences[1:]
+                random.shuffle(rest_sents)
+                augmented = first_sent + " " + " ".join(rest_sents)
+        except Exception:
+            pass
+
+    return augmented
+

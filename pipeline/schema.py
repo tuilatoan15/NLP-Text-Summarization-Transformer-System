@@ -128,11 +128,11 @@ class ChunkingConfig:
 class EmbeddingConfig:
     model_name: str = "BAAI/bge-m3"
     batch_size: int = 16
-    device: str | None = None
+    device: str | None = "cpu"
     normalize_embeddings: bool = True
     trust_remote_code: bool = True
     max_seq_length: int = 8192
-    use_fp16: bool = True
+    use_fp16: bool = False
     show_progress: bool = True
     fallback_to_hashing: bool = True
     query_prefix: str | None = None

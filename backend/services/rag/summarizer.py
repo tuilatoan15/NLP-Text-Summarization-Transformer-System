@@ -157,6 +157,91 @@ def _run_transformer_generate(
     except Exception as exc:
         logger.error("❌ Transformer generate [%s] lỗi: %s", model_key, exc)
         return ""
+def _run_llm_api(prompt: str, generator_type: str) -> str:
+    """Gọi LLM API tương ứng để sinh văn bản."""
+    import requests
+    from .rag_config import (
+        GEMINI_API_KEY,
+        OPENAI_API_KEY,
+        GEMINI_MODEL,
+        OPENAI_MODEL,
+        OLLAMA_API_URL,
+        OLLAMA_MODEL,
+    )
+
+    try:
+        if generator_type == "gemini":
+            if not GEMINI_API_KEY:
+                raise ValueError("GEMINI_API_KEY chưa được cấu hình trong .env")
+            
+            # Gemini API Endpoint
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt}
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 800
+                }
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            res_data = response.json()
+            return res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        elif generator_type == "openai":
+            if not OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY chưa được cấu hình trong .env")
+            
+            # OpenAI Chat Completion Endpoint
+            url = "https://api.openai.com/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            }
+            payload = {
+                "model": OPENAI_MODEL,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 800
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            res_data = response.json()
+            return res_data["choices"][0]["message"]["content"].strip()
+
+        elif generator_type == "ollama":
+            # Ollama API Endpoint
+            url = OLLAMA_API_URL
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2
+                }
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=45)
+            response.raise_for_status()
+            res_data = response.json()
+            return res_data["response"].strip()
+
+    except Exception as exc:
+        logger.error("❌ Gọi LLM API [%s] lỗi: %s", generator_type, exc)
+    
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,18 +301,29 @@ class RAGTransformerSummarizer:
         # Build prompt
         prompt = SUMMARIZE_PROMPT_TEMPLATE.format(context=full_context)
 
-        # Thử từng model theo thứ tự ưu tiên
-        model_key = _pick_available_model()
+        # Thử generator từ cấu hình
+        from .rag_config import RAG_GENERATOR_TYPE
         summary = ""
         fallback_used = False
+        model_key = ""
 
-        if model_key:
-            profile = GENERATION_PROFILES[model_key]
-            summary = _run_transformer_generate(model_key, prompt, profile)
+        if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+            logger.info("Dùng LLM API [%s] để tóm tắt", RAG_GENERATOR_TYPE)
+            summary = _run_llm_api(prompt, RAG_GENERATOR_TYPE)
+            if summary:
+                model_key = f"{RAG_GENERATOR_TYPE}_api"
+            else:
+                logger.warning("⚠️ LLM API [%s] failed — fallback sang local/extractive", RAG_GENERATOR_TYPE)
+
+        if not summary:
+            model_key = _pick_available_model()
+            if model_key:
+                profile = GENERATION_PROFILES[model_key]
+                summary = _run_transformer_generate(model_key, prompt, profile)
 
         if not summary or len(summary.split()) < 10:
             # Fallback: extractive — ghép các câu quan trọng nhất
-            logger.warning("⚠️  Transformer summarizer failed — dùng extractive fallback")
+            logger.warning("⚠️ Transformer summarizer failed — dùng extractive fallback")
             summary = self._extractive_fallback(contexts, max_sentences=8)
             fallback_used = True
             model_key = "extractive_fallback"
@@ -245,42 +341,83 @@ class RAGTransformerSummarizer:
         question: str,
         contexts: list[dict[str, Any]],
         *,
+        chat_history: list[dict[str, Any]] | None = None,
         max_context_chars: int = 3000,
+        general_chat: bool = False,
     ) -> dict[str, Any]:
         """
-        Trả lời câu hỏi dựa trên context đã retrieve.
+        Trả lời câu hỏi dựa trên context đã retrieve và lịch sử trò chuyện.
 
         Returns:
             dict gồm: answer, confidence, grounded, model_used, fallback_used
         """
-        if not contexts:
-            return {
-                "answer": "Không tìm thấy thông tin trong tài liệu.",
-                "confidence": 0.0,
-                "grounded": True,
-                "model_used": None,
-                "fallback_used": True,
-            }
+        if general_chat:
+            history_text = "Không có"
+            if chat_history:
+                history_lines = []
+                for msg in chat_history[-4:]:
+                    role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+                    history_lines.append(f"{role}: {msg.get('content', '')}")
+                if history_lines:
+                    history_text = "\n".join(history_lines)
+            prompt = (
+                "Bạn là trợ lý ảo AI tiếng Việt thông minh và thân thiện.\n"
+                "Hãy trò chuyện hoặc trả lời câu hỏi dưới đây một cách lịch sự, tự nhiên và hữu ích.\n"
+                "Hãy tham khảo LỊCH SỬ HỘI THOẠI (nếu có) để cuộc trò chuyện được tiếp tục mạch lạc.\n\n"
+                f"LỊCH SỬ HỘI THOẠI:\n{history_text}\n\n"
+                f"CÂU HỎI HIỆN TẠI: {question}\n\n"
+                "TRẢ LỜI:"
+            )
+        else:
+            if not contexts:
+                return {
+                    "answer": "Không tìm thấy thông tin trong tài liệu.",
+                    "confidence": 0.0,
+                    "grounded": True,
+                    "model_used": None,
+                    "fallback_used": True,
+                }
 
-        # Ghép context
-        context_parts = []
-        for i, chunk in enumerate(contexts, start=1):
-            filename = chunk.get("filename", "?")
-            context_parts.append(f"[{i}] {chunk['text']}")
-        full_context = "\n\n".join(context_parts)
+            # Ghép context
+            context_parts = []
+            for i, chunk in enumerate(contexts, start=1):
+                filename = chunk.get("filename", "?")
+                context_parts.append(f"[{i}] {chunk['text']}")
+            full_context = "\n\n".join(context_parts)
 
-        if len(full_context) > max_context_chars:
-            full_context = full_context[:max_context_chars] + "..."
+            if len(full_context) > max_context_chars:
+                full_context = full_context[:max_context_chars] + "..."
 
-        prompt = QA_PROMPT_TEMPLATE.format(context=full_context, question=question)
+            # Định dạng chat_history
+            history_text = "Không có"
+            if chat_history:
+                history_lines = []
+                for msg in chat_history[-4:]:  # Lấy tối đa 4 tin nhắn gần nhất (2 lượt hỏi-đáp)
+                    role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+                    history_lines.append(f"{role}: {msg.get('content', '')}")
+                if history_lines:
+                    history_text = "\n".join(history_lines)
 
-        model_key = _pick_available_model()
+            prompt = QA_PROMPT_TEMPLATE.format(context=full_context, chat_history=history_text, question=question)
+
+        from .rag_config import RAG_GENERATOR_TYPE
         answer = ""
         fallback_used = False
+        model_key = ""
 
-        if model_key:
-            profile = GENERATION_PROFILES[model_key]
-            answer = _run_transformer_generate(model_key, prompt, profile)
+        if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+            logger.info("Dùng LLM API [%s] để trả lời câu hỏi", RAG_GENERATOR_TYPE)
+            answer = _run_llm_api(prompt, RAG_GENERATOR_TYPE)
+            if answer:
+                model_key = f"{RAG_GENERATOR_TYPE}_api"
+            else:
+                logger.warning("⚠️ LLM API [%s] failed — fallback sang local/extractive", RAG_GENERATOR_TYPE)
+
+        if not answer:
+            model_key = _pick_available_model()
+            if model_key:
+                profile = GENERATION_PROFILES[model_key]
+                answer = _run_transformer_generate(model_key, prompt, profile)
 
         if not answer or len(answer.split()) < 3:
             # Fallback: trả về câu liên quan nhất từ context

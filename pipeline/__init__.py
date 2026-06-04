@@ -23,12 +23,15 @@ __all__ = [
     "IngestPipeline",
     "IngestResult",
     "TextChunk",
+    "HybridSummarizer",
 ]
 
 
 def __getattr__(name: str):
     if name == "IngestPipeline":
         from pipeline.ingest_pipeline import IngestPipeline
-
         return IngestPipeline
+    if name == "HybridSummarizer":
+        from pipeline.hybrid_summarizer import HybridSummarizer
+        return HybridSummarizer
     raise AttributeError(name)

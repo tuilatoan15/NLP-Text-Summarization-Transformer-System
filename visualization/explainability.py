@@ -189,3 +189,111 @@ def _explain_reason(rank: int, similarity: float, keywords: list[str]) -> str:
         f"Câu này khớp trực tiếp với câu trong bản tóm tắt "
         f"(độ tương đồng {similarity:.2f}) và chứa: {keyword_text}."
     )
+
+
+def visualize_centrality_graph(
+    source_text: str,
+    algorithm: str = "textrank",
+    top_edges: int = 25,
+    output_path: str | None = None,
+) -> str:
+    """Generate and save a visual Sentence Centrality Graph image for thesis report."""
+    try:
+        import networkx as nx
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Build the graph JSON representation first
+        graph_data = build_sentence_ranking_graph(source_text, algorithm, top_edges)
+        
+        G = nx.Graph()
+        
+        # Add nodes with attributes
+        node_colors = []
+        node_sizes = []
+        labels = {}
+        
+        for node in graph_data["nodes"]:
+            node_id = node["id"]
+            rank_score = node.get("rank_score", 0.0)
+            selected = node["selected"]
+            
+            G.add_node(node_id, label=node["label"], rank_score=rank_score, selected=selected)
+            
+            # Label is just first 30 characters with node id prefix
+            labels[node_id] = f"S{node['index']} ({rank_score:.2f})"
+            
+            # Selected nodes are highlighted
+            if selected:
+                node_colors.append("#ff5722")  # Deep Orange
+                node_sizes.append(1000 + rank_score * 5000)
+            else:
+                node_colors.append("#2196f3")  # Blue
+                node_sizes.append(400 + rank_score * 3000)
+                
+        # Add edges
+        for edge in graph_data["edges"]:
+            G.add_edge(edge["source"], edge["target"], weight=edge["weight"])
+            
+        plt.figure(figsize=(10, 8), dpi=150)
+        
+        # Compute layout
+        pos = nx.spring_layout(G, k=0.45, seed=42)
+        
+        # Draw edges with opacity based on similarity weight
+        edge_list = list(G.edges(data=True))
+        if edge_list:
+            edge_weights = [e[2]["weight"] for e in edge_list]
+            max_weight = max(edge_weights) if edge_weights else 1.0
+            for u, v, d in edge_list:
+                w = d["weight"]
+                # Alpha between 0.1 and 0.8
+                alpha = 0.1 + 0.7 * (w / max_weight)
+                nx.draw_networkx_edges(
+                    G, pos, edgelist=[(u, v)], 
+                    width=1.0 + w * 3.0, 
+                    alpha=alpha, 
+                    edge_color="#9e9e9e"
+                )
+                
+        # Draw nodes
+        nx.draw_networkx_nodes(
+            G, pos, 
+            node_color=node_colors, 
+            node_size=node_sizes, 
+            edgecolors="#333333", 
+            linewidths=1.0
+        )
+        
+        # Draw labels with clear font
+        nx.draw_networkx_labels(
+            G, pos, labels, 
+            font_size=8, 
+            font_weight="bold", 
+            font_color="#ffffff",
+            bbox=dict(facecolor='black', alpha=0.6, edgecolor='none', boxstyle='round,pad=0.2')
+        )
+        
+        plt.title(
+            f"Sentence Centrality Relation Graph ({algorithm.upper()})\nSelected summary sentences highlighted in Orange", 
+            fontsize=12, fontweight="bold", pad=15
+        )
+        plt.axis("off")
+        plt.tight_layout()
+        
+        if output_path is None:
+            from src import config
+            output_path = str(config.RESULTS_DIR / f"{algorithm}_sentence_graph.png")
+            
+        plt.savefig(output_path, format="png", bbox_inches="tight")
+        plt.close()
+        
+        from src.utils import logger
+        logger.info(f"Successfully generated and saved centrality graph image: {output_path}")
+        return output_path
+        
+    except Exception as exc:
+        from src.utils import logger
+        logger.error(f"Failed to generate centrality graph visualization: {exc}", exc_info=True)
+        return ""
+

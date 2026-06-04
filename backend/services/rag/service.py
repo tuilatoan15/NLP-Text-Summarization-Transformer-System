@@ -100,6 +100,19 @@ class RAGChatService:
         self.repository.save_chunks(chunks, vectors, embedding_model)
         self.vector_store.upsert_chunks(chunks, vectors)
 
+        # RAPTOR-lite hierarchical indexing
+        try:
+            from .raptor import RaptorIndexer
+            indexer = RaptorIndexer(
+                repository=self.repository,
+                vector_store=self.vector_store,
+                embedding_service=self.embedding_service,
+                generator=self.generator
+            )
+            indexer.build_tree(document_id, chunks, vectors, embedding_model)
+        except Exception as exc:
+            logger.error(f"❌ Failed to build RAPTOR tree for document {document_id}: {exc}", exc_info=True)
+
         logger.info("✅ Upload xong: %s — %d chunks", filename, len(chunks))
         return {
             "document_id": document_id,
@@ -162,19 +175,90 @@ class RAGChatService:
         conv_id = self.repository.ensure_conversation(
             conversation_id, title=query[:60] or "New chat"
         )
+        
+        # Lấy lịch sử tin nhắn trước khi append tin nhắn hiện tại
+        chat_history = self.repository.list_messages(conv_id)
+        
         self.repository.append_message(conv_id, "user", query)
+
+        # Classify intent
+        from .agent import classify_intent, expand_query
+        intent = classify_intent(query, document_ids)
 
         # Embed query
         query_vector = self.embedding_service.embed_query(query, embedding_model)
 
-        # Lấy candidates từ vector store (nhiều để reranker có đủ để chọn)
-        candidates = self.vector_store.query(
-            query_vector=query_vector,
-            top_k=RETRIEVAL_INITIAL_TOP_K,
-            document_ids=document_ids or None,
-        )
+        # 1. GENERAL INTENT (No retrieval needed)
+        if intent == "GENERAL":
+            generation = self.generator.build_answer(
+                query, [], chat_history=chat_history, temperature=temperature, general_chat=True
+            )
+            response = {
+                "conversation_id": conv_id,
+                "answer": generation["answer"],
+                "confidence": 1.0,
+                "grounded": False,
+                "model_used": generation.get("model_used"),
+                "fallback_used": generation.get("fallback_used", False),
+                "retrieved_context": [],
+                "retrieval_threshold": threshold,
+                "prompt_template": f"General Chat: {query}",
+                "intent": "general",
+                "rag_config": {
+                    "embedding_model": embedding_model,
+                    "retrieval_mode": "none",
+                    "top_k": 0,
+                    "threshold": threshold,
+                    "reranking": False,
+                },
+            }
+            self.repository.append_message(
+                conv_id,
+                "assistant",
+                response["answer"],
+                citations=[],
+                confidence=1.0,
+                retrieval_threshold=threshold,
+                model_used=response.get("model_used"),
+            )
+            return response
 
-        # Hybrid retrieval + Cross-Encoder reranking (tất cả hardcode)
+        # 2. DOCUMENT_QA INTENT (With Multi-query Expansion)
+        elif intent == "DOCUMENT_QA":
+            # Lấy candidates từ query gốc
+            candidates = self.vector_store.query(
+                query_vector=query_vector,
+                top_k=RETRIEVAL_INITIAL_TOP_K,
+                document_ids=document_ids or None,
+            )
+            # Query expansion
+            expanded = expand_query(query)
+            if expanded:
+                seen_ids = {c["id"] for c in candidates}
+                for eq in expanded:
+                    eq_vector = self.embedding_service.embed_query(eq, embedding_model)
+                    eq_candidates = self.vector_store.query(
+                        query_vector=eq_vector,
+                        top_k=5,
+                        document_ids=document_ids or None,
+                    )
+                    for eq_c in eq_candidates:
+                        if eq_c["id"] not in seen_ids:
+                            candidates.append(eq_c)
+                            seen_ids.add(eq_c["id"])
+        
+        # 3. SUMMARIZE INTENT (Hierarchical RAPTOR Retrieval)
+        else: # intent == "SUMMARIZE"
+            candidates = self.vector_store.query(
+                query_vector=query_vector,
+                top_k=RETRIEVAL_INITIAL_TOP_K,
+                document_ids=document_ids or None,
+            )
+            summary_candidates = [c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"]
+            if summary_candidates:
+                candidates = summary_candidates
+
+        # Hybrid retrieval + Cross-Encoder reranking
         retrieved = self.retriever.retrieve(
             query=query,
             query_vector=query_vector,
@@ -186,8 +270,27 @@ class RAGChatService:
         )
 
         # Sinh câu trả lời bằng Transformer
-        generation = self.generator.build_answer(query, retrieved, temperature=temperature)
+        generation = self.generator.build_answer(
+            query, retrieved, chat_history=chat_history, temperature=temperature
+        )
         prompt = self.generator.prompt_template(retrieved, query)
+
+        # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk)
+        eval_metrics = None
+        if retrieved:
+            try:
+                from evaluation.hallucination import audit_summary
+                source_text = "\n\n".join(c["text"] for c in retrieved)
+                formatted_chunks = [{"chunk_id": c["id"], "text": c["text"]} for c in retrieved]
+                audit_res = audit_summary(generation["answer"], source_text, chunks=formatted_chunks, mode="fast")
+                eval_metrics = {
+                    "consistency_score": float(audit_res.get("consistency_score", 0.0)),
+                    "grounding_coverage": float(audit_res.get("grounding_coverage", 0.0)),
+                    "semantic_coverage": float(audit_res.get("semantic_coverage", 0.0)),
+                    "hallucination_risk": str(audit_res.get("hallucination_risk", "low")),
+                }
+            except Exception as exc:
+                logger.error("Failed to run hallucination audit on chat response: %s", exc)
 
         response: dict[str, Any] = {
             "conversation_id": conv_id,
@@ -199,6 +302,8 @@ class RAGChatService:
             "retrieved_context": retrieved,
             "retrieval_threshold": threshold,
             "prompt_template": prompt,
+            "intent": intent.lower(),
+            "evaluation": eval_metrics,
             "rag_config": {
                 "embedding_model": embedding_model,
                 "retrieval_mode": retrieval_mode,
@@ -217,6 +322,8 @@ class RAGChatService:
             citations=retrieved,
             confidence=response["confidence"],
             retrieval_threshold=threshold,
+            model_used=response.get("model_used"),
+            evaluation=response.get("evaluation"),
         )
         return response
 
@@ -363,4 +470,124 @@ class RAGChatService:
             await asyncio.sleep(0.015)
 
         # Yield kết quả cuối cùng đầy đủ
+        yield f"data: {json.dumps({'event': 'done', 'result': result}, ensure_ascii=False)}\n\n"
+
+    def summarize_documents(
+        self,
+        *,
+        document_ids: list[str],
+        query: str = "Tóm tắt nội dung chính của các tài liệu",
+    ) -> dict[str, Any]:
+        """
+        Tóm tắt đồng thời nhiều tài liệu hoặc tài liệu dài (Multi-document synthesis).
+        1. Với 1 tài liệu: Gọi summarize_document trực tiếp.
+        2. Với nhiều tài liệu:
+           - Tóm tắt từng tài liệu trước (dùng RAPTOR tree summary hoặc trích xuất chunk cốt lõi).
+           - Gom các bản tóm tắt đó lại và sinh ra một bản tóm tắt tổng hợp chéo (cross-document summary).
+        """
+        if not document_ids:
+            return {
+                "summary": "Không có tài liệu nào được chọn để tóm tắt.",
+                "word_count": 0,
+                "model_used": None,
+                "fallback_used": True,
+            }
+
+        if len(document_ids) == 1:
+            return self.summarize_document(document_id=document_ids[0], query=query)
+
+        logger.info("📝 Bắt đầu tóm tắt đa tài liệu: %s", document_ids)
+        t_start = time.perf_counter()
+
+        individual_summaries = []
+        model_used = None
+        fallback_used = False
+
+        for doc_id in document_ids:
+            chunks = self.repository.list_chunks(document_ids=[doc_id])
+            summaries = [c for c in chunks if c.get("metadata", {}).get("chunk_type") == "summary"]
+            
+            if summaries:
+                doc_summary = "\n".join(s["text"] for s in summaries)
+            else:
+                res = self.summarize_document(document_id=doc_id, query=query)
+                doc_summary = res["summary"]
+                if res.get("fallback_used"):
+                    fallback_used = True
+                if res.get("model_used"):
+                    model_used = res["model_used"]
+
+            individual_summaries.append(f"--- Tóm tắt tài liệu (ID: {doc_id}): ---\n{doc_summary}")
+
+        combined_context = "\n\n".join(individual_summaries)
+
+        prompt = (
+            "Bạn là chuyên gia phân tích thông tin cao cấp. Dưới đây là các bản tóm tắt riêng lẻ của nhiều tài liệu khác nhau.\n"
+            "Hãy viết một bản tóm tắt tổng hợp chéo (cross-document synthesis) kết hợp và đối chiếu các thông tin cốt lõi, "
+            "vạch ra những điểm tương đồng và khác biệt chính giữa chúng một cách khoa học, khách quan và mạch lạc:\n\n"
+            f"{combined_context}\n\n"
+            "Bản tóm tắt tổng hợp tiếng Việt chuẩn xác:"
+        )
+
+        from .rag_config import RAG_GENERATOR_TYPE
+        summary = ""
+
+        if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+            from .summarizer import _run_llm_api
+            summary = _run_llm_api(prompt, RAG_GENERATOR_TYPE)
+            if summary:
+                model_used = f"{RAG_GENERATOR_TYPE}_api"
+
+        if not summary:
+            from .summarizer import _pick_available_model, _run_transformer_generate, GENERATION_PROFILES
+            model_key = _pick_available_model()
+            if model_key:
+                profile = GENERATION_PROFILES[model_key]
+                summary = _run_transformer_generate(model_key, prompt, profile)
+                model_used = model_key
+
+        if not summary:
+            summary = "\n\n".join(individual_summaries)
+            fallback_used = True
+            model_used = "extractive_fallback"
+
+        elapsed = time.perf_counter() - t_start
+        word_count = len(summary.split())
+
+        return {
+            "document_ids": document_ids,
+            "summary": summary,
+            "word_count": word_count,
+            "model_used": model_used,
+            "fallback_used": fallback_used,
+            "processing_time_s": round(elapsed, 3),
+        }
+
+    async def stream_summarize_documents(
+        self,
+        *,
+        document_ids: list[str],
+        query: str = "Tóm tắt nội dung chính của các tài liệu",
+    ) -> AsyncIterator[str]:
+        """Stream tóm tắt đa tài liệu từng token."""
+        result = await asyncio.to_thread(
+            self.summarize_documents,
+            document_ids=document_ids,
+            query=query,
+        )
+        summary = result["summary"]
+
+        yield f"data: {json.dumps({'event': 'start', 'document_ids': document_ids, 'model_used': result.get('model_used')}, ensure_ascii=False)}\n\n"
+
+        words = summary.split(" ")
+        assembled = ""
+        for word in words:
+            assembled = f"{assembled} {word}".strip()
+            payload = {
+                "event": "token",
+                "content": assembled,
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.015)
+
         yield f"data: {json.dumps({'event': 'done', 'result': result}, ensure_ascii=False)}\n\n"

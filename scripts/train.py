@@ -27,7 +27,7 @@ from transformers import (
 from src import config
 from src.evaluate import compute_rouge_batch
 from src.model_registry import ABSTRACTIVE_ALGORITHMS, resolve_algorithm
-from src.preprocess import clean_generated_summary
+from src.preprocess import clean_generated_summary, augment_text
 from src.utils import logger, save_json
 from train.dataset_loader import load_vnexpress_dataset
 
@@ -36,8 +36,11 @@ def _prefix(model_key: str, text: str) -> str:
     return f"summarize: {text}" if model_key in {"vit5", "mt5"} else text
 
 
-def tokenize_batch(examples, tokenizer, model_key: str, max_input_len: int, max_target_len: int):
-    inputs = [_prefix(model_key, str(article)) for article in examples["article"]]
+def tokenize_batch(examples, tokenizer, model_key: str, max_input_len: int, max_target_len: int, use_augmentation: bool = False):
+    if use_augmentation:
+        inputs = [_prefix(model_key, augment_text(str(article))) for article in examples["article"]]
+    else:
+        inputs = [_prefix(model_key, str(article)) for article in examples["article"]]
     targets = [str(summary) for summary in examples["title"]]
     model_inputs = tokenizer(
         inputs,
@@ -111,6 +114,31 @@ def train_model(args) -> dict:
     tokenizer = AutoTokenizer.from_pretrained(model_source, use_fast=use_fast_tok)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_source)
 
+    if args.use_lora:
+        logger.info("Applying LoRA (Low-Rank Adaptation) configuration...")
+        from peft import LoraConfig, get_peft_model, TaskType
+        
+        # Target modules cho từng loại mô hình
+        if algorithm.key in {"vit5", "mt5"}:
+            # T5 architectures sử dụng q, v
+            target_modules = ["q", "v"]
+        elif algorithm.key == "bartpho":
+            # BART architectures
+            target_modules = ["q_proj", "v_proj"]
+        else:
+            target_modules = ["q", "v"]
+
+        peft_config = LoraConfig(
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            inference_mode=False,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            target_modules=target_modules
+        )
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+
     dataset = load_vnexpress_dataset(
         local_csv_path=args.local_data,
         dataset_name=args.dataset_name,
@@ -127,7 +155,14 @@ def train_model(args) -> dict:
     )
 
     tokenized = dataset.map(
-        lambda batch: tokenize_batch(batch, tokenizer, algorithm.key, args.max_input_tokens, args.max_target_tokens),
+        lambda batch: tokenize_batch(
+            batch,
+            tokenizer,
+            algorithm.key,
+            args.max_input_tokens,
+            args.max_target_tokens,
+            use_augmentation=args.use_augmentation,
+        ),
         batched=True,
         batch_size=32,
         remove_columns=dataset["train"].column_names,
@@ -167,6 +202,8 @@ def train_model(args) -> dict:
         dataloader_num_workers=0,
         logging_steps=args.logging_steps,
         report_to="none",
+        lr_scheduler_type=args.lr_scheduler_type,
+        gradient_checkpointing=args.gradient_checkpointing,
     )
 
     compute_metrics = None if args.skip_rouge_eval else build_compute_metrics(tokenizer)
@@ -235,6 +272,28 @@ def parse_args():
         "--skip_rouge_eval",
         action="store_true",
         help="Use eval_loss only (faster on CPU; skips generate+ROUGE during training).",
+    )
+    # LoRA / PEFT parameters
+    parser.add_argument("--use_lora", action="store_true", help="Enable LoRA parameter-efficient training.")
+    parser.add_argument("--lora_r", type=int, default=8, help="Rank size for LoRA adapters.")
+    parser.add_argument("--lora_alpha", type=int, default=16, help="Scaling factor (alpha) for LoRA.")
+    parser.add_argument("--lora_dropout", type=float, default=0.05, help="Dropout probability for LoRA layers.")
+    # Performance & training optimization
+    parser.add_argument(
+        "--lr_scheduler_type",
+        default="linear",
+        choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        help="Learning rate scheduler type.",
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Enable gradient checkpointing to save VRAM.",
+    )
+    parser.add_argument(
+        "--use_augmentation",
+        action="store_true",
+        help="Enable data augmentation for Vietnamese training text.",
     )
     return parser.parse_args()
 

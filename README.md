@@ -344,6 +344,3 @@ python scratch/verify_rag_quick.py
 5.  Thực thi câu hỏi kiểm thử: chạy Hybrid Search (kết hợp vector và từ khóa) để lấy top chunks.
 6.  Đưa qua Cross-Encoder Reranker để xếp hạng và lọc tinh.
 7.  Kết quả kiểm thử hiển thị trực tiếp điểm số `combined_score` và điểm `rerank_score` cực kỳ trực quan trên console, cam kết chất lượng hệ thống hoạt động chính xác 100%.
-
----
-*© 2026 — Đồ án Nghiên cứu Khoa học NLP & Agentic AI Tiếng Việt Xuất Sắc. Thiết kế và phát triển bởi Antigravity.*

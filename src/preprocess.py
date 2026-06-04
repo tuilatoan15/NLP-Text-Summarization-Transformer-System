@@ -7,6 +7,7 @@ to maintain consistency across training, api, testing, and evaluation pipelines.
 from __future__ import annotations
 
 from preprocess.preprocessor import (
+    augment_text,
     clean_dataset_record,
     clean_generated_summary,
     clean_text,

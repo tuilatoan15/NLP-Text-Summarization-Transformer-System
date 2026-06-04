@@ -73,10 +73,19 @@ class RAGRepository:
                     retrieval_threshold REAL,
                     citations_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    model_used TEXT,
                     FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id)
                 );
                 """
             )
+            try:
+                conn.execute("ALTER TABLE rag_messages ADD COLUMN model_used TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE rag_messages ADD COLUMN evaluation_json TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def create_document(self, filename: str, source_type: str, metadata: dict[str, Any]) -> str:
         document_id = str(uuid.uuid4())
@@ -214,6 +223,8 @@ class RAGRepository:
         citations: list[dict[str, Any]] | None = None,
         confidence: float | None = None,
         retrieval_threshold: float | None = None,
+        model_used: str | None = None,
+        evaluation: dict[str, Any] | None = None,
     ) -> str:
         message_id = str(uuid.uuid4())
         now = _now_iso()
@@ -221,8 +232,8 @@ class RAGRepository:
             conn.execute(
                 """
                 INSERT INTO rag_messages
-                (id, conversation_id, role, content, confidence, retrieval_threshold, citations_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, conversation_id, role, content, confidence, retrieval_threshold, citations_json, created_at, model_used, evaluation_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message_id,
@@ -233,6 +244,8 @@ class RAGRepository:
                     retrieval_threshold,
                     json.dumps(citations or [], ensure_ascii=False),
                     now,
+                    model_used,
+                    json.dumps(evaluation or {}, ensure_ascii=False),
                 ),
             )
             conn.execute(
@@ -245,7 +258,7 @@ class RAGRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, conversation_id, role, content, confidence, retrieval_threshold, citations_json, created_at
+                SELECT id, conversation_id, role, content, confidence, retrieval_threshold, citations_json, created_at, model_used, evaluation_json
                 FROM rag_messages
                 WHERE conversation_id = ?
                 ORDER BY created_at ASC
@@ -256,6 +269,8 @@ class RAGRepository:
         for row in rows:
             record = dict(row)
             record["citations"] = json.loads(record.pop("citations_json") or "[]")
+            eval_str = record.pop("evaluation_json", None)
+            record["evaluation"] = json.loads(eval_str or "{}") if eval_str else None
             records.append(record)
         return records
 

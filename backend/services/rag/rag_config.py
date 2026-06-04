@@ -7,6 +7,19 @@ Người dùng KHÔNG cần và KHÔNG được phép thay đổi từ frontend.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
+from dotenv import load_dotenv
+
+# Load env variables (if not loaded yet)
+load_dotenv()
+
+RAG_GENERATOR_TYPE: str = os.getenv("RAG_GENERATOR_TYPE", "local").lower()
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OLLAMA_API_URL: str = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,13 +166,17 @@ Ngữ cảnh:
 Bản tóm tắt tiếng Việt chuẩn xác:"""
 
 QA_PROMPT_TEMPLATE: str = """\
-Bạn là trợ lý phân tích tài liệu chuyên nghiệp. Chỉ trả lời dựa trên NGỮCẢNH bên dưới.
+Bạn là trợ lý phân tích tài liệu chuyên nghiệp. Chỉ trả lời dựa trên NGỮ CẢNH bên dưới.
+Hãy tham khảo LỊCH SỬ HỘI THOẠI để hiểu ngữ cảnh các câu hỏi tiếp theo của người dùng (nếu có).
 Nếu không tìm thấy thông tin, hãy trả lời: "Không tìm thấy thông tin trong tài liệu."
 Trả lời bằng tiếng Việt, súc tích và chính xác.
 
-NGỮCẢNH:
+NGỮ CẢNH:
 {context}
 
-CÂU HỎI: {question}
+LỊCH SỬ HỘI THOẠI:
+{chat_history}
+
+CÂU HỎI HIỆN TẠI: {question}
 
 TRẢ LỜI:"""

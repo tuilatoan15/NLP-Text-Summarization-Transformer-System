@@ -192,10 +192,30 @@ class ModelRegistry:
 
         load_kwargs: dict[str, Any] = {}
         if self.fp16:
-            load_kwargs["dtype"] = torch.float16
+            load_kwargs["torch_dtype"] = torch.float16  # HuggingFace standard parameter is torch_dtype
         from transformers import AutoModelForSeq2SeqLM
+        
+        is_peft = False
+        adapter_config_file = Path(model_path) / "adapter_config.json"
+        if adapter_config_file.exists():
+            is_peft = True
 
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
+        if is_peft:
+            from peft import PeftModel
+            import json
+            logger.info("[%s] PEFT adapter config found at %s. Loading base model...", algorithm.key, adapter_config_file)
+            with open(adapter_config_file, "r", encoding="utf-8") as f:
+                adapter_cfg = json.load(f)
+            base_model_name = adapter_cfg.get("base_model_name_or_path")
+            if not base_model_name:
+                base_model_name = algorithm.model_name
+            logger.info("[%s] Loading base model: %s", algorithm.key, base_model_name)
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_name, **load_kwargs)
+            model = PeftModel.from_pretrained(base_model, model_path)
+            model = model.merge_and_unload()
+            logger.info("[%s] PEFT adapter merged successfully into base model", algorithm.key)
+        else:
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
 
         tokenizer = self._repair_vocab_mismatch(model, tokenizer, algorithm, model_path)
         self._patch_generation_config(model, tokenizer)

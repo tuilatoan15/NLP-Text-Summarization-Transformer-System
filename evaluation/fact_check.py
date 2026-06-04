@@ -33,7 +33,46 @@ def _get_embedding_model():
         return None
 
 
-_embedding_cache: dict[str, np.ndarray] = {}
+import threading
+from collections import OrderedDict
+
+class LRUEmbeddingCache:
+    def __init__(self, maxsize: int = 2000):
+        self.maxsize = maxsize
+        self.cache = OrderedDict()
+        self.lock = threading.Lock()
+
+    def get(self, key: str) -> np.ndarray | None:
+        with self.lock:
+            if key not in self.cache:
+                return None
+            self.cache.move_to_end(key)
+            return self.cache[key]
+
+    def set(self, key: str, value: np.ndarray) -> None:
+        with self.lock:
+            if key in self.cache:
+                self.cache[key] = value
+                self.cache.move_to_end(key)
+            else:
+                self.cache[key] = value
+                if len(self.cache) > self.maxsize:
+                    self.cache.popitem(last=False)
+
+    def __contains__(self, key: str) -> bool:
+        with self.lock:
+            return key in self.cache
+
+    def __getitem__(self, key: str) -> np.ndarray:
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key: str, value: np.ndarray) -> None:
+        self.set(key, value)
+
+_embedding_cache = LRUEmbeddingCache(maxsize=2000)
 
 
 def check_consistency(

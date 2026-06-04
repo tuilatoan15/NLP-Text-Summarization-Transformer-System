@@ -23,7 +23,7 @@ _ROUGE_SCORER = rouge_scorer.RougeScorer(
     use_stemmer=False,
 )
 
-_HEAVY_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="heavy_metrics")
+_HEAVY_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="heavy_metrics")
 
 _NULL_BERTSCORE = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
 _NULL_HEAVY: dict = {"bertscore": _NULL_BERTSCORE, "bertscore_f1": 0.0, "semantic_similarity": 0.0}
@@ -121,13 +121,16 @@ def compute_bertscore(
         return {"precision": 1.0, "recall": 1.0, "f1": 1.0}
     try:
         from bert_score import score as bert_score_fn
+        import torch
 
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         precision, recall, f1 = bert_score_fn(
             [prediction], [reference],
             lang=lang,
             model_type=model_type,
             verbose=False,
             rescale_with_baseline=False,
+            device=device,
         )
         return {
             "precision": round(float(precision[0]), 4),
@@ -158,8 +161,10 @@ def _load_sentence_transformer(model_name: str):
         # Double-checked locking: another thread may have loaded while we waited.
         if model_name not in _SBERT_CACHE:
             from sentence_transformers import SentenceTransformer
-            logger.info("Loading SentenceTransformer: %s", model_name)
-            _SBERT_CACHE[model_name] = SentenceTransformer(model_name)
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info("Loading SentenceTransformer: %s on %s", model_name, device)
+            _SBERT_CACHE[model_name] = SentenceTransformer(model_name, device=device)
     return _SBERT_CACHE[model_name]
 
 

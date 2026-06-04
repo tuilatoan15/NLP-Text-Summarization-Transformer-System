@@ -3,10 +3,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   UploadCloud, Trash2, Plus, MessageSquare, Settings, Sliders,
   Loader2, Send, CheckCircle2, AlertTriangle, FileText,
-  ChevronRight, Sparkles, ShieldCheck, Bookmark, Settings2
+  ChevronRight, Sparkles, ShieldCheck, Bookmark, Settings2,
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import * as ragApi from '../services/ragApi';
-import type { RAGDocument, RAGMessage, RAGCitation } from '../types/rag';
+const formatModelName = (name: string | null | undefined) => {
+  if (!name) return "";
+  const n = name.toLowerCase();
+  if (n.includes("gemini")) return "Google Gemini API";
+  if (n.includes("openai")) return "OpenAI GPT API";
+  if (n.includes("ollama")) return "Ollama Local LLM";
+  if (n.includes("vit5")) return "ViT5 Local";
+  if (n.includes("bartpho")) return "BARTPho Local";
+  if (n.includes("mt5")) return "mT5 Local";
+  if (n.includes("extractive")) return "Trích xuất Fallback";
+  return name;
+};
 
 export default function Chat() {
   // --- Refs ---
@@ -49,6 +61,18 @@ export default function Chat() {
   
   // Right Panel: Chỉ hiển thị tab dẫn nguồn ('citations') theo thiết kế tối giản mới
   const [rightPanelTab, setRightPanelTab] = useState<'settings' | 'citations'>('citations');
+
+  // Sidebars toggle states for modern layout
+  const [showLeftPanel, setShowLeftPanel] = useState(true);
+  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // --- Initial Data Load ---
   useEffect(() => {
@@ -291,6 +315,8 @@ export default function Chat() {
             content: finalResult.answer,
             confidence: finalResult.confidence,
             citations: finalResult.retrieved_context,
+            model_used: finalResult.model_used,
+            evaluation: finalResult.evaluation,
             created_at: new Date().toISOString()
           };
         }
@@ -332,14 +358,25 @@ export default function Chat() {
   };
 
   // Helper to render citation superscript links in assistant response with regex mapping
-  const renderMessageContent = (msg: RAGMessage) => {
+  const renderMessageContent = (msg: RAGMessage, isStreaming: boolean = false) => {
     if (msg.role === 'user') {
-      return <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>;
+      return <p className="whitespace-pre-wrap leading-relaxed font-medium">{msg.content}</p>;
     }
 
     const text = msg.content;
     if (!msg.citations || msg.citations.length === 0) {
-      return <p className="whitespace-pre-wrap leading-relaxed">{text}</p>;
+      return (
+        <p className="whitespace-pre-wrap leading-relaxed">
+          {text}
+          {isStreaming && (
+            <motion.span
+              animate={{ opacity: [1, 0, 1] }}
+              transition={{ repeat: Infinity, duration: 0.8 }}
+              className="inline-block w-1.5 h-3.5 ml-1 bg-blue-500 align-middle"
+            />
+          )}
+        </p>
+      );
     }
 
     // Split text by reference blocks [1], [2] to inject clickable superscript motion buttons
@@ -370,6 +407,13 @@ export default function Chat() {
             }
             return part;
           })}
+          {isStreaming && (
+            <motion.span
+              animate={{ opacity: [1, 0, 1] }}
+              transition={{ repeat: Infinity, duration: 0.8 }}
+              className="inline-block w-1.5 h-3.5 ml-1 bg-blue-500 align-middle"
+            />
+          )}
         </p>
         
         <div className="pt-2.5 border-t border-[var(--border)]/60 mt-3 opacity-90">
@@ -415,169 +459,187 @@ export default function Chat() {
     <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 relative overflow-hidden -mx-4 -my-4 lg:mx-0 lg:my-0">
       
       {/* ─────────────────────────────────────────────────────────────
-          LEFT PANEL: Documents Ingestion & Scope Select
+          LEFT PANEL: Documents Ingestion & Scope Select (Collapsible)
           ───────────────────────────────────────────────────────────── */}
-      <section className="w-full lg:w-80 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5">
-        {/* Header */}
-        <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileText size={16} className="text-blue-500" />
-            <h2 className="text-sm font-bold text-[var(--text)]">Tài liệu RAG</h2>
-          </div>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
-            {documents.length} File
-          </span>
-        </div>
-
-        {/* Ingestion & Selection Tabs */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5">
-          {/* Upload Form */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-              Nạp tài liệu mới
-            </h3>
-            <form onSubmit={handleUpload} className="space-y-3">
-              {/* Drag/Drop Box */}
-              <motion.div
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-                animate={{
-                  boxShadow: dragActive ? "0 0 15px rgba(37, 99, 235, 0.4)" : "0 0 0px rgba(0,0,0,0)",
-                  scale: dragActive ? 1.02 : 1
-                }}
-                className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
-                  dragActive
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : uploadFile
-                    ? 'border-emerald-400 bg-emerald-400/5'
-                    : 'border-[var(--border)] hover:border-blue-400 hover:bg-[var(--surface-muted)]'
-                }`}
-                onClick={() => document.getElementById('file-upload-input')?.click()}
-              >
-                <input
-                  id="file-upload-input"
-                  type="file"
-                  accept=".pdf,.docx,.txt,.md"
-                  className="hidden"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                />
-                
-                {uploadFile ? (
-                  <div className="space-y-1">
-                    <FileText className="w-8 h-8 text-emerald-500 mx-auto" />
-                    <p className="text-xs font-semibold text-[var(--text)] truncate px-2">{uploadFile.name}</p>
-                    <p className="text-[10px] text-[var(--text-muted)]">{(uploadFile.size / 1024).toFixed(1)} KB</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <UploadCloud className="w-8 h-8 text-blue-500 mx-auto" />
-                    <p className="text-xs font-semibold text-[var(--text)]">Kéo thả hoặc nhấp để chọn file</p>
-                    <p className="text-[10px] text-[var(--text-faint)]">PDF, DOCX, TXT, MD</p>
-                  </div>
-                )}
-              </motion.div>
-
-
-
-              <button
-                type="submit"
-                disabled={!uploadFile || uploading}
-                className="ui-btn-primary w-full text-xs py-2 gap-1.5"
-              >
-                {uploading ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Đang nhúng & lưu...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={14} />
-                    Nạp tài liệu & Index
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
-
-          <div className="h-px bg-[var(--border)]" />
-
-          {/* Documents Selection Checklist */}
-          <div className="space-y-2 flex-1">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                Chọn tài liệu trò chuyện
-              </h3>
-              <button
-                onClick={toggleSelectAllDocs}
-                className="text-[10px] text-blue-500 font-bold hover:underline cursor-pointer"
-              >
-                {selectedDocIds.length === documents.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
-              </button>
+      <AnimatePresence initial={false}>
+        {showLeftPanel && (
+          <motion.section
+            key="left-panel"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: isMobile ? '100%' : 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5"
+          >
+            {/* Header */}
+            <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-blue-500" />
+                <h2 className="text-sm font-bold text-[var(--text)]">Tài liệu RAG</h2>
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
+                {documents.length} File
+              </span>
             </div>
 
-            {documents.length === 0 ? (
-              <div className="py-6 text-center text-xs text-[var(--text-faint)]">
-                Chưa có tài liệu nào được nạp. Hãy tải file lên trước.
+            {/* Ingestion & Selection Tabs */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-5">
+              {/* Upload Form */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                  Nạp tài liệu mới
+                </h3>
+                <form onSubmit={handleUpload} className="space-y-3">
+                  {/* Drag/Drop Box */}
+                  <motion.div
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    animate={{
+                      boxShadow: dragActive ? "0 0 15px rgba(37, 99, 235, 0.4)" : "0 0 0px rgba(0,0,0,0)",
+                      scale: dragActive ? 1.02 : 1
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                      dragActive
+                        ? 'border-blue-500 bg-blue-500/10'
+                        : uploadFile
+                        ? 'border-emerald-400 bg-emerald-400/5'
+                        : 'border-[var(--border)] hover:border-blue-400 hover:bg-[var(--surface-muted)]'
+                    }`}
+                    onClick={() => document.getElementById('file-upload-input')?.click()}
+                  >
+                    <input
+                      id="file-upload-input"
+                      type="file"
+                      accept=".pdf,.docx,.txt,.md"
+                      className="hidden"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    />
+                    
+                    {uploadFile ? (
+                      <div className="space-y-1">
+                        <FileText className="w-8 h-8 text-emerald-500 mx-auto" />
+                        <p className="text-xs font-semibold text-[var(--text)] truncate px-2">{uploadFile.name}</p>
+                        <p className="text-[10px] text-[var(--text-muted)]">{(uploadFile.size / 1024).toFixed(1)} KB</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <UploadCloud className="w-8 h-8 text-blue-500 mx-auto" />
+                        <p className="text-xs font-semibold text-[var(--text)]">Kéo thả hoặc nhấp để chọn file</p>
+                        <p className="text-[10px] text-[var(--text-faint)]">PDF, DOCX, TXT, MD</p>
+                      </div>
+                    )}
+                  </motion.div>
+
+                  <button
+                    type="submit"
+                    disabled={!uploadFile || uploading}
+                    className="ui-btn-primary w-full text-xs py-2 gap-1.5"
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Đang nhúng & lưu...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} />
+                        Nạp tài liệu & Index
+                      </>
+                    )}
+                  </button>
+                </form>
               </div>
-            ) : (
-              <motion.div
-                variants={containerVariants}
-                initial="hidden"
-                animate="show"
-                className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1"
-              >
-                {documents.map((doc) => {
-                  const isChecked = selectedDocIds.includes(doc.id);
-                  return (
-                    <motion.div
-                      variants={itemVariants}
-                      key={doc.id}
-                      className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
-                        isChecked
-                          ? 'border-blue-500/30 bg-blue-500/5'
-                          : 'border-[var(--border)] hover:bg-[var(--surface-muted)]'
-                      }`}
-                    >
-                      <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleSelectDoc(doc.id)}
-                          className="rounded border-[var(--border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-[var(--text)] truncate">{doc.filename}</p>
-                          <p className="text-[9px] text-[var(--text-faint)] flex items-center gap-1 mt-0.5">
-                            <span className="uppercase font-mono">{doc.source_type}</span> ·
-                            <span>{new Date(doc.created_at).toLocaleDateString()}</span>
-                          </p>
-                        </div>
-                      </label>
-                      <button
-                        onClick={() => handleDeleteDoc(doc.id, doc.filename)}
-                        className="text-[var(--text-faint)] hover:text-red-500 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors ml-1 cursor-pointer"
-                        title="Xóa tài liệu"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </motion.div>
-                  );
-                })}
-              </motion.div>
-            )}
-          </div>
-        </div>
-      </section>
+
+              <div className="h-px bg-[var(--border)]" />
+
+              {/* Documents Selection Checklist */}
+              <div className="space-y-2 flex-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                    Chọn tài liệu trò chuyện
+                  </h3>
+                  <button
+                    onClick={toggleSelectAllDocs}
+                    className="text-[10px] text-blue-500 font-bold hover:underline cursor-pointer"
+                  >
+                    {selectedDocIds.length === documents.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                  </button>
+                </div>
+
+                {documents.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-[var(--text-faint)]">
+                    Chưa có tài liệu nào được nạp. Hãy tải file lên trước.
+                  </div>
+                ) : (
+                  <motion.div
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="show"
+                    className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1"
+                  >
+                    {documents.map((doc) => {
+                      const isChecked = selectedDocIds.includes(doc.id);
+                      return (
+                        <motion.div
+                          variants={itemVariants}
+                          key={doc.id}
+                          className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                            isChecked
+                              ? 'border-blue-500/30 bg-blue-500/5'
+                              : 'border-[var(--border)] hover:bg-[var(--surface-muted)]'
+                          }`}
+                        >
+                          <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleSelectDoc(doc.id)}
+                              className="rounded border-[var(--border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-[var(--text)] truncate">{doc.filename}</p>
+                              <p className="text-[9px] text-[var(--text-faint)] flex items-center gap-1 mt-0.5">
+                                <span className="uppercase font-mono">{doc.source_type}</span> ·
+                                <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                              </p>
+                            </div>
+                          </label>
+                          <button
+                            onClick={() => handleDeleteDoc(doc.id, doc.filename)}
+                            className="text-[var(--text-faint)] hover:text-red-500 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors ml-1 cursor-pointer"
+                            title="Xóa tài liệu"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </motion.div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </div>
+            </div>
+          </motion.section>
+        )}
+      </AnimatePresence>
 
       {/* ─────────────────────────────────────────────────────────────
           MIDDLE PANEL: Streaming Chat & Session Manager
           ───────────────────────────────────────────────────────────── */}
       <section className="flex-1 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shadow-sm shadow-black/5 relative">
-        {/* Chat Header */}
-        <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
+        {/* Chat Header (Glassmorphism & Collapsible buttons) */}
+        <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)]/70 backdrop-blur-md flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
+            {/* Toggle Left Panel */}
+            <button
+              onClick={() => setShowLeftPanel(!showLeftPanel)}
+              className="p-1.5 rounded-lg hover:bg-[var(--surface-inset)] border border-[var(--border)]/60 text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors cursor-pointer"
+              title={showLeftPanel ? "Ẩn danh sách tài liệu" : "Hiện danh sách tài liệu"}
+            >
+              {showLeftPanel ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+            </button>
+
             {/* Conversation Selector / History Toggle */}
             <select
               value={activeConversationId || ''}
@@ -600,13 +662,24 @@ export default function Chat() {
             </span>
           </div>
 
-          <button
-            onClick={handleStartNewChat}
-            disabled={chatLoading}
-            className="ui-btn-secondary py-1.5 px-3 text-xs gap-1 h-8 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus size={13} /> Chat mới
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleStartNewChat}
+              disabled={chatLoading}
+              className="ui-btn-secondary py-1.5 px-3 text-xs gap-1 h-8 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus size={13} /> Chat mới
+            </button>
+
+            {/* Toggle Right Panel */}
+            <button
+              onClick={() => setShowRightPanel(!showRightPanel)}
+              className="p-1.5 rounded-lg hover:bg-[var(--surface-inset)] border border-[var(--border)]/60 text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors cursor-pointer"
+              title={showRightPanel ? "Ẩn dẫn nguồn tham chiếu" : "Hiện dẫn nguồn tham chiếu"}
+            >
+              {showRightPanel ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+            </button>
+          </div>
         </div>
 
         {/* Global Notifications inside Panel */}
@@ -699,33 +772,84 @@ export default function Chat() {
                     )}
 
                     <div className="space-y-1 max-w-[85%]">
-                      {/* Sub-label showing confidence */}
+                      {/* Sub-label showing confidence as a premium progress bar */}
                       {!isUser && (msg.confidence !== undefined && msg.confidence !== null) && (
-                        <div className="flex items-center gap-1.5 pl-1">
-                          <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wider ${
-                            msg.confidence > 0.7 
-                              ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200/40' 
-                              : 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200/40'
-                          }`}>
-                            Tin cậy: {Math.round(msg.confidence * 100)}%
-                          </span>
-                          <span className="text-[10px] text-[var(--text-faint)]">RAG Grounded</span>
+                        <div className="flex flex-col gap-1 w-full max-w-[200px] mt-1 mb-1.5 pl-1">
+                          <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--text-secondary)]">
+                            <span className="flex items-center gap-1">
+                              <ShieldCheck size={12} className={msg.confidence > 0.7 ? 'text-emerald-500' : 'text-amber-500'} />
+                              Độ tin cậy RAG
+                            </span>
+                            <span className={msg.confidence > 0.7 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-amber-600 dark:text-amber-400 font-bold'}>
+                              {Math.round(msg.confidence * 100)}%
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${msg.confidence * 100}%` }}
+                              transition={{ duration: 0.8, ease: "easeOut" }}
+                              className={`h-full rounded-full ${
+                                msg.confidence > 0.7
+                                  ? 'bg-gradient-to-r from-emerald-400 to-teal-500'
+                                  : 'bg-gradient-to-r from-amber-400 to-orange-500'
+                              }`}
+                            />
+                          </div>
+                           {msg.model_used && (
+                            <div className="text-[9px] text-[var(--text-faint)] font-semibold flex items-center gap-1 mt-0.5">
+                              <span>Mô hình:</span>
+                              <span className="text-blue-600 dark:text-blue-400 font-mono">
+                                {formatModelName(msg.model_used)}
+                              </span>
+                            </div>
+                          )}
+                          {msg.evaluation && (
+                            <div className="mt-2 pt-2 border-t border-[var(--border)]/40 flex flex-col gap-1.5 text-[10px] w-full max-w-[240px]">
+                              <div className="flex items-center justify-between font-semibold">
+                                <span className="text-[var(--text-muted)]">Rác / Hoang đường:</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                                  msg.evaluation.hallucination_risk === 'low'
+                                    ? 'bg-emerald-500/10 text-emerald-500'
+                                    : msg.evaluation.hallucination_risk === 'medium'
+                                    ? 'bg-amber-500/10 text-amber-500'
+                                    : 'bg-red-500/10 text-red-500'
+                                }`}>
+                                  {msg.evaluation.hallucination_risk === 'low' ? 'Thấp' : msg.evaluation.hallucination_risk === 'medium' ? 'Trung bình' : 'Cao'}
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[9px]">
+                                  <span className="text-[var(--text-faint)]">Nhất quán (Consistency):</span>
+                                  <span className="font-bold text-[var(--text-secondary)]">{Math.round(msg.evaluation.consistency_score * 100)}%</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[9px]">
+                                  <span className="text-[var(--text-faint)]">Đo bao phủ nguồn (Grounding):</span>
+                                  <span className="font-bold text-[var(--text-secondary)]">{Math.round(msg.evaluation.grounding_coverage * 100)}%</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[9px]">
+                                  <span className="text-[var(--text-faint)]">Độ bao phủ ngữ nghĩa:</span>
+                                  <span className="font-bold text-[var(--text-secondary)]">{Math.round(msg.evaluation.semantic_coverage * 100)}%</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
                       <div className={`p-4 rounded-2xl text-sm leading-relaxed border shadow-sm ${
                         isUser
-                          ? 'bg-blue-600 border-blue-500 text-white rounded-tr-sm shadow-blue-600/10'
+                          ? 'bg-gradient-to-r from-indigo-600 to-blue-600 border-indigo-500 text-white rounded-tr-sm shadow-indigo-600/10'
                           : 'bg-[var(--surface-elevated)] border-[var(--border)] text-[var(--text-secondary)] rounded-tl-sm'
                       }`}>
-                        {renderMessageContent(msg)}
+                        {renderMessageContent(msg, !isUser && index === messages.length - 1 && chatLoading)}
                       </div>
                     </div>
                   </motion.div>
                 );
               })}
 
-              {/* Shimmer Skeleton Loader when generating */}
+              {/* Bouncing Dots Typing Indicator when generating */}
               {chatLoading && messages[messages.length - 1]?.role !== 'assistant' && (
                 <motion.div
                   initial={{ opacity: 0, y: 15 }}
@@ -733,17 +857,30 @@ export default function Chat() {
                   className="flex gap-3 justify-start"
                 >
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0 shadow-md shadow-blue-500/10">
-                    <Loader2 size={13} className="animate-spin" />
+                    <Sparkles size={14} />
                   </div>
-                  <div className="p-4 rounded-2xl text-sm bg-[var(--surface-muted)] border border-[var(--border)] text-[var(--text-secondary)] rounded-tl-sm space-y-2 w-full max-w-lg shadow-sm">
-                    <div className="flex items-center gap-2 font-bold text-xs text-blue-500">
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>AI đang tìm kiếm & tổng hợp...</span>
+                  <div className="p-4 rounded-2xl bg-[var(--surface-elevated)] border border-[var(--border)] text-[var(--text-secondary)] rounded-tl-sm flex flex-col gap-2 shadow-sm max-w-xs">
+                    <div className="text-xs font-bold text-blue-500 flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                      </span>
+                      AI đang tìm kiếm & suy nghĩ
                     </div>
-                    <div className="space-y-1.5 pt-1">
-                      <div className="h-3 bg-gradient-to-r from-[var(--border)] via-[var(--surface-inset)] to-[var(--border)] bg-[length:200%_100%] animate-[algo-shimmer_1.5s_linear_infinite] rounded w-full" />
-                      <div className="h-3 bg-gradient-to-r from-[var(--border)] via-[var(--surface-inset)] to-[var(--border)] bg-[length:200%_100%] animate-[algo-shimmer_1.5s_linear_infinite] rounded w-[90%]" />
-                      <div className="h-3 bg-gradient-to-r from-[var(--border)] via-[var(--surface-inset)] to-[var(--border)] bg-[length:200%_100%] animate-[algo-shimmer_1.5s_linear_infinite] rounded w-[60%]" />
+                    <div className="flex items-center gap-1.5 py-1">
+                      {[0, 1, 2].map((dotIndex) => (
+                        <motion.span
+                          key={dotIndex}
+                          animate={{ y: [0, -6, 0] }}
+                          transition={{
+                            repeat: Infinity,
+                            duration: 0.6,
+                            delay: dotIndex * 0.15,
+                            ease: "easeInOut"
+                          }}
+                          className="w-2.5 h-2.5 rounded-full bg-blue-500/80 inline-block"
+                        />
+                      ))}
                     </div>
                   </div>
                 </motion.div>
@@ -754,8 +891,8 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Input Bar */}
-        <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-muted)]">
+        {/* Input Bar (Glassmorphism & Responsive layout) */}
+        <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-muted)]/70 backdrop-blur-md">
           <form onSubmit={handleSendMessage} className="flex gap-2">
             <input
               type="text"
@@ -767,7 +904,7 @@ export default function Chat() {
                   : "Hỏi AI bất cứ điều gì về tài liệu..."
               }
               disabled={chatLoading || selectedDocIds.length === 0}
-              className="ui-input flex-1 bg-[var(--surface-elevated)] border-[var(--border)] text-sm rounded-xl py-3 px-4 shadow-sm"
+              className="ui-input flex-1 bg-[var(--surface-elevated)]/60 backdrop-blur-sm border-[var(--border)] text-sm rounded-xl py-3 px-4 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
             />
             <button
               type="submit"
@@ -785,95 +922,143 @@ export default function Chat() {
       </section>
 
       {/* ─────────────────────────────────────────────────────────────
-          RIGHT PANEL: Citations Grounds & Parameters Settings
+          RIGHT PANEL: Citations Grounds & Parameters Settings (Collapsible)
           ───────────────────────────────────────────────────────────── */}
-      <section className="w-full lg:w-80 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5">
-        {/* Right Panel Header */}
-        <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={16} className="text-emerald-500 animate-pulse" />
-            <h2 className="text-sm font-bold text-[var(--text)]">Dẫn nguồn tham chiếu</h2>
-          </div>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold font-mono">
-            {activeCitations.length} đoạn
-          </span>
-        </div>
-
-        {/* Citations Content list */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="space-y-3">
-            {activeCitations.length === 0 ? (
-              <div className="py-12 text-center text-xs text-[var(--text-faint)]">
-                Chưa có trích dẫn từ tin nhắn phản hồi gần nhất. Gửi một tin nhắn để xem dẫn nguồn chi tiết.
+      <AnimatePresence initial={false}>
+        {showRightPanel && (
+          <motion.section
+            key="right-panel"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: isMobile ? '100%' : 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5"
+          >
+            {/* Right Panel Header */}
+            <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={16} className="text-emerald-500 animate-pulse" />
+                <h2 className="text-sm font-bold text-[var(--text)]">Dẫn nguồn tham chiếu</h2>
               </div>
-            ) : (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold font-mono">
+                {activeCitations.length} đoạn
+              </span>
+            </div>
+
+            {/* Citations Content list */}
+            <div className="flex-1 overflow-y-auto p-4">
               <div className="space-y-3">
-                {activeCitations.map((cite, index) => {
-                  const isHighlighted = highlightedCitationId === cite.chunk_id;
-                  return (
-                    <motion.div
-                      key={cite.chunk_id}
-                      id={`citation-chunk-${cite.chunk_id}`}
-                      animate={{
-                        borderColor: isHighlighted ? 'var(--accent)' : 'var(--border)',
-                        backgroundColor: isHighlighted ? 'rgba(37,99,235,0.06)' : 'rgba(255,255,255,0)',
-                      }}
-                      transition={{ duration: 0.3 }}
-                      className={`p-3.5 rounded-xl border ${
-                        isHighlighted
-                          ? 'shadow-md shadow-blue-500/5 ring-1 ring-blue-500/20'
-                          : 'bg-[var(--surface-muted)]/50'
-                      }`}
-                    >
-                      {/* Source Details Header */}
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-500 text-white font-mono uppercase">
-                          Nguồn #{index + 1}
-                        </span>
-                        <span className="text-[9px] font-bold text-[var(--text-faint)]">
-                          Hạng {cite.rank ?? (index + 1)}
-                        </span>
-                      </div>
+                {activeCitations.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-[var(--text-faint)]">
+                    Chưa có trích dẫn từ tin nhắn phản hồi gần nhất. Gửi một tin nhắn để xem dẫn nguồn chi tiết.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {activeCitations.map((cite, index) => {
+                      const isHighlighted = highlightedCitationId === cite.chunk_id;
+                      return (
+                        <motion.div
+                          key={cite.chunk_id}
+                          id={`citation-chunk-${cite.chunk_id}`}
+                          animate={{
+                            borderColor: isHighlighted ? 'var(--accent)' : 'var(--border)',
+                            backgroundColor: isHighlighted ? 'rgba(37,99,235,0.06)' : 'rgba(255,255,255,0)',
+                          }}
+                          transition={{ duration: 0.3 }}
+                          className={`p-3.5 rounded-xl border ${
+                            isHighlighted
+                              ? 'shadow-md shadow-blue-500/5 ring-1 ring-blue-500/20'
+                              : 'bg-[var(--surface-muted)]/50'
+                          }`}
+                        >
+                          {/* Source Details Header */}
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-500 text-white font-mono uppercase">
+                              Nguồn #{index + 1}
+                            </span>
+                            <span className="text-[9px] font-bold text-[var(--text-faint)]">
+                              Hạng {cite.rank ?? (index + 1)}
+                            </span>
+                          </div>
 
-                      {/* File Name info */}
-                      <p className="text-[11px] font-bold text-[var(--text)] truncate flex items-center gap-1.5">
-                        <FileText size={12} className="text-blue-500 shrink-0" />
-                        {cite.filename}
-                        {cite.page !== null && (
-                          <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--surface-inset)] text-[var(--text-muted)] font-mono">
-                            Tr. {cite.page}
-                          </span>
-                        )}
-                      </p>
+                          {/* File Name info */}
+                          <p className="text-[11px] font-bold text-[var(--text)] truncate flex items-center gap-1.5">
+                            <FileText size={12} className="text-blue-500 shrink-0" />
+                            {cite.filename}
+                            {cite.page !== null && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--surface-inset)] text-[var(--text-muted)] font-mono">
+                                Tr. {cite.page}
+                              </span>
+                            )}
+                          </p>
 
-                      {/* Chunk Content Text */}
-                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed mt-2 p-2 bg-[var(--surface-elevated)] rounded-lg border border-[var(--border)]/60 max-h-[140px] overflow-y-auto whitespace-pre-wrap font-sans">
-                        {cite.text}
-                      </p>
+                          {/* Chunk Content Text */}
+                          <p className="text-xs text-[var(--text-secondary)] leading-relaxed mt-2 p-2 bg-[var(--surface-elevated)] rounded-lg border border-[var(--border)]/60 max-h-[140px] overflow-y-auto whitespace-pre-wrap font-sans">
+                            {cite.text}
+                          </p>
 
-                      {/* Detail Scores */}
-                      <div className="mt-2.5 pt-2 border-t border-[var(--border)]/40 grid grid-cols-3 gap-1 text-center">
-                        <div className="p-1 rounded bg-[var(--surface-inset)]">
-                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Embed F1</p>
-                          <p className="text-xs font-mono font-bold text-blue-500">{(cite.embedding_score || 0).toFixed(3)}</p>
-                        </div>
-                        <div className="p-1 rounded bg-[var(--surface-inset)]">
-                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">BM25</p>
-                          <p className="text-xs font-mono font-bold text-blue-500">{(cite.bm25_score || 0).toFixed(1)}</p>
-                        </div>
-                        <div className="p-1 rounded bg-[var(--surface-inset)]">
-                          <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Combined</p>
-                          <p className="text-xs font-mono font-bold text-emerald-500">{(cite.combined_score || 0).toFixed(3)}</p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
+                          {/* Detail Scores */}
+                          <div className="mt-2.5 pt-2 border-t border-[var(--border)]/40 grid grid-cols-3 gap-1 text-center">
+                            <div className="p-1 rounded bg-[var(--surface-inset)]">
+                              <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Embed F1</p>
+                              <p className="text-xs font-mono font-bold text-blue-500">{(cite.embedding_score || 0).toFixed(3)}</p>
+                            </div>
+                            <div className="p-1 rounded bg-[var(--surface-inset)]">
+                              <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">BM25</p>
+                              <p className="text-xs font-mono font-bold text-blue-500">{(cite.bm25_score || 0).toFixed(1)}</p>
+                            </div>
+                            <div className="p-1 rounded bg-[var(--surface-inset)]">
+                              <p className="text-[8px] text-[var(--text-faint)] uppercase font-semibold">Combined</p>
+                              <p className="text-xs font-mono font-bold text-emerald-500">{(cite.combined_score || 0).toFixed(3)}</p>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      </section>
+            </div>
+          </motion.section>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Panel Reopen Buttons */}
+      <AnimatePresence>
+        {!showLeftPanel && (
+          <motion.button
+            key="restore-left-btn"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowLeftPanel(true)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-40 w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg hover:bg-blue-700 transition-colors border border-blue-500 cursor-pointer"
+            title="Hiện danh sách tài liệu"
+          >
+            <PanelLeftOpen size={18} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!showRightPanel && (
+          <motion.button
+            key="restore-right-btn"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowRightPanel(true)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-40 w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-lg hover:bg-emerald-700 transition-colors border border-emerald-500 cursor-pointer"
+            title="Hiện dẫn nguồn tham chiếu"
+          >
+            <PanelRightOpen size={18} />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
     </div>
   );

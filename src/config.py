@@ -5,8 +5,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - python-dotenv is in requirements.txt
+    load_dotenv = None
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if load_dotenv is not None:
+    load_dotenv(PROJECT_ROOT / ".env")
+if os.getenv("CUDA_VISIBLE_DEVICES") == "":
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+
 DATA_DIR = PROJECT_ROOT / "data"
 CACHE_DIR = PROJECT_ROOT / "cache"
 MODEL_DIR = PROJECT_ROOT / "models"
@@ -162,9 +172,11 @@ DOCUMENT_INTELLIGENCE_DIR = Path(
 DOCUMENT_INTELLIGENCE_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 REDIS_URL = os.getenv("REDIS_URL", "")
-VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "local").lower()
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "qdrant").lower() # Mặc định chuyển sang Qdrant
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "agentic")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "agentic-secret")
@@ -174,4 +186,3 @@ ENABLE_DB_PERSISTENCE = os.getenv("ENABLE_DB_PERSISTENCE", "0") == "1"
 
 # ─────────────────────────── LOGGING ───────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-

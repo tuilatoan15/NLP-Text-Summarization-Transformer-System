@@ -87,8 +87,13 @@ def log_device_info() -> None:
         logger.info("    torch=%s  cuda_build=%s", torch.__version__, torch.version.cuda or "None (CPU-only build)")
         return
 
-    idx = torch.cuda.current_device()
-    props = torch.cuda.get_device_properties(idx)
+    try:
+        idx = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(idx)
+    except Exception as exc:
+        logger.warning("CUDA diagnostics failed; continuing without GPU startup details: %s", exc)
+        return
+
     total_mb = props.total_memory / 1024 ** 2
     free_mb = (props.total_memory - torch.cuda.memory_reserved(idx)) / 1024 ** 2
     fp16_ok = props.major >= 7

@@ -32,14 +32,17 @@ class GroundedGenerator:
         self,
         query: str,
         contexts: list[dict[str, Any]],
+        *,
+        chat_history: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,  # Giữ param để tương thích API, không dùng (hardcoded)
+        general_chat: bool = False,
     ) -> dict[str, Any]:
         """
         Sinh câu trả lời cho query dựa trên contexts đã retrieve + rerank.
 
         temperature bị ignore — GenerationConfig đã hardcode trong rag_config.py.
         """
-        if not contexts:
+        if not contexts and not general_chat:
             return {
                 "answer": self.insufficient_context_message,
                 "confidence": 0.0,
@@ -49,12 +52,14 @@ class GroundedGenerator:
                 "temperature_used": temperature,
             }
 
-        result = self._summarizer.answer_question(query, contexts)
+        result = self._summarizer.answer_question(
+            query, contexts, chat_history=chat_history, general_chat=general_chat
+        )
 
         return {
             "answer": result["answer"],
             "confidence": result["confidence"],
-            "grounded": True,
+            "grounded": not general_chat,
             "model_used": result.get("model_used"),
             "fallback_used": result.get("fallback_used", False),
             "temperature_used": temperature,

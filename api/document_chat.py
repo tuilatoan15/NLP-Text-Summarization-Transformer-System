@@ -81,6 +81,11 @@ async def list_messages(conversation_id: str):
     return {"items": service.list_messages(conversation_id)}
 
 
+class SummarizeDocsRequest(BaseModel):
+    document_ids: list[str] = Field(min_length=1)
+    query: str = Field(default="Tóm tắt nội dung chính của các tài liệu")
+
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     return await _to_thread(service.chat, **request.model_dump())
@@ -90,6 +95,24 @@ async def chat(request: ChatRequest):
 async def stream_chat(request: ChatRequest):
     async def event_gen():
         async for event in service.stream_chat(**request.model_dump()):
+            yield event
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/documents/summarize")
+async def summarize_documents(request: SummarizeDocsRequest):
+    return await _to_thread(service.summarize_documents, **request.model_dump())
+
+
+@router.post("/documents/summarize/stream")
+async def stream_summarize_documents(request: SummarizeDocsRequest):
+    async def event_gen():
+        async for event in service.stream_summarize_documents(**request.model_dump()):
             yield event
 
     return StreamingResponse(

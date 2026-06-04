@@ -1,11 +1,7 @@
 """
-retriever.py — Hybrid Retriever tối ưu: 0.7 Vector + 0.3 BM25 + Cross-Encoder Reranker.
-
-Pipeline cứng (không cho user thay đổi):
-  1. Vector similarity (cosine) — bắt ngữ nghĩa toàn cục
-  2. BM25 — giữ từ khóa chuyên ngành, tên riêng, số liệu
-  3. Hybrid merge: 0.70V + 0.30BM25 → top 10
-  4. Cross-Encoder reranker → top 5 (threshold > 0.40)
+retriever.py — Hybrid Retriever thế hệ mới sử dụng bộ trộn Reciprocal Rank Fusion (RRF)
+kết hợp giữa Dense semantic search (BGE-M3) và Sparse keyword search (Okapi BM25),
+sau đó đưa qua Cross-Encoder Reranker (BGE-Reranker-Large).
 """
 from __future__ import annotations
 
@@ -49,11 +45,8 @@ def _tokens(text: str) -> list[str]:
 
 class HybridRetriever:
     """
-    Hybrid Retriever chuẩn công nghiệp.
-
-    Mọi trọng số và ngưỡng đều được hardcode từ rag_config.py.
-    Tham số retrieval_mode và use_reranking trong API signature được giữ lại
-    để tương thích ngược, nhưng luôn bị override bởi cấu hình cứng.
+    Hybrid Retriever sử dụng giải thuật Reciprocal Rank Fusion (RRF)
+    kết hợp với Cross-Encoder Reranker chuẩn công nghiệp.
     """
 
     def __init__(self) -> None:
@@ -67,13 +60,16 @@ class HybridRetriever:
         chunks: list[dict[str, Any]],
         top_k: int = RETRIEVAL_FINAL_TOP_K,
         threshold: float = RETRIEVAL_THRESHOLD,
-        retrieval_mode: str = "hybrid",      # Luôn dùng hybrid, param giữ để tương thích
+        retrieval_mode: str = "hybrid",      # Giữ nguyên tương thích ngược
         use_reranking: bool = True,           # Luôn bật reranking
     ) -> list[dict[str, Any]]:
         """
-        Retrieval hoàn chỉnh: Hybrid scoring → Cross-Encoder reranking.
-
-        Trả về top-K chunks đã được rerank, sắp xếp theo rerank_score.
+        Thực hiện truy xuất thông tin đa tầng:
+          Bước 1: Chấm điểm BM25 Okapi cho từng chunk.
+          Bước 2: Tính Cosine Similarity của Vector Embedding.
+          Bước 3: Thực hiện Reciprocal Rank Fusion (RRF) trộn 2 bảng xếp hạng độc lập.
+          Bước 4: Sắp xếp theo RRF Score và lấy Top Candidates.
+          Bước 5: Đưa qua Cross-Encoder Reranker để lấy kết quả có độ liên quan sâu sắc nhất.
         """
         if not chunks:
             return []
@@ -81,12 +77,11 @@ class HybridRetriever:
         # ── Bước 1: Tính BM25 scores ──────────────────────────────────────
         bm25_scores = self._bm25_scores(query, chunks)
 
-        # ── Bước 2: Tính vector similarity (cosine) ───────────────────────
+        # ── Bước 2: Tính Dense Vector similarity (cosine) ──────────────────
         q = np.array(query_vector, dtype=np.float32)
         q_norm = np.linalg.norm(q) or 1.0
 
-        # ── Bước 3: Hybrid scoring với weight cứng 0.7V + 0.3BM25 ─────────
-        scored: list[dict[str, Any]] = []
+        dense_scored: list[tuple[int, float]] = []
         for idx, chunk in enumerate(chunks):
             if "embedding_score" in chunk:
                 sim = float(chunk["embedding_score"])
@@ -96,31 +91,57 @@ class HybridRetriever:
                     sim = 0.0
                 else:
                     sim = float(np.dot(q, vec) / ((np.linalg.norm(vec) or 1.0) * q_norm))
+            dense_scored.append((idx, sim))
 
+        # ── Bước 3: Reciprocal Rank Fusion (RRF) ──────────────────────────
+        # Sắp xếp Dense để lấy hạng (rank)
+        dense_scored.sort(key=lambda x: x[1], reverse=True)
+        dense_ranks = {item[0]: rank for rank, item in enumerate(dense_scored, start=1)}
+
+        # Sắp xếp BM25 để lấy hạng (rank)
+        bm25_scored = list(enumerate(bm25_scores))
+        bm25_scored.sort(key=lambda x: x[1], reverse=True)
+        bm25_ranks = {item[0]: rank for rank, item in enumerate(bm25_scored, start=1)}
+
+        # Tính điểm RRF kết hợp
+        # RRF Score formula: RRF(d) = sum(1 / (k + rank_i(d)))
+        # Mặc định hằng số k = 60 theo tiêu chuẩn của Elasticsearch & IR Research
+        k = 60.0
+        rrf_scored: list[dict[str, Any]] = []
+
+        for idx, chunk in enumerate(chunks):
+            dense_rank = dense_ranks[idx]
+            bm25_rank = bm25_ranks[idx]
+            
+            # Tính RRF Score
+            rrf_score = (1.0 / (k + dense_rank)) + (1.0 / (k + bm25_rank))
+            
+            # Giữ lại các chỉ số điểm số thô để phân tích học thuật / XAI
+            sim = next(item[1] for item in dense_scored if item[0] == idx)
             bm = bm25_scores[idx]
-            # Hardcode: 70% vector + 30% BM25 (tốt hơn 65/35 cho tiếng Việt)
-            combined = VECTOR_WEIGHT * sim + BM25_WEIGHT * bm
+            
+            rrf_scored.append({
+                "chunk_id": chunk.get("id", chunk.get("chunk_id", "")),
+                "document_id": chunk["document_id"],
+                "filename": chunk["filename"],
+                "page": chunk.get("page"),
+                "text": chunk["text"],
+                "embedding_score": round(sim, 6),
+                "bm25_score": round(bm, 6),
+                "combined_score": round(rrf_score * 100, 6),  # Nhân 100 để scale trực quan
+                "dense_rank": dense_rank,
+                "bm25_rank": bm25_rank,
+            })
 
-            scored.append(
-                {
-                    "chunk_id": chunk.get("id", chunk.get("chunk_id", "")),
-                    "document_id": chunk["document_id"],
-                    "filename": chunk["filename"],
-                    "page": chunk.get("page"),
-                    "text": chunk["text"],
-                    "embedding_score": round(sim, 6),
-                    "bm25_score": round(bm, 6),
-                    "combined_score": round(combined, 6),
-                }
-            )
-
-        # Sắp xếp theo combined_score, lấy pre-rerank top K
-        scored.sort(key=lambda x: x["combined_score"], reverse=True)
-        pre_rerank = scored[:RETRIEVAL_PRE_RERANK_TOP_K]
+        # Sắp xếp các ứng viên theo RRF Score giảm dần
+        rrf_scored.sort(key=lambda x: x["combined_score"], reverse=True)
+        
+        # Lấy pre-rerank top K để làm đầu vào cho Reranker
+        pre_rerank = rrf_scored[:RETRIEVAL_PRE_RERANK_TOP_K]
 
         logger.debug(
-            "🔍 Hybrid retrieval: %d chunks → pre-rerank top %d (threshold=%.2f)",
-            len(chunks), len(pre_rerank), threshold,
+            "🔍 Hybrid RRF retrieval complete: %d chunks → pre-rerank top %d",
+            len(chunks), len(pre_rerank),
         )
 
         # ── Bước 4: Cross-Encoder Reranking ───────────────────────────────
@@ -132,22 +153,22 @@ class HybridRetriever:
             threshold=threshold,
         )
 
-        # Nếu rerank trả về rỗng (tất cả dưới threshold), nới lỏng và thử lại
+        # Trình fallback nếu threshold rerank quá gắt gây rỗng
         if not reranked and pre_rerank:
             logger.warning(
-                "⚠️  Reranker trả về rỗng (threshold=%.2f quá cao). "
-                "Nới lỏng threshold về 0.2 để trả về ít nhất 1 kết quả.",
+                "⚠️ Reranker returned empty (threshold=%.2f too high). "
+                "Relaxing threshold to 0.15 for at least 1 result.",
                 threshold,
             )
             reranked = self._reranker.rerank(
                 query=query,
                 chunks=pre_rerank[:3],
                 top_k=1,
-                threshold=0.2,
+                threshold=0.15,
             )
 
         logger.info(
-            "✅ Retrieval hoàn tất: %d→%d chunks (reranker=%s)",
+            "✅ Retrieval hoàn tất: %d → %d chunks (Reranker=%s)",
             len(pre_rerank),
             len(reranked),
             "CrossEncoder" if self._reranker.is_available() else "fallback",
@@ -159,7 +180,7 @@ class HybridRetriever:
     def _bm25_scores(self, query: str, chunks: list[dict[str, Any]]) -> list[float]:
         """
         BM25 (Okapi BM25) với k1=1.5, b=0.75.
-        Kết quả được normalize về [0, 1] để dễ kết hợp với cosine similarity.
+        Kết quả được normalize về [0, 1] để dễ kết hợp.
         """
         docs_tokens = [_tokens(chunk["text"]) for chunk in chunks]
         query_tokens = _tokens(query)
