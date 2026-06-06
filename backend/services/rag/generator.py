@@ -79,7 +79,7 @@ class GroundedGenerator:
 
     # ─────────────────────────── Prompt template ──────────────────────────────
 
-    def prompt_template(self, contexts: list[dict[str, Any]], question: str) -> str:
+    def prompt_template(self, contexts: list[dict[str, Any]], question: str, chat_history: str = "Không có") -> str:
         """Render prompt template tiếng Việt chuẩn (dùng để debug/log)."""
         blocks = []
         for idx, c in enumerate(contexts, start=1):
@@ -93,7 +93,7 @@ class GroundedGenerator:
                 + f" | {score_info}]\n{c['text']}"
             )
         context_text = "\n\n".join(blocks)
-        return QA_PROMPT_TEMPLATE.format(context=context_text, question=question)
+        return QA_PROMPT_TEMPLATE.format(context=context_text, chat_history=chat_history, question=question)
 
     def summarize_prompt_template(self, contexts: list[dict[str, Any]]) -> str:
         """Render summarize prompt template để debug."""

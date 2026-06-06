@@ -1,4 +1,11 @@
-"""Load, clean, deduplicate, and cache the VNExpress dataset."""
+"""Load, clean, deduplicate, and cache the VietNews dataset (nam194/vietnews).
+
+VietNews column schema:
+  - article: full news article text
+  - abstract: reference summary (used as training target)
+  - title: headline
+  - guid: unique identifier
+"""
 
 from __future__ import annotations
 
@@ -19,7 +26,8 @@ CACHE_DIR = config.DATASET_CACHE_DIR
 
 def _detect_columns(column_names: list[str], article_col: str | None, title_col: str | None) -> tuple[str, str]:
     article_candidates = [article_col, "article", "text", "content", "body", "description", "document"]
-    summary_candidates = [title_col, "summary", "title", "headline", "abstract", "short_description"]
+    # VietNews (nam194/vietnews) uses 'abstract' as the reference summary column
+    summary_candidates = [title_col, "abstract", "summary", "title", "headline", "short_description"]
 
     article = next((col for col in article_candidates if col and col in column_names), None)
     summary = next((col for col in summary_candidates if col and col in column_names), None)
@@ -80,8 +88,8 @@ def load_from_csv(
 
 def load_from_huggingface(
     dataset_name: str = config.DATASET_NAME,
-    article_col: str = "text",
-    title_col: str = "title",
+    article_col: str = "article",
+    title_col: str = "abstract",  # VietNews uses 'abstract' as reference summary
     max_samples: int = DEFAULT_MAX_SAMPLES,
     max_eval_samples: int = 200,
 ) -> DatasetDict:

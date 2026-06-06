@@ -18,7 +18,7 @@ from scripts.train import train_model
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune VietAI/vit5-base for Vietnamese summarization.")
     parser.add_argument("--local_data", default=None)
-    parser.add_argument("--dataset_name", default="thanhnew2001/vnexpress")
+    parser.add_argument("--dataset_name", default="nam194/vietnews")
     parser.add_argument("--max_samples", type=int, default=5000)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=2)

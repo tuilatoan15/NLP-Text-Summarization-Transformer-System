@@ -37,7 +37,7 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # ─────────────────────────── DATASET ───────────────────────
-DATASET_NAME = os.getenv("DATASET_NAME", "thanhnew2001/vnexpress")
+DATASET_NAME = os.getenv("DATASET_NAME", "nam194/vietnews")
 DATASET_CACHE_DIR = DATA_DIR / "cache"
 MAX_TRAIN_SAMPLES = int(os.getenv("MAX_TRAIN_SAMPLES", "5000"))
 VALIDATION_RATIO = float(os.getenv("VALIDATION_RATIO", "0.1"))

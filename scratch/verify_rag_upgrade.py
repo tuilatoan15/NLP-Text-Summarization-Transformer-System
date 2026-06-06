@@ -60,8 +60,8 @@ summarizer = RAGTransformerSummarizer()
 
 # Test _build_gen_kwargs
 bartpho_kwargs = _build_gen_kwargs(BARTPHO_GENERATION)
-assert "early_stopping" in bartpho_kwargs, "BARTPho cần early_stopping"
-assert bartpho_kwargs["do_sample"] == False
+assert "early_stopping" not in bartpho_kwargs, "BARTPho không cần early_stopping khi do_sample=True"
+assert bartpho_kwargs["do_sample"] == True
 
 mt5_kwargs = _build_gen_kwargs(MT5_GENERATION)
 assert "early_stopping" not in mt5_kwargs, "mT5 không được có early_stopping khi do_sample=True"

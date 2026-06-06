@@ -62,7 +62,7 @@ def _pick_available_model() -> str | None:
     Ưu tiên theo PREFERRED_SUMMARIZER_ORDER = [bartpho, vit5, mt5].
     """
     try:
-        from src.model_loader import _registry  # type: ignore
+        from ai_models.model_loader import _registry  # type: ignore
 
         for key in PREFERRED_SUMMARIZER_ORDER:
             if _registry.is_loaded(key):

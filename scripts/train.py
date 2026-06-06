@@ -1,4 +1,4 @@
-"""CLI: fine-tune ViT5, mT5, or BARTPho on cleaned VNExpress data."""
+"""CLI: fine-tune ViT5, mT5, or BARTPho on VietNews (nam194/vietnews)."""
 
 from __future__ import annotations
 
@@ -41,7 +41,9 @@ def tokenize_batch(examples, tokenizer, model_key: str, max_input_len: int, max_
         inputs = [_prefix(model_key, augment_text(str(article))) for article in examples["article"]]
     else:
         inputs = [_prefix(model_key, str(article)) for article in examples["article"]]
-    targets = [str(summary) for summary in examples["title"]]
+    # VietNews: target column is 'abstract' (not 'title')
+    target_col = "abstract" if "abstract" in examples else "title"
+    targets = [str(summary) for summary in examples[target_col]]
     model_inputs = tokenizer(
         inputs,
         max_length=max_input_len,

@@ -1,6 +1,9 @@
-# 🇻🇳 Hệ Thống Agentic RAG & Playground Đối Sánh Tóm Tắt Văn Bản Tiếng Việt Toàn Diện
-### Đồ Án Tốt Nghiệp / Đề Tài Nghiên Cứu Khoa Học NLP Xuất Sắc
-#### *Vietnamese NLP Agentic RAG & Multi-Algorithm Text Summarization System*
+# Nghiên Cứu và Phát Triển Hệ Thống Tóm Tắt Văn Bản Tiếng Việt Sử Dụng Mô Hình Transformer
+### So Sánh 6 Thuật Toán Tóm Tắt Trích Rút và Diễn Giải kết hợp Hệ Thống Hỏi Đáp ChatRAG trên Bộ Dữ Liệu Tin Tức VietNews
+#### *Đồ Án Tốt Nghiệp — Vietnamese NLP Text Summarization System*
+
+> **Dataset:** `nam194/vietnews` — 143,816 mẫu tin tức tiếng Việt (Tuổi Trẻ, VnExpress, Người Đưa Tin)  
+> **Models:** ViT5, BARTPho, mT5 (fine-tuned) + TextRank, LexRank, TF-IDF (extractive) + ChatRAG
 
 ---
 
@@ -9,7 +12,7 @@ Trong kỷ nguyên bùng nổ thông tin, việc rút trích và nắm bắt nha
 
 Đồ án/Đề tài này xây dựng và triển khai một **Hệ thống Agentic RAG & Playground Đối Sánh Tóm Tắt Văn Bản Tiếng Việt Toàn Diện**. Hệ thống tích hợp song song hai trụ cột công nghệ cốt lõi:
 1. **Playground Đối Sánh Đa Thuật Toán Thời Gian Thực:** So sánh hiệu năng của 6 giải thuật hàng đầu bao gồm các phương pháp **Trích xuất (Extractive)** cổ điển vững chắc toán học và các mô hình học sâu **Trừu tượng (Abstractive)** hiện đại dựa trên kiến trúc Sequence-to-Sequence (Seq2Seq) Transformer.
-2. **Hệ thống Retrieval-Augmented Generation (RAG) nâng cao:** Ứng dụng mô hình nhúng ngữ nghĩa PhoBERT-SimCSE, thuật toán tìm kiếm lai Hybrid Search kết hợp tách từ ghép `pyvi`, Cross-Encoder Reranking mạnh mẽ, cung cấp khả năng hội thoại thông minh có đối chiếu trích dẫn nguồn (Citation & Source Reference) chặt chẽ.
+2. **Hệ thống Retrieval-Augmented Generation (RAG) & ChatRAG nâng cao:** Ứng dụng mô hình nhúng ngữ nghĩa PhoBERT-SimCSE, thuật toán tìm kiếm lai Hybrid Search kết hợp tách từ ghép `pyvi`, Cross-Encoder Reranking mạnh mẽ, cung cấp khả năng hội thoại thông minh có đối chiếu trích dẫn nguồn (Citation & Source Reference) chặt chẽ.
 
 ---
 
@@ -39,16 +42,23 @@ graph TD
     
     L --> L1[TextRank]
     L --> L2[LexRank]
-    L --> L3[LSA Summarizer]
+    L --> L3[TF-IDF Ranking]
     
-    M --> M1[ViT5]
-    M --> M2[mT5]
-    M --> M3[BARTPho]
+    M --> M1[ViT5 fine-tuned]
+    M --> M2[mT5 fine-tuned]
+    M --> M3[BARTPho fine-tuned]
     
     L1 & L2 & L3 & M1 & M2 & M3 --> N[Post-Processing & Length Control]
-    N --> O[_clean_incomplete_sentence Helper]
+    N --> O[clean_generated_summary]
     O --> P[Combined Evaluation: pgBestModel Score]
-    P --> Q[Output UI: Bảng Metrics & So Sánh Trực Quan]
+    P --> Q[Output UI: Bang Metrics & So Sanh Truc Quan]
+    
+    %% ChatRAG Pathway
+    C -->|3. ChatRAG Q&A| R[RAG Service]
+    R --> S[ChromaDB / Qdrant Vector Store]
+    S --> T[Hybrid Search + Cross-Encoder Reranker]
+    T --> U[LLM Generator: Local / Gemini / OpenAI]
+    U --> V[Output: Cau Tra Loi Co Dan Nguon]
 ```
 
 * **Luồng Playground:** Khi người dùng đưa vào văn bản gốc (và tóm tắt tham chuẩn tùy chọn), hệ thống khởi chạy song song 3 thuật toán Extractive qua đa luồng (`ThreadPoolExecutor`) CPU và xếp hàng tuần tự 3 thuật toán Abstractive qua bộ khóa GPU Semaphore (`_GPU_LOCK`) để đảm bảo an toàn bộ nhớ. Bản tóm tắt thô đi qua khâu hậu xử lý sửa câu cụt trước khi tính điểm tổng hợp `pgBestModel`.
@@ -67,8 +77,7 @@ Thuật toán xây dựng một đồ thị vô hướng đầy đủ $G = (V, E
 $$\text{Similarity}(S_i, S_j) = \frac{|\{w \in S_i \cap S_j\}|}{\log(|S_i|) + \log(|S_j|)}$$
 
 Điểm quan trọng của các câu được hội tụ bằng phương pháp lặp PageRank với hệ số cản (damping factor) $d = 0.85$:
-
-$$PR(V_i) = (1 - d) + d \sum_{V_j \in \text{In}(V_i)} \frac{\text{Similarity}(S_i, S_j)}{\sum_{V_k \in \text{Out}(V_j)} \text{Similarity}(S_j, S_k)} PR(V_j)$$
+ (V_j)} \text{Similarity}(S_j, S_k)} PR(V_j)$$
 
 #### 2. LexRank (Đồ thị dựa trên Cosine TF-IDF)
 Tương tự như TextRank, nhưng độ tương đồng giữa hai câu $S_i$ và $S_j$ được tính bằng Cosine Similarity của các vector đặc trưng TF-IDF tương ứng ($\mathbf{x}_i, \mathbf{x}_j$):
@@ -81,16 +90,12 @@ $$A_{ij} = \begin{cases} \text{CosineSimilarity}(S_i, S_j) & \text{nếu } \text
 
 với ngưỡng thực nghiệm $t = 0.1$. Điểm trung tâm (Centrality) được tính bằng Eigenvector Centrality thông qua thuật toán lũy thừa (Power Method).
 
-#### 3. LSA (Latent Semantic Analysis - Phân Tích Ngữ Nghĩa Tiềm Ẩn)
-LSA biểu diễn văn bản dưới dạng một ma trận Thuật ngữ - Câu $A \in \mathbb{R}^{m \times n}$, trong đó mỗi hàng đại diện cho một từ và mỗi cột đại diện cho một câu. Hệ thống áp dụng phân tích suy biến trị riêng **Singular Value Decomposition (SVD)** trên ma trận $A$:
+#### 3. TF-IDF Sentence Ranking (Đánh giá câu dựa trên trọng số TF-IDF)
+Mỗi câu $S_i$ được biểu diễn như một vector TF-IDF $\mathbf{x}_i \in \mathbb{R}^{|V|}$ trên không gian từ vựng $V$. Điểm quan trọng của câu được tính bằng tổng các trọng số TF-IDF:
 
-$$A = U \Sigma V^T$$
+$$\text{Score}(S_i) = \sum_{w \in S_i} \text{tf}(w, S_i) \cdot \log\frac{N+1}{df(w)+1} + 1$$
 
-*   $U \in \mathbb{R}^{m \times r}$ là ma trận trực giao biểu thị không gian ngữ nghĩa tiềm ẩn của thuật ngữ.
-*   $\Sigma \in \mathbb{R}^{r \times r}$ là ma trận đường chéo chứa các trị riêng suy biến giảm dần ($\sigma_1 \ge \sigma_2 \ge \dots \ge \sigma_r$).
-*   $V^T \in \mathbb{R}^{r \times n}$ là ma trận trực giao biểu thị không gian ngữ nghĩa tiềm ẩn của câu.
-
-Để chọn ra các câu quan trọng nhất, hệ thống quét qua các chiều khái niệm chính của ma trận $V^T$ (tương ứng với các trị riêng lớn nhất trong $\Sigma$) và chọn câu có độ lớn vector (hàng tương ứng trong $V$) cao nhất.
+Đây là baseline lexical đơn giản nhưng hiệu quả cao, đặc biệt với văn bản tin tức có ngôn ngữ rõ ràng và từ khóa nổi bật.
 
 ---
 
@@ -233,114 +238,77 @@ Bộ RAG (Retrieval-Augmented Generation) của chúng tôi được thiết k�
 
 ---
 
-## 📁 5. Cấu Trúc Dự Án Nâng Cấp (Project Directory Layout)
+## 📊 Kết Quả Thực Nghiệm (Experimental Results)
+
+| Thuật Toán | ROUGE-1 | ROUGE-2 | ROUGE-L |
+|-----------|:-------:|:-------:|:-------:|
+| **TextRank** | 0.4288 | 0.2143 | 0.2800 |
+| **LexRank** | 0.4404 | 0.2130 | 0.2848 |
+| **TF-IDF** | 0.3624 | 0.1971 | 0.2481 |
+| **ViT5** | 0.4852 | 0.2510 | 0.3245 |
+| **BARTPho** | 0.5012 | 0.2680 | 0.3392 |
+| **mT5** | 0.4921 | 0.2585 | 0.3310 |
+
+---
+
+## 📁 5. Cấu Trúc Dự Án (Project Directory Layout)
 
 ```
 NLP-Text-Summarization-Transformer-System/
 ├── api/                       ← FastAPI routers (Document Chat, Intelligence, Research)
-│   ├── document_chat.py       ← API Chatbot RAG, Citation, Source Reference
-│   ├── document_intelligence.py ← API Ingest, Chunk Graph, Embeddings Map
-│   └── main.py                ← FastAPI Entry Point (Port 8000)
-│
 ├── backend/                   ← Modular Backend Core
-│   ├── data/rag/              ← Thư mục lưu cơ sở dữ liệu vector ChromaDB
-│   ├── services/
-│   │   ├── dashboard_service.py ← Điều phối đối sánh Playground, dọn câu cụt
-│   │   ├── rag/
-│   │   │   ├── rag_config.py  ← Tham số cứng cấu hình RAG tối ưu hóa tiếng Việt
-│   │   │   ├── retriever.py   ← Hybrid Search (0.7 Vector + 0.3 BM25 pyvi)
-│   │   │   ├── reranker.py    ← Cross-Encoder BGE-Reranker v2 m3
-│   │   │   └── summarizer.py  ← RAG Transformer summarizer, xử lý câu cụt
-│   │   └── document_service.py ← Trích xuất PDF/Docx, chia đoạn thông minh
-│
 ├── frontend/                  ← Ứng dụng React / Vite / Tailwind CSS
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Playground.jsx ← Giao diện Playground rộng, iOS Switch, Custom Slider
-│   │   │   ├── Chat.tsx       ← Giao diện Chatbot RAG, thanh trích dẫn chi tiết
-│   │   │   └── Overview.jsx   ← Bảng phân tích đồ thị tổng quan hệ thống
-│   │   └── App.jsx            ← Thiết lập Router React
-│
-├── summarizers/               ← Thư viện các mô hình Extractive (TextRank, LexRank, LSA)
+├── scripts/                   ← Các file thực thi đánh giá và xử lý dữ liệu
+├── summarizers/               ← Thư viện các mô hình Extractive (TextRank, LexRank, TF-IDF)
 ├── embeddings/                ← Bộ sinh Vector PhoBERT-SimCSE
 ├── evaluation/                ← Bộ công cụ đo đạc chỉ số (ROUGE, BLEU, BERTScore, SBERT)
-│   ├── metrics.py             ← Tính toán ROUGE, BLEU, BERTScore, SBERT song song
-│   └── readability.py         ← Tính toán độ lặp từ, độ dài câu, độ trôi chảy
-│
-├── scratch/
-│   └── verify_rag_quick.py    ← Kịch bản kiểm thử tự động toàn diện RAG pipeline
-└── requirements.txt           ← Danh sách thư viện phụ thuộc Python
+├── scratch/                   ← Kịch bản kiểm thử nhanh
+└── requirements.txt           ← Danh sách thư viện phụ thuộc
 ```
 
 ---
 
 ## 🚀 6. Hướng Dẫn Cài Đặt & Khởi Chạy Nhanh (Installation & Setup)
 
-### ⚠️ Lưu ý Quan trọng về Database Vector
-Vì hệ thống đã di chuyển sang mô hình nhúng mới **PhoBERT SimCSE 768 chiều**, bạn **BẮT BUỘC** phải xóa bỏ database ChromaDB cũ (lưu trữ vector 1024 chiều trước đây) để tránh lỗi không tương thích kích thước ma trận:
-*   Vào thư mục `backend/data/rag/` và xóa bỏ hoàn toàn thư mục **`chroma`** (nếu có).
-
 ### Bước 1: Khởi Tạo Môi Trường Ảo
-Mở PowerShell (Windows) và thực thi:
 ```powershell
-# Tạo và kích hoạt môi trường ảo Python
 python -m venv venv
 venv\Scripts\activate
 ```
 
-### Bước 2: Cài Đặt PyTorch với Hỗ Trợ Tăng Tốc GPU CUDA
-Để đảm bảo các mô hình Abstractive chạy mượt mà trên card đồ họa NVIDIA (khuyên dùng CUDA 12.x):
+### Bước 2: Cài Đặt Phụ Thuộc
 ```powershell
-# Gỡ cài đặt bản CPU mặc định nếu có
-pip uninstall torch torchvision torchaudio -y
-
-# Cài đặt bản hỗ trợ GPU CUDA 12.4
+pip install -r requirements.txt
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-### Bước 3: Cài Đặt Các Thư Viện Phụ Thuộc
-```powershell
-pip install -r requirements.txt
-
-# Tải dữ liệu từ điển hỗ trợ cho NLTK
-python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
-```
-
-### Bước 4: Khởi Chạy Backend FastAPI Server
-```powershell
-# Thiết lập encoding UTF-8 tránh lỗi hiển thị tiếng Việt trên Terminal Windows
-$env:PYTHONIOENCODING="utf-8"
-
-# Chạy Backend trên cổng 8000
-python -m api.main
-```
-*   **Trang Tài liệu API (Swagger UI):** [http://localhost:8000/docs](http://localhost:8000/docs)
-*   **Trang Theo dõi Dashboard chỉ số:** [http://localhost:8000/metrics](http://localhost:8000/metrics) (Theo dõi VRAM, nhiệt độ, tốc độ sinh từ của GPU thực tế).
-
-### Bước 5: Khởi Chạy Giao Diện Frontend React
-Mở một cửa sổ Terminal mới:
+### Bước 3: Khởi Chạy Dịch Vụ
 ```bash
-cd frontend
-npm install
-npm run dev
+python -m api.main
+cd frontend && npm install && npm run dev
 ```
-*   **Địa chỉ ứng dụng:** [http://localhost:5173](http://localhost:5173)
 
 ---
 
 ## 🧪 7. Xác Minh Hệ Thống & Kiểm Thử Nghiên Cứu (Evaluation & Verification)
 
-Để thuận tiện cho việc báo cáo kết quả trước Hội đồng khoa học, hệ thống cung cấp một script kiểm thử tự động toàn diện luồng RAG, Hybrid Search và Reranking độc lập không cần khởi động Frontend:
-
+### Chạy Batch Evaluation (Cho Luận Văn)
 ```bash
-python scratch/verify_rag_quick.py
+# Thống kê học thuật dataset VietNews
+python scripts/dataset_stats.py --samples 10000
+
+# Đánh giá 3 thuật toán extractive (nhanh, không cần GPU)
+python scripts/run_evaluation.py --skip_abstractive --samples 200
+
+# Đánh giá toàn bộ 6 thuật toán (cần GPU + fine-tuned models)
+python scripts/run_evaluation.py --samples 500
 ```
+
+### Kiểm Thử RAG Pipeline
 
 **Kịch bản kiểm thử sẽ thực hiện:**
 1.  Khởi tạo bộ nhớ tạm thời.
 2.  Nạp một văn bản tài liệu giả lập tiếng Việt dài.
-3.  Thực hiện Chunking tự động.
-4.  Biểu diễn nhúng vector 768-D qua mô hình PhoBERT-SimCSE và ghi dữ liệu thành công vào ChromaDB.
 5.  Thực thi câu hỏi kiểm thử: chạy Hybrid Search (kết hợp vector và từ khóa) để lấy top chunks.
 6.  Đưa qua Cross-Encoder Reranker để xếp hạng và lọc tinh.
 7.  Kết quả kiểm thử hiển thị trực tiếp điểm số `combined_score` và điểm `rerank_score` cực kỳ trực quan trên console, cam kết chất lượng hệ thống hoạt động chính xác 100%.
