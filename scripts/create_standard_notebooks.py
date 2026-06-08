@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def build_notebook(model_name: str, prefix: str, model_id: str, display_name: str):
+def build_notebook(model_name: str, prefix: str, model_id: str, display_name: str, use_fast: bool):
     output_dir = f"./{model_id}-colab-checkpoints"
     final_dir = f"./{model_id}-colab-finetuned"
     zip_name = f"{model_id}-colab-finetuned.zip"
@@ -34,7 +34,7 @@ Cách đưa model về dự án:
     cells.append({"cell_type": "markdown", "metadata": {}, "source": ["## Cell 1 - Cài đặt môi trường và cấu hình\n"]})
 
     # Cell 3: Setup Code
-    setup_code = """!pip install -q -U transformers datasets evaluate rouge-score bert-score accelerate sentencepiece safetensors
+    setup_code = """!pip install -q transformers==4.52.4 tokenizers==0.21.1 sentencepiece==0.2.0 datasets evaluate rouge-score bert-score accelerate safetensors
 
 import inspect
 import os
@@ -93,6 +93,12 @@ CFG = {
     "zip_name": "[ZIP_NAME]",
     "save_to_drive": True,
     "drive_dir": "[DRIVE_DIR]",
+    "eval_strategy": "steps",
+    "eval_steps": 500,
+    "save_strategy": "steps",
+    "save_steps": 500,
+    "no_resume": False,
+    "use_fast": [USE_FAST],
 }
 
 def set_seed(seed: int) -> None:
@@ -111,6 +117,7 @@ print("Config OK:", CFG)
     setup_code = setup_code.replace("[FINAL_DIR]", final_dir)
     setup_code = setup_code.replace("[ZIP_NAME]", zip_name)
     setup_code = setup_code.replace("[DRIVE_DIR]", drive_dir)
+    setup_code = setup_code.replace("[USE_FAST]", "True" if use_fast else "False")
     cells.append({"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": setup_code.splitlines(keepends=True)})
 
     # Cell 4: Markdown block
@@ -153,7 +160,7 @@ display(sample_df[[CFG["source_col"], CFG["target_col"]]])
     cells.append({"cell_type": "markdown", "metadata": {}, "source": ["## Cell 3 - Khám phá phân phối token\n"]})
 
     # Cell 7: Token distribution Code
-    token_dist_code = """tokenizer = AutoTokenizer.from_pretrained(CFG["model_name"], use_fast=False)
+    token_dist_code = """tokenizer = AutoTokenizer.from_pretrained(CFG["model_name"], use_fast=CFG.get("use_fast", True))
 
 def plot_token_distribution(dataset_sample, num_samples=1000):
     sample = dataset_sample.select(range(min(num_samples, len(dataset_sample))))
@@ -266,7 +273,9 @@ def compute_metrics(eval_pred):
     if isinstance(predictions, tuple):
         predictions = predictions[0]
 
-    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    predictions = np.where(predictions != -100, predictions, pad_token_id)
+    labels = np.where(labels != -100, labels, pad_token_id)
     decoded_preds = tokenizer.batch_decode(
         predictions,
         skip_special_tokens=True,
@@ -287,10 +296,24 @@ def compute_metrics(eval_pred):
     )
     return {k: round(v * 100, 4) for k, v in result.items()}
 
+# Mount Google Drive neu save_to_drive la True
+training_output_dir = CFG["output_dir"]
+if CFG.get("save_to_drive", False):
+    try:
+        from google.colab import drive
+        print("[Drive] Dang mount Google Drive...")
+        drive.mount("/content/drive")
+        drive_output_dir = Path(CFG["drive_dir"]) / "checkpoints"
+        drive_output_dir.mkdir(parents=True, exist_ok=True)
+        training_output_dir = str(drive_output_dir)
+        print(f"[Drive] Checkpoints se duoc ghi truc tiep len Google Drive: {training_output_dir}")
+    except Exception as exc:
+        print(f"[Drive] Mount Google Drive that bai, chuyen sang dung thu muc tam: {exc}")
+        training_output_dir = CFG["output_dir"]
+
 def build_training_args():
     kwargs = {
-        "output_dir": CFG["output_dir"],
-        "save_strategy": "epoch",
+        "output_dir": training_output_dir,
         "learning_rate": CFG["lr"],
         "per_device_train_batch_size": CFG["batch_size"],
         "per_device_eval_batch_size": CFG["eval_batch_size"],
@@ -314,9 +337,13 @@ def build_training_args():
 
     signature = inspect.signature(Seq2SeqTrainingArguments.__init__)
     if "eval_strategy" in signature.parameters:
-        kwargs["eval_strategy"] = "epoch"
+        kwargs["eval_strategy"] = CFG.get("eval_strategy", "steps")
     else:
-        kwargs["evaluation_strategy"] = "epoch"
+        kwargs["evaluation_strategy"] = CFG.get("eval_strategy", "steps")
+
+    kwargs["save_strategy"] = CFG.get("save_strategy", "steps")
+    kwargs["save_steps"] = CFG.get("save_steps", 500)
+    kwargs["eval_steps"] = CFG.get("eval_steps", 500)
 
     return Seq2SeqTrainingArguments(**kwargs)
 
@@ -334,8 +361,22 @@ trainer = Seq2SeqTrainer(
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
 )
 
+# Kiem tra xem co checkpoint cu de resume khong
+resume_from_checkpoint = None
+if not CFG.get("no_resume", False):
+    checkpoint_dir = Path(training_output_dir)
+    if checkpoint_dir.exists():
+        checkpoints = [d for d in checkpoint_dir.iterdir() if d.is_dir() and d.name.startswith("checkpoint-")]
+        if checkpoints:
+            resume_from_checkpoint = True
+            print(f"[Trainer] Phat hien checkpoint cu tai {training_output_dir}. Se khoi phuc training tu checkpoint moi nhat...")
+        else:
+            print(f"[Trainer] Khong co checkpoint trong {training_output_dir}. Bat dau training tu dau.")
+    else:
+        print(f"[Trainer] Thu muc checkpoints {training_output_dir} chua ton tai. Bat dau training tu dau.")
+
 print("[Trainer] Bat dau huan luyen...")
-trainer.train()
+trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
 print("[Trainer] Danh gia validation...")
 metrics = trainer.evaluate()
@@ -474,6 +515,7 @@ def main():
             "prefix": "summarize: ",
             "model_id": "vit5",
             "display_name": "ViT5",
+            "use_fast": False,
             "filename": "Colab_ViT5_Training_Standard.ipynb"
         },
         {
@@ -481,6 +523,7 @@ def main():
             "prefix": "",
             "model_id": "bartpho",
             "display_name": "BARTPho",
+            "use_fast": False,
             "filename": "Colab_BARTPho_Training_Standard.ipynb"
         },
         {
@@ -488,6 +531,7 @@ def main():
             "prefix": "summarize: ",
             "model_id": "mt5",
             "display_name": "mT5",
+            "use_fast": True,
             "filename": "Colab_mT5_Training_Standard.ipynb"
         }
     ]
@@ -497,7 +541,8 @@ def main():
             model_name=config["model_name"],
             prefix=config["prefix"],
             model_id=config["model_id"],
-            display_name=config["display_name"]
+            display_name=config["display_name"],
+            use_fast=config["use_fast"]
         )
         path = ROOT / config["filename"]
         with open(path, "w", encoding="utf-8") as f:
