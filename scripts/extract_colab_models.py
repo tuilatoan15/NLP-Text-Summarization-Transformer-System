@@ -57,33 +57,36 @@ def main():
     data_dir = workspace_dir / "data" / "vietnamese-summarization-dataset-0001"
     models_dir = workspace_dir / "models"
     
-    # Define zip configurations
-    configs = [
-        {
-            "zip_name": "vit5-colab-finetuned.zip",
-            "target_dirname": "vit5-finetuned",
-            "expected_prefix": "vit5-colab-finetuned"
-        },
-        {
-            "zip_name": "mt5-colab-finetuned.zip",
-            "target_dirname": "mt5-finetuned",
-            "expected_prefix": "mt5-colab-finetuned"
-        }
-    ]
+    # Define models to look for
+    models_to_check = ["vit5", "mt5", "bartpho"]
     
     found_any = False
-    for cfg in configs:
-        zip_path = data_dir / cfg["zip_name"]
-        target_dir = models_dir / cfg["target_dirname"]
+    for model_id in models_to_check:
+        # Check both naming conventions: model-finetuned.zip and model-colab-finetuned.zip
+        candidates = [
+            f"{model_id}-finetuned.zip",
+            f"{model_id}-colab-finetuned.zip"
+        ]
         
-        if zip_path.exists():
+        zip_path = None
+        for candidate in candidates:
+            temp_path = data_dir / candidate
+            if temp_path.exists():
+                zip_path = temp_path
+                break
+                
+        target_dir = models_dir / f"{model_id}-finetuned"
+        
+        if zip_path:
             found_any = True
+            # The expected prefix folder inside the zip matches the zip file name without extension
+            expected_prefix = zip_path.stem
             try:
-                extract_zip(zip_path, target_dir, cfg["expected_prefix"])
+                extract_zip(zip_path, target_dir, expected_prefix)
             except Exception as e:
-                print(f"[-] Error extracting {cfg['zip_name']}: {str(e)}")
+                print(f"[-] Error extracting {zip_path.name}: {str(e)}")
         else:
-            print(f"[i] Zip file {cfg['zip_name']} not found in {data_dir.relative_to(workspace_dir)} - Skipping.")
+            print(f"[i] No zip file found for {model_id} (tried {', '.join(candidates)}) in {data_dir.relative_to(workspace_dir)} - Skipping.")
 
     if not found_any:
         print("[-] No zip files found to extract in data/vietnamese-summarization-dataset-0001.")
