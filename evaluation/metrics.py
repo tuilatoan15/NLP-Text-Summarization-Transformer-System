@@ -15,7 +15,7 @@ from rouge_score import rouge_scorer
 
 from src import config
 from src.preprocess import clean_text, tokenize_words
-from src.utils import compression_ratio, logger
+from src.utils import MODEL_LOAD_LOCK, compression_ratio, logger
 
 
 _ROUGE_SCORER = rouge_scorer.RougeScorer(
@@ -124,14 +124,15 @@ def compute_bertscore(
         import torch
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        precision, recall, f1 = bert_score_fn(
-            [prediction], [reference],
-            lang=lang,
-            model_type=model_type,
-            verbose=False,
-            rescale_with_baseline=False,
-            device=device,
-        )
+        with MODEL_LOAD_LOCK:
+            precision, recall, f1 = bert_score_fn(
+                [prediction], [reference],
+                lang=lang,
+                model_type=model_type,
+                verbose=False,
+                rescale_with_baseline=False,
+                device=device,
+            )
         return {
             "precision": round(float(precision[0]), 4),
             "recall": round(float(recall[0]), 4),
@@ -157,7 +158,7 @@ def _load_sentence_transformer(model_name: str):
     """
     if model_name in _SBERT_CACHE:
         return _SBERT_CACHE[model_name]
-    with _SBERT_LOAD_LOCK:
+    with MODEL_LOAD_LOCK:
         # Double-checked locking: another thread may have loaded while we waited.
         if model_name not in _SBERT_CACHE:
             from sentence_transformers import SentenceTransformer

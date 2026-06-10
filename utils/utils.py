@@ -6,12 +6,16 @@ import json
 import logging
 import sys
 import time
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Generator
 
 from src import config
+
+# Global reentrant lock to prevent PyTorch/Transformers race conditions during model loading across threads
+MODEL_LOAD_LOCK = threading.RLock()
 
 
 for _stream in (sys.stdout, sys.stderr):

@@ -115,6 +115,10 @@ def _build_generation_preset(
     word_budget: int,
     *,
     num_beams: Optional[int] = None,
+    temperature: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
+    do_sample: Optional[bool] = None,
+    length_penalty: Optional[float] = None,
     force_greedy: bool = False,
 ) -> dict:
     """Build the generation config dict for a given key and word budget.
@@ -145,6 +149,14 @@ def _build_generation_preset(
 
     if num_beams is not None:
         base["num_beams"] = num_beams
+    if do_sample is not None:
+        base["do_sample"] = do_sample
+    if temperature is not None:
+        base["temperature"] = temperature
+    if repetition_penalty is not None:
+        base["repetition_penalty"] = repetition_penalty
+    if length_penalty is not None:
+        base["length_penalty"] = length_penalty
 
     if force_greedy:
         base["do_sample"] = False
@@ -165,6 +177,10 @@ def _generate_one(
     max_word_budget: Optional[int] = None,
     min_word_budget: Optional[int] = None,
     num_beams: Optional[int] = None,
+    temperature: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
+    do_sample: Optional[bool] = None,
+    length_penalty: Optional[float] = None,
 ) -> str:
     """Generate a single summary from `text` using model `key`.
 
@@ -187,7 +203,15 @@ def _generate_one(
     encoded = {k: v.to(device) for k, v in encoded.items()}
 
     word_budget = max(12, int(max_word_budget or config.MAX_OUTPUT_LENGTH))
-    gen_preset = _build_generation_preset(key, word_budget, num_beams=num_beams)
+    gen_preset = _build_generation_preset(
+        key,
+        word_budget,
+        num_beams=num_beams,
+        temperature=temperature,
+        repetition_penalty=repetition_penalty,
+        do_sample=do_sample,
+        length_penalty=length_penalty,
+    )
     if min_word_budget is not None:
         gen_preset["min_new_tokens"] = min(
             gen_preset["max_new_tokens"] - 1,
@@ -274,6 +298,10 @@ def _generate_chunks_parallel(
     budgets: list[int],
     min_output_length: int,
     num_beams: int,
+    temperature: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
+    do_sample: Optional[bool] = None,
+    length_penalty: Optional[float] = None,
 ) -> list[str]:
     """Run _generate_one() for each chunk in parallel using a thread pool.
 
@@ -297,6 +325,10 @@ def _generate_chunks_parallel(
                 max_word_budget=budget,
                 min_word_budget=min(min_output_length, max(12, budget // 3)),
                 num_beams=num_beams,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
+                do_sample=do_sample,
+                length_penalty=length_penalty,
             )
     else:
         # Parallel path (CPU or multi-GPU setups)
@@ -312,6 +344,10 @@ def _generate_chunks_parallel(
                     budget,
                     min(min_output_length, max(12, budget // 3)),
                     num_beams,
+                    temperature,
+                    repetition_penalty,
+                    do_sample,
+                    length_penalty,
                 ): i
                 for i, (chunk, budget) in enumerate(zip(chunks, budgets))
             }
@@ -336,6 +372,10 @@ def abstractive_summarize_key(
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
     min_output_length: int = config.MIN_OUTPUT_LENGTH,
     num_beams: int = config.NUM_BEAMS,
+    temperature: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
+    do_sample: Optional[bool] = None,
+    length_penalty: Optional[float] = None,
 ) -> str:
     text = clean_text(text, aggressive=True)
     if not text:
@@ -354,7 +394,11 @@ def abstractive_summarize_key(
 
         chunk_budgets = allocate_chunk_word_budgets(chunks, target_words)
         partials = _generate_chunks_parallel(
-            key, chunks, chunk_budgets, min_output_length, num_beams
+            key, chunks, chunk_budgets, min_output_length, num_beams,
+            temperature=temperature,
+            repetition_penalty=repetition_penalty,
+            do_sample=do_sample,
+            length_penalty=length_penalty,
         )
 
         merged = " ".join(p for p in partials if p)
@@ -374,6 +418,10 @@ def abstractive_summarize_key(
                 max_word_budget=target_words,
                 min_word_budget=max(min_output_length, target_words // 4),
                 num_beams=num_beams,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
+                do_sample=do_sample,
+                length_penalty=length_penalty,
             )
             merged = clean_generated_summary(merged)
 
@@ -389,6 +437,10 @@ def abstractive_summarize_key(
                 max_word_budget=target_words,
                 min_word_budget=max(min_output_length, target_words // 4),
                 num_beams=num_beams,
+                temperature=temperature,
+                repetition_penalty=repetition_penalty,
+                do_sample=do_sample,
+                length_penalty=length_penalty,
             )
             merged = clean_generated_summary(merged)
 
@@ -406,6 +458,10 @@ def abstractive_summarize_key(
         max_word_budget=target_words,
         min_word_budget=min_output_length,
         num_beams=num_beams,
+        temperature=temperature,
+        repetition_penalty=repetition_penalty,
+        do_sample=do_sample,
+        length_penalty=length_penalty,
     )
 
 
@@ -447,6 +503,10 @@ class AbstractiveSummarizer:
         max_output_length: Optional[int] = None,
         min_output_length: Optional[int] = None,
         num_beams: Optional[int] = None,
+        temperature: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+        do_sample: Optional[bool] = None,
+        length_penalty: Optional[float] = None,
         chunk_long_text: bool = True,
     ) -> str:
         return abstractive_summarize_key(
@@ -455,6 +515,10 @@ class AbstractiveSummarizer:
             max_output_length=max_output_length or self.max_output_length,
             min_output_length=min_output_length or self.min_output_length,
             num_beams=num_beams or self.num_beams,
+            temperature=temperature,
+            repetition_penalty=repetition_penalty,
+            do_sample=do_sample,
+            length_penalty=length_penalty,
         )
 
     def explain_tokens(self, source_text: str, summary: str, limit: int = 40) -> list[dict]:

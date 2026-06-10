@@ -26,7 +26,7 @@ class HybridSummarizer:
 
     def __init__(self, abstractive_model_key: str = "vit5") -> None:
         self.abstractive_model_key = abstractive_model_key
-        self.abstractive_engine = AbstractiveSummarizer()
+        self.abstractive_engine = AbstractiveSummarizer(model_name=abstractive_model_key)
 
     def summarize(
         self,
@@ -83,7 +83,8 @@ class HybridSummarizer:
             extractive_runner = EXTRACTIVE_RUNNERS["textrank"]
             
         # Lấy bản tóm tắt extractive
-        condensed_text = extractive_runner(cleaned_text, sentence_count=num_sentences)
+        condensed_details = extractive_runner(cleaned_text, sentence_count=num_sentences)
+        condensed_text = condensed_details.get("summary", "")
         
         condensed_word_count = count_words(condensed_text)
         logger.info(
@@ -119,10 +120,9 @@ class HybridSummarizer:
     ) -> str:
         """Thực hiện chạy tóm tắt Abstractive trực tiếp từ model engine."""
         try:
-            summary = self.abstractive_engine.abstractive_summarize_key(
+            summary = self.abstractive_engine.summarize(
                 text=text,
-                model_key=self.abstractive_model_key,
-                max_length=max_length,
+                max_output_length=max_length,
                 temperature=temperature,
                 num_beams=num_beams,
                 repetition_penalty=repetition_penalty

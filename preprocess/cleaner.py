@@ -46,6 +46,15 @@ class DocumentCleaner:
         elements = deepcopy(document.elements)
         warnings = list(document.warnings)
 
+        if getattr(self.config, "clean_vietnamese_admin", True):
+            from preprocess.admin_cleaner import AdministrativeDocumentCleaner
+            admin_cleaner = AdministrativeDocumentCleaner(clean_enabled=True)
+            orig_count = len(elements)
+            elements = admin_cleaner.clean_elements(elements, document.text)
+            removed = orig_count - len(elements)
+            if removed > 0:
+                warnings.append(f"Removed {removed} administrative metadata elements.")
+
         if self.config.remove_headers_footers:
             elements, removed = self._remove_repeated_headers_footers(elements)
             if removed:

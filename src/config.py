@@ -61,40 +61,36 @@ ABSTRACTIVE_MAX_CHUNKS = int(os.getenv("ABSTRACTIVE_MAX_CHUNKS", "16"))
 # Keys must match ABSTRACTIVE_ALGORITHMS keys in model_registry.py
 GENERATION_CONFIGS: dict[str, dict] = {
     # ViT5: T5 tiếng Việt fine-tuned.
-    # Repetition loop là lỗi #1 → penalty mạnh + ngram lớn.
-    # num_beams=2 giữ tốc độ ổn; penalty=2.5 + ngram=5 chặn vòng lặp hiệu quả.
+    # Su dung repetition_penalty=1.2 va no_repeat_ngram_size=3 de dam bao cau logic tu nhien.
     "vit5": dict(
         max_new_tokens=120,
         min_new_tokens=20,
-        num_beams=2,
-        no_repeat_ngram_size=5,
-        repetition_penalty=2.5,
-        length_penalty=1.05,
+        num_beams=4,
+        no_repeat_ngram_size=3,
+        repetition_penalty=1.2,
+        length_penalty=1.0,
         early_stopping=True,
         do_sample=False,
     ),
-    # mT5: đa ngôn ngữ — dùng sampling để tránh beam instability.
-    # temperature=0.7, top_p=0.85 cho output tập trung hơn.
-    # repetition_penalty=2.0 để chặn multilingual garbage.
+    # mT5: da ngon ngu. Ha repetition_penalty de tranh lam meo mo tu vung sinh ra rac.
     "mt5": dict(
         max_new_tokens=80,
         min_new_tokens=10,
         num_beams=4,
         no_repeat_ngram_size=3,
-        repetition_penalty=3.0,
-        length_penalty=0.8,
+        repetition_penalty=1.15,
+        length_penalty=1.0,
         early_stopping=True,
         do_sample=False,
     ),
-    # BARTPho: BART syllable-level của VinAI.
-    # num_beams=4 cho diversity tốt; penalty cao để tránh hallucinate.
+    # BARTPho: BART syllable-level. Su dung repetition_penalty va length_penalty hop ly.
     "bartpho": dict(
         max_new_tokens=160,
         min_new_tokens=25,
         num_beams=4,
-        no_repeat_ngram_size=5,
-        repetition_penalty=2.0,
-        length_penalty=1.2,
+        no_repeat_ngram_size=3,
+        repetition_penalty=1.15,
+        length_penalty=1.0,
         early_stopping=True,
         do_sample=False,
         forced_bos_token_id=None,

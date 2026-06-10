@@ -58,7 +58,7 @@ def is_garbled_abstractive(text: str) -> bool:
     text_nfc = unicodedata.normalize("NFC", text)
     if is_multilingual_garbage(text_nfc, require_vietnamese=False):
         return True
-    if detect_garbled_text(text_nfc, single_letter_threshold=0.10):
+    if detect_garbled_text(text_nfc, single_letter_threshold=0.30):
         return True
 
     words = text_nfc.split()
@@ -70,7 +70,7 @@ def is_garbled_abstractive(text: str) -> bool:
         return True
 
     short_tokens = sum(1 for w in words if len(w) <= 2)
-    if short_tokens / len(words) > 0.45:
+    if short_tokens / len(words) > 0.60:
         return True
 
     if re.search(r"\b(WỴ|nhóm!|sinh nhóm|Viet Q\.)\b", text_nfc, flags=re.IGNORECASE):

@@ -107,6 +107,7 @@ class CleaningConfig:
     reconstruct_paragraphs: bool = True
     semantic_filtering: bool = True
     min_quality_score: float = 0.25
+    clean_vietnamese_admin: bool = True
 
 
 @dataclass(slots=True)

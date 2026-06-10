@@ -30,6 +30,73 @@ VN_STOPWORDS = {
 }
 
 
+def fix_vietnamese_ocr_spacing(text: str) -> str:
+    if not text:
+        return ""
+    # Mapping of specific common Vietnamese glued word combinations from PDF/OCR
+    glued_patterns = {
+        "chủnghĩa": "chủ nghĩa",
+        "tựdo": "tự do",
+        "đồán": "đồ án",
+        "đềtài": "đề tài",
+        "tựđộng": "tự động",
+        "sửdụng": "sử dụng",
+        "hệthống": "hệ thống",
+        "ngữnghĩa": "ngữ nghĩa",
+        "từkhóa": "từ khóa",
+        "tựnhiên": "tự nhiên",
+        "xửlý": "xử lý",
+        "ngữcảnh": "ngữ cảnh",
+        "họtên": "họ tên",
+        "nộidung": "nội dung",
+        "kếtquả": "kết quả",
+        "đạtđược": "đạt được",
+        "cánbộ": "cán bộ",
+        "sinhviên": "sinh viên",
+        "phânhiệu": "phân hiệu",
+        "bộmôn": "bộ môn",
+        "tiếnđộ": "tiến độ",
+        "thựchiện": "thực hiện",
+        "hướngdẫn": "hướng dẫn",
+        "môhình": "mô hình",
+        "tiếngviệt": "tiếng Việt",
+        "dunglượng": "dung lượng",
+        "bằngcách": "bằng cách",
+        "lấydúng": "lấy đúng",
+        "ngắngọn": "ngắn gọn",
+        "huấnluyện": "huấn luyện",
+        "chạythử": "chạy thử",
+        "trênmáy": "trên máy",
+        "bộnhớ": "bộ nhớ",
+        "trànbộ": "tràn bộ",
+        "ngônngữ": "ngôn ngữ",
+        "độthực": "độ thực",
+        "ngữtự": "ngữ tự",
+        "nhỏnội": "nhỏ nội",
+        "đểhệ": "để hệ",
+        "đểlấy": "để lấy",
+        "đểtạo": "để tạo",
+        "vụhuấn": "vụ huấn",
+        "thửtrên": "thử trên",
+        "bộhướng": "bộ hướng",
+        "cánbộhướng": "cán bộ hướng",
+        "độc lập": "độc lập",
+        "hạnh phúc": "hạnh phúc",
+    }
+    
+    for pattern, replacement in glued_patterns.items():
+        def repl(match):
+            m = match.group(0)
+            if m.isupper():
+                return replacement.upper()
+            if m[0].isupper():
+                return " ".join(w.capitalize() for w in replacement.split())
+            return replacement
+            
+        text = re.sub(re.escape(pattern), repl, text, flags=re.IGNORECASE)
+    return text
+
+
 def normalize_unicode(text: str) -> str:
     return unicodedata.normalize("NFC", text or "")
 
@@ -157,12 +224,15 @@ def dedupe_similar_sentences(sentences: list[str]) -> list[str]:
 def clean_text(text: str, aggressive: bool = False) -> str:
     if not text:
         return ""
+    text = fix_vietnamese_ocr_spacing(text)
     text = remove_html_tags(text)
     text = normalize_unicode(text)
     if aggressive:
         text = URL_RE.sub(" ", text)
         text = EMAIL_RE.sub(" ", text)
         text = strip_editorial_chrome(text)
+        from preprocess.admin_cleaner import AdministrativeDocumentCleaner
+        text = AdministrativeDocumentCleaner(clean_enabled=True).clean(text)
     text = normalize_punctuation(text)
     text = remove_noise_characters(text)
     text = normalize_whitespace(text)
@@ -225,6 +295,25 @@ def is_probably_bad_generation(text: str) -> bool:
     return weird_ratio > 0.08
 
 
+def _clean_incomplete_sentence(text: str) -> str:
+    """
+    Tự động tìm kiếm dấu chấm câu cuối cùng trong văn bản tóm tắt sinh ra 
+    và loại bỏ phần chữ thừa bị dở dang phía sau dấu chấm đó do chạm trần token.
+    """
+    text = (text or "").strip()
+    if not text:
+        return ""
+    # Kiểm tra xem chuỗi đã kết thúc bằng một dấu chấm câu chuẩn (. ! ? … ” ") hay chưa
+    if re.search(r'[.!?…]["”]?\s*$', text):
+        return text
+    # Tìm kiếm tất cả các vị trí kết thúc câu trong chuỗi
+    ends = list(re.finditer(r'[.!?…]["”]?', text))
+    if not ends:
+        return text
+    # Cắt đến dấu kết thúc câu cuối cùng
+    return text[:ends[-1].end()].strip()
+
+
 def clean_generated_summary(text: str) -> str:
     if not text:
         return ""
@@ -271,11 +360,13 @@ def clean_generated_summary(text: str) -> str:
     text = re.sub(r"\s*([.,;:!?])\s*", r"\1 ", text)
     text = re.sub(r"\s+([.,;:!?])", r"\1", text)
 
-    text = text.lstrip(".,;:!? ")
+    # Strip leading formatting artifacts, bullet points, colons, and spaces
+    text = re.sub(r"^[\s\.\,\;\:\!\?\-\*\•\•\:\+\=\#\@\$\%\^\&\(\)\[\]\{\}\<\>\\\/\|\_]+", "", text)
 
     text = post_clean_vit5_telex(text)
 
     text = normalize_whitespace(text)
+    text = _clean_incomplete_sentence(text)
     return fix_decimal_spacing(text)
 
 
