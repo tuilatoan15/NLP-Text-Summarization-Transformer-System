@@ -8,6 +8,7 @@ const Overview = lazy(() => import('./pages/Overview'));
 const Playground = lazy(() => import('./pages/Playground'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Chat = lazy(() => import('./pages/Chat'));
+const Compare = lazy(() => import('./pages/Compare'));
 const DocumentLayout = lazy(() => import('./pages/documents/DocumentLayout'));
 const DocumentEvaluation = lazy(() => import('./pages/documents/DocumentEvaluation'));
 const DocumentExplainability = lazy(() => import('./pages/documents/DocumentExplainability'));
@@ -25,8 +26,8 @@ const App = () => {
             <Route path="/chat" element={<Chat />} />
             <Route path="/analytics" element={<Analytics />} />
 
-            {/* AI features (reuse existing pages for now) */}
-            <Route path="/compare" element={<Playground />} />
+            {/* AI features */}
+            <Route path="/compare" element={<Compare />} />
             <Route path="/search" element={<Chat />} />
 
             {/* Document routes */}

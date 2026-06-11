@@ -153,3 +153,43 @@ export async function exportPodcastTts(documentId: string): Promise<any> {
   const response = await fetch(`${API}/documents/${documentId}/podcast/tts`, { method: 'POST' });
   return parseJson(response, 'Podcast TTS');
 }
+
+export async function getResearchLeaderboard(): Promise<any> {
+  const response = await fetch(`${API}/research/leaderboard`);
+  return parseJson(response, 'Research leaderboard');
+}
+
+export async function getResearchBenchmarkSamples(
+  page = 1,
+  limit = 10,
+  category = 'All',
+  search = '',
+): Promise<any> {
+  const url = new URL(`${API}/research/benchmark/samples`);
+  url.searchParams.append('page', String(page));
+  url.searchParams.append('limit', String(limit));
+  if (category && category !== 'All') {
+    url.searchParams.append('category', category);
+  }
+  if (search) {
+    url.searchParams.append('search', search);
+  }
+  const response = await fetch(url.toString());
+  return parseJson(response, 'Research benchmark samples');
+}
+
+export async function getResearchHybridStudy(): Promise<any> {
+  const response = await fetch(`${API}/research/hybrid-study`);
+  return parseJson(response, 'Research hybrid study');
+}
+
+export async function getResearchReport(): Promise<any> {
+  const response = await fetch(`${API}/research/report`);
+  return parseJson(response, 'Research report');
+}
+
+export async function runResearchBenchmark(): Promise<any> {
+  const response = await fetch(`${API}/research/benchmark/run`, { method: 'POST' });
+  return parseJson(response, 'Run research benchmark');
+}
+
