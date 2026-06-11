@@ -99,11 +99,16 @@ def _run_abstractive(
     key: str,
     max_output_length: int,
     sentence_count: int,
+    min_output_length: int | None = None,
 ) -> tuple[str, dict]:
     log_vram_usage(f"before_{key}")
     with _GPU_LOCK:
         summarizer = get_summarizer(model_name=key)
-        summary = summarizer.summarize(text, max_output_length=max_output_length)
+        summary = summarizer.summarize(
+            text, 
+            max_output_length=max_output_length,
+            min_output_length=min_output_length,
+        )
         if summary:
             summary = _clean_incomplete_sentence(summary)
 
@@ -161,6 +166,7 @@ def _evaluate_result(
     max_output_length: int,
     target_words: int | None = None,
     source_words: int | None = None,
+    summary_length: str = "auto",
 ) -> dict:
     algorithm = resolve_algorithm(key)
     start = time.perf_counter()
@@ -168,16 +174,29 @@ def _evaluate_result(
     explainability: dict = {}
 
     try:
-        if algorithm.key in EXTRACTIVE_ALGORITHMS:
-            summary, explainability = _run_extractive(text, algorithm.key, sentence_count)
-            training_quality: dict = {"is_poor_training": False, "reason": None}
-        elif algorithm.key in ABSTRACTIVE_ALGORITHMS:
-            summary, explainability = _run_abstractive(
-                text, algorithm.key, max_output_length, sentence_count
+        from src.utils import count_words
+        if count_words(text) > 10000:
+            from src.length_control import SummaryLengthManager
+            group = "extractive" if algorithm.key in EXTRACTIVE_ALGORITHMS else "abstractive"
+            summary = SummaryLengthManager.hierarchical_summarize_pipeline(
+                text, algorithm.key, summary_length, group
             )
-            training_quality = explainability.pop("training_quality", {"is_poor_training": False, "reason": None})
+            explainability = {"hierarchical": True}
+            training_quality = {"is_poor_training": False, "reason": None}
         else:
-            raise KeyError(f"Unsupported algorithm: {algorithm.key}")
+            if algorithm.key in EXTRACTIVE_ALGORITHMS:
+                summary, explainability = _run_extractive(text, algorithm.key, sentence_count)
+                training_quality = {"is_poor_training": False, "reason": None}
+            elif algorithm.key in ABSTRACTIVE_ALGORITHMS:
+                from src.length_control import SummaryLengthManager
+                analysis = SummaryLengthManager.analyze_input(text)
+                min_tokens, _ = SummaryLengthManager.get_abstractive_limits(algorithm.key, summary_length, analysis)
+                summary, explainability = _run_abstractive(
+                    text, algorithm.key, max_output_length, sentence_count, min_output_length=min_tokens
+                )
+                training_quality = explainability.pop("training_quality", {"is_poor_training": False, "reason": None})
+            else:
+                raise KeyError(f"Unsupported algorithm: {algorithm.key}")
     except Exception as exc:
         logger.exception("Algorithm %s failed", algorithm.key)
         error = str(exc)
@@ -266,6 +285,7 @@ def _run_all_parallel(
     max_output_length: int,
     target_words: int,
     source_words: int,
+    summary_length: str = "auto",
 ) -> list[dict]:
     results: dict[str, dict] = {}
 
@@ -285,6 +305,7 @@ def _run_all_parallel(
                     max_output_length,
                     target_words,
                     source_words,
+                    summary_length,
                 ): key
                 for key in extractive_keys
             }
@@ -307,6 +328,7 @@ def _run_all_parallel(
                     max_output_length,
                     target_words,
                     source_words,
+                    summary_length,
                 ): key
                 for key in abstractive_keys
             }
@@ -407,22 +429,35 @@ def _prepare_compare(
     max_output_length: int,
     target_length_ratio: int | None = None,
     use_length_ratio: bool = True,
+    summary_length: str = "auto",
 ) -> tuple[str, str, bool, list[str], list[str], list[str], int, int, int, int, dict]:
     cleaned = clean_text(text, aggressive=True)
     if not cleaned or count_words(cleaned) < 5:
         raise ValueError("Input text is empty or too short after preprocessing.")
+
+    from src.length_control import SummaryLengthManager
+
+    analysis = SummaryLengthManager.analyze_input(cleaned)
+    resolved_sentence_count = SummaryLengthManager.get_extractive_sentences(summary_length, analysis)
+    min_tokens, resolved_max_output = SummaryLengthManager.get_abstractive_limits("", summary_length, analysis)
 
     from src.length_control import compute_length_targets
 
     length_meta = compute_length_targets(
         cleaned,
         target_length_ratio if target_length_ratio is not None else 100,
-        sentence_count=sentence_count if not use_length_ratio else None,
-        max_output_length=max_output_length if not use_length_ratio else None,
+        sentence_count=resolved_sentence_count,
+        max_output_length=resolved_max_output,
     )
-    if use_length_ratio and target_length_ratio is not None:
-        sentence_count = length_meta["sentence_count"]
-        max_output_length = length_meta["max_output_length"]
+    
+    # Override settings with SummaryLengthManager resolved values
+    sentence_count = resolved_sentence_count
+    max_output_length = resolved_max_output
+    
+    length_meta["summary_length"] = summary_length
+    length_meta["analysis"] = analysis
+    length_meta["min_output_length"] = min_tokens
+    length_meta["is_extremely_long"] = analysis["is_extremely_long"]
 
     normalized_keys = _normalize_algorithm_keys(algorithms)
     reference_provided = bool(reference and clean_text(reference, aggressive=True))
@@ -438,7 +473,7 @@ def _prepare_compare(
         abstractive_keys,
         sentence_count,
         max_output_length,
-        length_meta["target_words"] if use_length_ratio else None,
+        length_meta["target_words"],
         length_meta["target_length_ratio"],
         length_meta,
     )
@@ -556,6 +591,7 @@ def summarize_all(
     target_length_ratio: int = 50,
     use_length_ratio: bool = True,
     use_cache: bool = False,
+    summary_length: str = "auto",
 ) -> dict:
     del use_cache
 
@@ -579,6 +615,7 @@ def summarize_all(
         max_output_length,
         target_length_ratio=target_length_ratio,
         use_length_ratio=use_length_ratio,
+        summary_length=summary_length,
     )
 
     source_words = count_words(cleaned)
@@ -592,6 +629,7 @@ def summarize_all(
         max_output_length,
         target_words,
         source_words,
+        summary_length=summary_length,
     )
     total_wall = time.perf_counter() - t_total
     logger.info(
@@ -631,6 +669,7 @@ def stream_compare(
     target_length_ratio: int = 50,
     use_length_ratio: bool = True,
     save_result: bool = True,
+    summary_length: str = "auto",
 ):
     try:
         (
@@ -653,6 +692,7 @@ def stream_compare(
             max_output_length,
             target_length_ratio=target_length_ratio,
             use_length_ratio=use_length_ratio,
+            summary_length=summary_length,
         )
     except ValueError as exc:
         yield _sse("error", error=str(exc))
@@ -681,6 +721,7 @@ def stream_compare(
                         max_output_length,
                         target_words,
                         source_words,
+                        summary_length,
                     ): key
                     for key in extractive_keys
                 }
@@ -702,6 +743,7 @@ def stream_compare(
                 max_output_length,
                 target_words,
                 source_words,
+                summary_length,
             )
             results_by_key[key] = row
             yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))

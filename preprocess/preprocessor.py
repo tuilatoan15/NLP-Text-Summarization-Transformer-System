@@ -43,7 +43,7 @@ def fix_vietnamese_ocr_spacing(text: str) -> str:
         "sửdụng": "sử dụng",
         "hệthống": "hệ thống",
         "ngữnghĩa": "ngữ nghĩa",
-        "từkhóa": "từ khóa",
+        "tựkhóa": "từ khóa",
         "tựnhiên": "tự nhiên",
         "xửlý": "xử lý",
         "ngữcảnh": "ngữ cảnh",
@@ -82,6 +82,19 @@ def fix_vietnamese_ocr_spacing(text: str) -> str:
         "cánbộhướng": "cán bộ hướng",
         "độc lập": "độc lập",
         "hạnh phúc": "hạnh phúc",
+        "độchính": "độ chính",
+        "trảlời": "trả lời",
+        "chínhxác": "chính xác",
+        "câutrả": "câu trả",
+        "nghiêncứu": "nghiên cứu",
+        "pháttriển": "phát triển",
+        "dựán": "dự án",
+        "thôngtin": "thông tin",
+        "tốtnghiệp": "tốt nghiệp",
+        "côngnghệ": "công nghệ",
+        "nghệthông": "nghệ thông",
+        "họctập": "học tập",
+        "vănbản": "văn bản",
     }
     
     for pattern, replacement in glued_patterns.items():

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Moon, Sun, Bell, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  Search, Moon, Sun, Bell, CheckCircle2, AlertCircle, Info, X, Command,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const typeIcon = {
@@ -15,14 +17,27 @@ const typeColor = {
   info: 'text-blue-500',
 };
 
+const routeLabels = {
+  '/': 'Dashboard',
+  '/summarize': 'Tóm tắt',
+  '/chat': 'Chat với Tài liệu',
+  '/compare': 'So sánh Mô hình',
+  '/search': 'Semantic Search',
+  '/analytics': 'Phân tích & Báo cáo',
+  '/settings': 'Cài đặt',
+  '/documents': 'Tài liệu',
+};
+
 const Header = () => {
   const {
-    theme, isDark, locale, toggleTheme, setLanguage, t,
+    isDark, locale, toggleTheme, setLanguage, t,
     notifications, notifOpen, setNotifOpen, unreadCount,
     markAsRead, markAllRead, clearNotifications,
     requestNotificationPermission, formatTimeAgo,
+    setCommandPaletteOpen,
   } = useApp();
 
+  const location = useLocation();
   const panelRef = useRef(null);
   const bellRef = useRef(null);
 
@@ -40,51 +55,78 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [notifOpen, setNotifOpen]);
 
+  const pageLabel = routeLabels[location.pathname] || location.pathname;
+
   return (
-    <header className="bg-[var(--surface-elevated)] border-b border-[var(--border)] h-16 flex items-center justify-between px-6 sticky top-0 z-20 w-full transition-colors duration-200 backdrop-blur-sm bg-opacity-95 dark:bg-opacity-95">
-      <div className="flex-1 max-w-xl">
-        <div className="relative group">
-          <Search className="w-4 h-4 text-gray-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder={t('searchPlaceholder')}
-            className="ui-input !pl-10 bg-[var(--surface-inset)] border-transparent focus:border-[var(--border)]"
-          />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1">
-            <kbd className="border border-gray-200 dark:border-slate-600 rounded px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 shadow-sm">Ctrl</kbd>
-            <kbd className="border border-gray-200 dark:border-slate-600 rounded px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 shadow-sm">K</kbd>
-          </div>
-        </div>
+    <header
+      className="h-14 flex items-center justify-between px-5 sticky top-0 z-20 w-full border-b transition-colors duration-150"
+      style={{
+        backgroundColor: 'var(--bg-elevated)',
+        borderColor: 'var(--border)',
+      }}
+    >
+      {/* Left: Breadcrumb + Search trigger */}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-1.5 text-sm min-w-0">
+          <span className="text-[var(--text-faint)] hidden sm:inline">AI Document Hub</span>
+          <span className="text-[var(--text-faint)] hidden sm:inline">/</span>
+          <span className="font-semibold text-[var(--text-primary)] truncate">{pageLabel}</span>
+        </nav>
       </div>
 
-      <div className="flex items-center gap-3 ml-4">
-        {/* VIE / ENG */}
+      {/* Right: Actions */}
+      <div className="flex items-center gap-1">
+        {/* Command Palette Trigger */}
+        <button
+          type="button"
+          onClick={() => setCommandPaletteOpen(true)}
+          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors duration-150 cursor-pointer"
+          style={{
+            backgroundColor: 'var(--bg-muted)',
+            color: 'var(--text-faint)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <Search className="w-3.5 h-3.5" />
+          <span>{t('searchPlaceholder')}</span>
+          <div className="flex items-center gap-0.5 ml-2">
+            <kbd className="ui-kbd">⌘</kbd>
+            <kbd className="ui-kbd">K</kbd>
+          </div>
+        </button>
+
+        {/* Spacer */}
+        <div className="w-px h-5 mx-1 hidden sm:block" style={{ backgroundColor: 'var(--border)' }} />
+
+        {/* Language */}
         <div
-          className="flex items-center gap-0.5 bg-gray-100 dark:bg-slate-800 rounded-lg p-1"
+          className="flex items-center gap-0.5 p-0.5 rounded-lg"
+          style={{ backgroundColor: 'var(--bg-muted)' }}
           role="group"
           aria-label="Language"
         >
           <button
             type="button"
             onClick={() => setLanguage('vie')}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+            className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
               locale === 'vie'
-                ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
+                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm'
+                : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]'
             }`}
           >
-            {t('langVie')}
+            VI
           </button>
           <button
             type="button"
             onClick={() => setLanguage('eng')}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+            className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
               locale === 'eng'
-                ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
+                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm'
+                : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]'
             }`}
           >
-            {t('langEng')}
+            EN
           </button>
         </div>
 
@@ -93,9 +135,9 @@ const Header = () => {
           type="button"
           onClick={toggleTheme}
           title={isDark ? t('themeLight') : t('themeDark')}
-          className="p-2 text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-full transition-colors"
+          className="ui-btn-icon cursor-pointer"
         >
-          {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
 
         {/* Notifications */}
@@ -105,35 +147,50 @@ const Header = () => {
             type="button"
             onClick={() => setNotifOpen(v => !v)}
             title={t('notifications')}
-            className="p-2 text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-full transition-colors relative"
+            className="ui-btn-icon relative cursor-pointer"
           >
-            <Bell className="w-5 h-5" />
+            <Bell className="w-4 h-4" />
             {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 min-w-[8px] h-2 px-0.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900" title={String(unreadCount)} />
+              <span
+                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2"
+                style={{
+                  backgroundColor: 'var(--error)',
+                  borderColor: 'var(--bg-elevated)',
+                }}
+              />
             )}
           </button>
 
           {notifOpen && (
             <div
               ref={panelRef}
-              className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl shadow-gray-200/50 dark:shadow-black/40 overflow-hidden z-50"
+              className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-xl border overflow-hidden z-50 animate-fade-in"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                borderColor: 'var(--border)',
+                boxShadow: 'var(--shadow-lg)',
+              }}
             >
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-slate-800">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100">{t('notifications')}</h3>
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b"
+                style={{ borderColor: 'var(--border)' }}
+              >
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('notifications')}</h3>
                 <div className="flex gap-2">
                   {notifications.length > 0 && (
                     <>
                       <button
                         type="button"
                         onClick={markAllRead}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        className="text-xs font-medium cursor-pointer hover:underline"
+                        style={{ color: 'var(--accent)' }}
                       >
                         {t('markAllRead')}
                       </button>
                       <button
                         type="button"
                         onClick={clearNotifications}
-                        className="text-xs text-gray-500 dark:text-slate-400 hover:underline"
+                        className="text-xs text-[var(--text-faint)] cursor-pointer hover:underline"
                       >
                         {t('clearAll')}
                       </button>
@@ -142,16 +199,16 @@ const Header = () => {
                   <button
                     type="button"
                     onClick={() => setNotifOpen(false)}
-                    className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+                    className="p-0.5 text-[var(--text-faint)] hover:text-[var(--text-secondary)] cursor-pointer"
                   >
-                    <X size={16} />
+                    <X size={14} />
                   </button>
                 </div>
               </div>
 
               <div className="max-h-80 overflow-y-auto">
                 {notifications.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-gray-500 dark:text-slate-400">
+                  <p className="px-4 py-8 text-center text-sm text-[var(--text-faint)]">
                     {t('noNotifications')}
                   </p>
                 ) : (
@@ -159,18 +216,25 @@ const Header = () => {
                     const Icon = typeIcon[item.type] || Info;
                     const content = (
                       <div
-                        className={`flex gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/80 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition ${
-                          !item.read ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
-                        }`}
+                        className="flex gap-3 px-4 py-3 border-b transition-colors duration-100 cursor-pointer"
+                        style={{
+                          borderColor: 'var(--border-subtle)',
+                          backgroundColor: !item.read ? 'var(--accent-muted)' : 'transparent',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-muted)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = !item.read ? 'var(--accent-muted)' : 'transparent'; }}
                       >
-                        <Icon className={`w-5 h-5 shrink-0 mt-0.5 ${typeColor[item.type] || typeColor.info}`} />
+                        <Icon className={`w-4 h-4 shrink-0 mt-0.5 ${typeColor[item.type] || typeColor.info}`} />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-900 dark:text-slate-100">{item.title}</p>
-                          <p className="text-xs text-gray-600 dark:text-slate-400 mt-0.5 line-clamp-2">{item.message}</p>
-                          <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">{formatTimeAgo(item.createdAt)}</p>
+                          <p className="text-sm font-medium text-[var(--text-primary)]">{item.title}</p>
+                          <p className="text-xs text-[var(--text-muted)] mt-0.5 line-clamp-2">{item.message}</p>
+                          <p className="text-[10px] text-[var(--text-faint)] mt-1">{formatTimeAgo(item.createdAt)}</p>
                         </div>
                         {!item.read && (
-                          <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-2" />
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0 mt-2"
+                            style={{ backgroundColor: 'var(--accent)' }}
+                          />
                         )}
                       </div>
                     );
@@ -201,18 +265,6 @@ const Header = () => {
               </div>
             </div>
           )}
-        </div>
-
-        <div className="h-6 w-px bg-gray-200 dark:bg-slate-700 mx-1" />
-
-        <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 p-1.5 rounded-lg transition-colors">
-          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-semibold text-sm border border-blue-200 dark:border-blue-800">
-            A
-          </div>
-          <div className="hidden sm:block text-sm">
-            <p className="font-medium text-gray-900 dark:text-slate-100 leading-none mb-1">Admin</p>
-            <p className="text-xs text-gray-500 dark:text-slate-400 leading-none">admin@agentic.ai</p>
-          </div>
         </div>
       </div>
     </header>

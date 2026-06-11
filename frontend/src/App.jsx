@@ -1,14 +1,16 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import DashboardLayout from './layouts/DashboardLayout';
-import Overview from './pages/Overview';
-import Playground from './pages/Playground';
-import Analytics from './pages/Analytics';
-import DocumentLayout from './pages/documents/DocumentLayout';
-import DocumentEvaluation from './pages/documents/DocumentEvaluation';
-import DocumentExplainability from './pages/documents/DocumentExplainability';
-import Chat from './pages/Chat';
+
+// Lazy-loaded pages for code splitting
+const Overview = lazy(() => import('./pages/Overview'));
+const Playground = lazy(() => import('./pages/Playground'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Chat = lazy(() => import('./pages/Chat'));
+const DocumentLayout = lazy(() => import('./pages/documents/DocumentLayout'));
+const DocumentEvaluation = lazy(() => import('./pages/documents/DocumentEvaluation'));
+const DocumentExplainability = lazy(() => import('./pages/documents/DocumentExplainability'));
 
 const App = () => {
   return (
@@ -17,14 +19,28 @@ const App = () => {
         <Routes>
           <Route element={<DashboardLayout />}>
             <Route path="/" element={<Overview />} />
-            <Route path="/playground" element={<Playground />} />
+
+            {/* Main features */}
+            <Route path="/summarize" element={<Playground />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/analytics" element={<Analytics />} />
+
+            {/* AI features (reuse existing pages for now) */}
+            <Route path="/compare" element={<Playground />} />
+            <Route path="/search" element={<Chat />} />
+
+            {/* Document routes */}
             <Route path="/documents" element={<DocumentLayout />}>
               <Route index element={<Navigate to="evaluation" replace />} />
               <Route path="evaluation" element={<DocumentEvaluation />} />
               <Route path="explainability" element={<DocumentExplainability />} />
             </Route>
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/analytics" element={<Analytics />} />
+
+            {/* Settings placeholder */}
+            <Route path="/settings" element={<Analytics />} />
+
+            {/* Backward compatibility redirects */}
+            <Route path="/playground" element={<Navigate to="/summarize" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>

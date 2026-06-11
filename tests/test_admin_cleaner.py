@@ -128,6 +128,25 @@ class TestAdministrativeDocumentCleaner(unittest.TestCase):
         self.assertIn("Nội dung thực hiện", cleaned)
         self.assertIn("1) Xử lý và nạp tài liệu tiếng Việt dài.", cleaned)
 
+    def test_vietnamese_text_normalizer_spacing_fixes(self):
+        # Admin text with glued words to ensure it triggers is_admin_document detection
+        dirty = (
+            "ỦY BAN NHÂN DÂN TỈNH NGHỆ AN\n"
+            "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\n"
+            "Độc lập - Tự do - Hạnh phúc\n\n"
+            "Mô hình RAG giúp tăng độchính xác và đưa ra câu trảlời nhanh chóng. "
+            "Chúng tôi thực hiện nghiêncứu và pháttriển dựán tốtnghiệp về côngnghệ nghệthông tin."
+        )
+        cleaned = self.cleaner.clean(dirty)
+        self.assertIn("độ chính xác", cleaned)
+        self.assertIn("câu trả lời", cleaned)
+        self.assertIn("nghiên cứu", cleaned)
+        self.assertIn("phát triển", cleaned)
+        self.assertIn("dự án", cleaned)
+        self.assertIn("tốt nghiệp", cleaned)
+        self.assertIn("công nghệ", cleaned)
+        self.assertIn("nghệ thông", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()

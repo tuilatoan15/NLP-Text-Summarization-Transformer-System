@@ -335,10 +335,7 @@ const Playground = () => {
   const [reference, setReference] = useState('');
   const [files, setFiles] = useState([]);
   const [selected, setSelected] = useState(ALGORITHMS.map(item => item.key));
-  const [lengthRatio, setLengthRatio] = useState(50);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [sentenceCount, setSentenceCount] = useState(5);
-  const [maxLength, setMaxLength] = useState(150);
+  const [summaryLength, setSummaryLength] = useState('auto');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -365,11 +362,6 @@ const Playground = () => {
     return text.trim().split(/\s+/).filter(Boolean).length;
   }, [text]);
 
-  const targetWordCount = useMemo(
-    () => Math.max(5, Math.round((sourceWordCount * lengthRatio) / 100)),
-    [sourceWordCount, lengthRatio],
-  );
-
   // Dynamic values that handle either uploaded files or text inputs seamlessly
   const displaySourceWords = useMemo(() => {
     if (files.length > 0 && !text.trim()) {
@@ -382,8 +374,17 @@ const Playground = () => {
     if (files.length > 0 && !text.trim()) {
       return result?.meta?.target_words || '—';
     }
-    return targetWordCount;
-  }, [files, targetWordCount, result, text]);
+    let mode = summaryLength;
+    if (mode === 'auto') {
+      if (sourceWordCount < 500) mode = 'short';
+      else if (sourceWordCount <= 3000) mode = 'standard';
+      else mode = 'detailed';
+    }
+    if (mode === 'short') return '50 - 80';
+    if (mode === 'standard') return '100 - 150';
+    if (mode === 'detailed') return '200 - 300';
+    return '—';
+  }, [files, summaryLength, sourceWordCount, result, text]);
 
   const handleFileChange = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -459,10 +460,7 @@ const Playground = () => {
         text: textToUse,
         reference: reference || null,
         algorithms: selected,
-        extractive_sentences: sentenceCount,
-        max_abstractive_length: maxLength,
-        target_length_ratio: lengthRatio,
-        use_length_ratio: !advancedOpen,
+        summary_length: summaryLength,
         save_result: true,
       }),
     });
@@ -575,8 +573,6 @@ const Playground = () => {
       setRunningKey(null);
     }
   }
-
-  const fillPercent = ((lengthRatio - 10) / 90) * 100;
 
   return (
     <div className="space-y-5 pb-16">
@@ -706,96 +702,42 @@ const Playground = () => {
                 />
               </section>
 
-              <section className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
-                    {t('pgLengthRatio')}
-                  </span>
-                  <span className="text-[10px] font-extrabold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 rounded">{lengthRatio}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  disabled={loading || advancedOpen}
-                  value={lengthRatio}
-                  onChange={(e) => setLengthRatio(Number(e.target.value))}
-                  className="ui-range"
-                  style={{
-                    background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${fillPercent}%, var(--surface-inset) ${fillPercent}%, var(--surface-inset) 100%)`
-                  }}
-                />
-                <p className="text-[9px] text-[var(--text-muted)] font-semibold leading-relaxed">
-                  {t('pgLengthTarget', {
-                    target: displayTargetWords,
-                    source: displaySourceWords,
-                  })}
-                </p>
-              </section>
-
-              <section className="space-y-2">
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
-                    <Sliders size={12} className="text-blue-500" />
-                    Tùy chỉnh nâng cao
-                  </span>
-                  
-                  {/* Modern Toggle Switch */}
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setAdvancedOpen(v => !v)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      advancedOpen ? 'bg-blue-600' : 'bg-gray-300 dark:bg-slate-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        advancedOpen ? 'translate-x-4' : 'translate-x-0'
+              <section className="space-y-3">
+                <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+                  <Sliders size={12} className="text-blue-500" />
+                  Độ dài tóm tắt
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {[
+                    { key: 'auto', label: 'Tự động', desc: 'Đề xuất bởi AI' },
+                    { key: 'short', label: 'Ngắn', desc: '~50-80 từ' },
+                    { key: 'standard', label: 'Tiêu chuẩn', desc: '~100-150 từ' },
+                    { key: 'detailed', label: 'Chi tiết', desc: '~200-300 từ' },
+                  ].map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setSummaryLength(option.key)}
+                      className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer select-none ${
+                        summaryLength === option.key
+                          ? 'border-blue-500 bg-blue-50/10 shadow-sm ring-1 ring-blue-500/20'
+                          : 'border-[var(--border)] bg-[var(--surface-elevated)] hover:border-[var(--border-strong)]'
                       }`}
-                    />
-                  </button>
+                    >
+                      <span className="text-xs font-bold text-[var(--text)]">{option.label}</span>
+                      <span className="text-[9px] text-[var(--text-muted)] mt-0.5">{option.desc}</span>
+                    </button>
+                  ))}
                 </div>
-
-                <div
-                  className={`grid grid-cols-2 gap-3 p-3 rounded-xl bg-[var(--surface-elevated)] border border-[var(--border-subtle)] transition-all duration-300 ${
-                    advancedOpen 
-                      ? 'opacity-100 scale-100' 
-                      : 'opacity-40 pointer-events-none scale-[0.99] bg-[var(--surface-inset)]/50'
-                  }`}
-                >
-                  <label className="space-y-1">
-                    <span className="block text-[9px] font-bold text-[var(--text-muted)] uppercase">
-                      {t('pgSentences')}
+                <p className="text-[10px] text-[var(--text-muted)] font-medium leading-relaxed mt-1">
+                  Mục tiêu đầu ra: <span className="font-bold text-[var(--text)]">{displayTargetWords} từ</span>.
+                  {summaryLength === 'auto' && (
+                    <span className="text-blue-500 dark:text-blue-400 font-semibold ml-1">
+                      (Tự động điều chỉnh theo kích thước văn bản đầu vào)
                     </span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      disabled={loading || !advancedOpen}
-                      value={sentenceCount}
-                      onChange={(e) => setSentenceCount(Number(e.target.value))}
-                      className="ui-input py-1 text-xs text-center"
-                    />
-                  </label>
-                  <div className="space-y-1 flex flex-col justify-end">
-                    <div className="flex items-center justify-between">
-                      <span className="block text-[9px] font-bold text-[var(--text-muted)] uppercase">
-                        {t('pgMaxTokens')}
-                      </span>
-                    </div>
-                    <input
-                      type="number"
-                      min="24"
-                      max="500"
-                      disabled={loading || !advancedOpen}
-                      value={maxLength}
-                      onChange={(e) => setMaxLength(Math.min(500, Math.max(24, Number(e.target.value) || 24)))}
-                      className="ui-input py-1 text-xs text-center"
-                    />
-                  </div>
-                </div>
+                  )}
+                </p>
               </section>
             </div>
 

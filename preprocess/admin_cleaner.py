@@ -111,6 +111,8 @@ class AdministrativeDocumentCleaner:
         if not self.clean_enabled or not text:
             return text
             
+        from preprocess.preprocessor import fix_vietnamese_ocr_spacing
+        text = fix_vietnamese_ocr_spacing(text)
         if not self.is_admin_document(text):
             return text
 
@@ -243,6 +245,8 @@ class AdministrativeDocumentCleaner:
         if not self.clean_enabled or not elements:
             return elements
             
+        from preprocess.preprocessor import fix_vietnamese_ocr_spacing
+        full_text = fix_vietnamese_ocr_spacing(full_text)
         if not self.is_admin_document(full_text):
             return elements
 

@@ -3,48 +3,54 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vietnamese Summarization Research</title>
+
+    <!-- SEO -->
+    <title>AI Document Hub — Nền tảng Xử lý Tài liệu Thông minh</title>
+    <meta name="description" content="AI Document Hub — Nền tảng AI xử lý tài liệu thông minh: Tóm tắt, Chat, Hybrid RAG, Semantic Search, Đánh giá & Phân tích tài liệu tiếng Việt." />
+    <meta name="keywords" content="AI, NLP, tóm tắt văn bản, summarization, RAG, chat tài liệu, tiếng Việt, transformer" />
+    <meta name="author" content="AI Document Hub" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AI Document Hub — Nền tảng Xử lý Tài liệu Thông minh" />
+    <meta property="og:description" content="Tóm tắt, Chat, Hybrid RAG, Semantic Search và Đánh giá tài liệu bằng AI." />
+    <meta property="og:site_name" content="AI Document Hub" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AI Document Hub" />
+    <meta name="twitter:description" content="Nền tảng AI xử lý tài liệu thông minh cho tiếng Việt." />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M8 10h16M8 16h12M8 22h8' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E" />
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "AI Document Hub",
+      "description": "Nền tảng AI xử lý tài liệu thông minh: Tóm tắt, Chat với tài liệu, Hybrid RAG, Đánh giá chất lượng.",
+      "applicationCategory": "AI & Machine Learning",
+      "operatingSystem": "Web"
+    }
+    </script>
+
+    <!-- Theme Detection (FOUC prevention) -->
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('nlp_theme');
-          if (t === 'dark') document.documentElement.classList.add('dark');
+          var stored = localStorage.getItem('aidh_theme');
+          if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          }
         } catch (e) {}
       })();
-      window.addEventListener('error', function(event) {
-        showError('Runtime Error', event.message, event.filename + ':' + event.lineno + ':' + event.colno, event.error ? event.error.stack : '');
-      });
-      window.addEventListener('unhandledrejection', function(event) {
-        showError('Unhandled Promise Rejection', event.reason, '', event.reason && event.reason.stack ? event.reason.stack : '');
-      });
-      function showError(title, message, loc, stack) {
-        var container = document.getElementById('error-overlay') || document.createElement('div');
-        container.id = 'error-overlay';
-        container.style.position = 'fixed';
-        container.style.top = '0';
-        container.style.left = '0';
-        container.style.width = '100%';
-        container.style.height = '100%';
-        container.style.backgroundColor = '#fff';
-        container.style.color = '#ef4444';
-        container.style.padding = '30px';
-        container.style.fontFamily = 'monospace';
-        container.style.zIndex = '999999';
-        container.style.overflow = 'auto';
-        container.style.boxSizing = 'border-box';
-        container.innerHTML = '<h1 style="font-size:24px;margin-bottom:10px;">🔴 ' + title + '</h1>' +
-          '<p style="font-size:16px;font-weight:bold;margin:10px 0;">' + message + '</p>' +
-          (loc ? '<p style="color:#6b7280;"><b>Location:</b> ' + loc + '</p>' : '') +
-          '<pre style="background:#f3f4f6;padding:15px;border-radius:6px;color:#1f2937;overflow-x:auto;white-space:pre-wrap;">' + (stack || 'No stack trace available') + '</pre>';
-        if (!container.parentElement) {
-          var checkBody = setInterval(function() {
-            if (document.body) {
-              clearInterval(checkBody);
-              document.body.appendChild(container);
-            }
-          }, 50);
-        }
-      }
     </script>
   </head>
   <body>
@@ -52,4 +58,3 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
-

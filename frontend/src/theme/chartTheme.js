@@ -1,13 +1,17 @@
 export function getChartTheme(isDark) {
   return {
-    grid: isDark ? '#334155' : '#f3f4f6',
-    axis: isDark ? '#94a3b8' : '#6b7280',
+    grid: isDark ? '#27272a' : '#e4e4e7',
+    axis: isDark ? '#71717a' : '#71717a',
+    accent: isDark ? '#818cf8' : '#6366f1',
     tooltipStyle: {
-      backgroundColor: isDark ? '#1e293b' : '#ffffff',
-      border: `1px solid ${isDark ? '#475569' : '#e5e7eb'}`,
+      backgroundColor: isDark ? '#18181b' : '#ffffff',
+      border: `1px solid ${isDark ? '#27272a' : '#e4e4e7'}`,
       borderRadius: '8px',
       fontSize: '12px',
-      color: isDark ? '#e2e8f0' : '#111827',
+      color: isDark ? '#d4d4d8' : '#09090b',
+      boxShadow: isDark
+        ? '0 4px 16px rgba(0, 0, 0, 0.5)'
+        : '0 4px 16px rgba(0, 0, 0, 0.08)',
     },
   };
 }

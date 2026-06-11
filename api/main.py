@@ -58,6 +58,7 @@ class SummarizeRequest(BaseModel):
     max_abstractive_length: int = Field(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512)
     model_name: str = Field(default="vit5")
     save_result: bool = Field(default=False)
+    summary_length: str = Field(default="auto")
     analysis_mode: str = Field(default="research")
     async_mode: bool = Field(default=False)
 
@@ -81,6 +82,7 @@ class CompareRequest(BaseModel):
     )
     use_length_ratio: bool = Field(default=True)
     save_result: bool = Field(default=True)
+    summary_length: str = Field(default="auto")
     async_mode: bool = Field(default=False)
 
     @field_validator("text", "reference", mode="before")
@@ -210,6 +212,7 @@ def _compare_or_400(
     target_length_ratio: int = 50,
     use_length_ratio: bool = True,
     save_result: bool = True,
+    summary_length: str = "auto",
 ) -> dict:
     """Sync wrapper — gọi từ executor thread, KHÔNG gọi trực tiếp từ async endpoint."""
     try:
@@ -221,6 +224,7 @@ def _compare_or_400(
             max_output_length=max_abstractive_length,
             target_length_ratio=target_length_ratio,
             use_length_ratio=use_length_ratio,
+            summary_length=summary_length,
         )
         if save_result:
             compare["storage"] = persist_compare_result(compare)
@@ -241,6 +245,7 @@ async def _compare_or_400_async(
     target_length_ratio: int = 50,
     use_length_ratio: bool = True,
     save_result: bool = True,
+    summary_length: str = "auto",
 ) -> dict:
     """Async wrapper: offload blocking inference sang thread pool để giải phóng event loop."""
     loop = asyncio.get_event_loop()
@@ -249,6 +254,7 @@ async def _compare_or_400_async(
         text, reference, algorithms,
         extractive_sentences, max_abstractive_length,
         target_length_ratio, use_length_ratio, save_result,
+        summary_length,
     )
     return await loop.run_in_executor(None, fn)
 
@@ -469,7 +475,8 @@ async def summarize(request_body: SummarizeRequest):
         "extractiveSentences": request_body.extractive_sentences,
         "maxLength": request_body.max_abstractive_length,
         "save_result": request_body.save_result,
-        "use_length_ratio": False
+        "use_length_ratio": False,
+        "summary_length": request_body.summary_length,
     }
 
     if request_body.async_mode:
@@ -494,6 +501,7 @@ async def summarize(request_body: SummarizeRequest):
         request_body.extractive_sentences,
         request_body.max_abstractive_length,
         save_result=request_body.save_result,
+        summary_length=request_body.summary_length,
     )
     return _legacy_response(compare, requested_model=model_key)
 
@@ -508,7 +516,8 @@ async def summarize_compare(request_body: CompareRequest):
         "maxLength": request_body.max_abstractive_length,
         "target_length_ratio": request_body.target_length_ratio,
         "use_length_ratio": request_body.use_length_ratio,
-        "save_result": request_body.save_result
+        "save_result": request_body.save_result,
+        "summary_length": request_body.summary_length,
     }
 
     if request_body.async_mode:
@@ -533,6 +542,7 @@ async def summarize_compare(request_body: CompareRequest):
         target_length_ratio=request_body.target_length_ratio,
         use_length_ratio=request_body.use_length_ratio,
         save_result=request_body.save_result,
+        summary_length=request_body.summary_length,
     )
 
 
@@ -550,6 +560,7 @@ async def summarize_compare_stream(request_body: CompareRequest):
             target_length_ratio=request_body.target_length_ratio,
             use_length_ratio=request_body.use_length_ratio,
             save_result=request_body.save_result,
+            summary_length=request_body.summary_length,
         ),
         media_type="text/event-stream",
         headers={
@@ -567,12 +578,14 @@ async def summarize_files(
     extractive_sentences: int = Form(default=5, ge=1, le=20),
     max_abstractive_length: int = Form(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512),
     model_name: str = Form(default="vit5"),
+    summary_length: str = Form(default="auto"),
 ):
     text, documents = await _read_uploads(files)
     model_key = resolve_algorithm(model_name).key
     compare = await _compare_or_400_async(
         text, reference, ["textrank", model_key],
         extractive_sentences, max_abstractive_length,
+        summary_length=summary_length,
     )
     response = _legacy_response(compare, requested_model=model_key)
     response["documents"] = documents
@@ -588,6 +601,7 @@ async def summarize_files_compare(
     max_abstractive_length: int = Form(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512),
     target_length_ratio: int = Form(default=50, ge=10, le=100),
     save_result: bool = Form(default=True),
+    summary_length: str = Form(default="auto"),
 ):
     text, documents = await _read_uploads(files)
     selected = DEFAULT_ALGORITHMS.copy()
@@ -605,6 +619,7 @@ async def summarize_files_compare(
         max_abstractive_length,
         target_length_ratio=target_length_ratio,
         save_result=save_result,
+        summary_length=summary_length,
     )
     result["documents"] = documents
     return result

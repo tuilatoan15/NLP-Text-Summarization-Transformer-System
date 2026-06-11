@@ -97,6 +97,8 @@ class DocumentCleaner:
     def clean_element_text(self, text: str, element_type: str = "paragraph") -> str:
         if not text:
             return ""
+        from preprocess.preprocessor import fix_vietnamese_ocr_spacing
+        text = fix_vietnamese_ocr_spacing(text)
         text = normalize_unicode(text)
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         text = BROKEN_HYPHEN_RE.sub(r"\1\2", text)

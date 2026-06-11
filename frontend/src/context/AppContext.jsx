@@ -3,9 +3,10 @@ import React, {
 } from 'react';
 import { t as translate } from '../i18n/translations';
 
-const STORAGE_THEME = 'nlp_theme';
-const STORAGE_LOCALE = 'nlp_locale';
-const STORAGE_NOTIFICATIONS = 'nlp_notifications';
+const STORAGE_THEME = 'aidh_theme';
+const STORAGE_LOCALE = 'aidh_locale';
+const STORAGE_NOTIFICATIONS = 'aidh_notifications';
+const STORAGE_SIDEBAR = 'aidh_sidebar';
 const MAX_NOTIFICATIONS = 50;
 
 const AppContext = createContext(null);
@@ -19,26 +20,66 @@ function loadJson(key, fallback) {
   }
 }
 
+function getInitialTheme() {
+  try {
+    const stored = localStorage.getItem(STORAGE_THEME);
+    if (stored === 'dark' || stored === 'light') return stored;
+    // System preference
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch { /* ignore */ }
+  return 'light';
+}
+
 function formatTimeAgo(ts, locale) {
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return translate(locale, 'justNow');
-  return translate(locale, 'minutesAgo', { n: mins });
+  if (mins < 60) return translate(locale, 'minutesAgo', { n: mins });
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function AppProvider({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem(STORAGE_THEME) || 'light');
+  const [theme, setTheme] = useState(getInitialTheme);
   const [locale, setLocale] = useState(() => localStorage.getItem(STORAGE_LOCALE) || 'vie');
   const [notifications, setNotifications] = useState(() => loadJson(STORAGE_NOTIFICATIONS, []));
   const [notifOpen, setNotifOpen] = useState(false);
   const [overviewCache, setOverviewCache] = useState(null);
   const [analyticsCache, setAnalyticsCache] = useState({});
 
+  // Sidebar collapsed state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_SIDEBAR) === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+
+  // Command palette state
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  // Apply theme to DOM
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     localStorage.setItem(STORAGE_THEME, theme);
   }, [theme]);
+
+  // Listen for system theme changes
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const handler = (e) => {
+      const stored = localStorage.getItem(STORAGE_THEME);
+      if (!stored || stored === 'system') {
+        setTheme(e.matches ? 'dark' : 'light');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_LOCALE, locale);
@@ -48,6 +89,25 @@ export function AppProvider({ children }) {
     localStorage.setItem(STORAGE_NOTIFICATIONS, JSON.stringify(notifications.slice(0, MAX_NOTIFICATIONS)));
   }, [notifications]);
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_SIDEBAR, sidebarCollapsed ? 'collapsed' : 'expanded');
+  }, [sidebarCollapsed]);
+
+  // Ctrl+K command palette shortcut
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+        setCommandPaletteOpen(false);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const unreadCount = useMemo(
     () => notifications.filter(n => !n.read).length,
     [notifications],
@@ -55,6 +115,10 @@ export function AppProvider({ children }) {
 
   const toggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => !prev);
   }, []);
 
   const setLanguage = useCallback((lang) => {
@@ -67,9 +131,7 @@ export function AppProvider({ children }) {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
       new Notification(title, { body, icon: '/favicon.ico' });
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, []);
 
   const addNotification = useCallback(({
@@ -133,11 +195,20 @@ export function AppProvider({ children }) {
     setOverviewCache,
     analyticsCache,
     setAnalyticsCache,
+    // New: sidebar
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    toggleSidebar,
+    // New: command palette
+    commandPaletteOpen,
+    setCommandPaletteOpen,
   }), [
     theme, locale, notifications, notifOpen, unreadCount,
     toggleTheme, setLanguage, t, addNotification, markAsRead, markAllRead,
     clearNotifications, requestNotificationPermission,
     overviewCache, analyticsCache,
+    sidebarCollapsed, toggleSidebar,
+    commandPaletteOpen,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
