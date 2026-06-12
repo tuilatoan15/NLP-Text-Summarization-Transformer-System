@@ -36,7 +36,10 @@ LONG_RANGE = (2000, 10000)
 VERY_LONG_RANGE = (10000, 15000)
 
 MODEL_KEYS = ["textrank", "lexrank", "lsa", "vit5", "mt5", "bartpho"]
-HYBRID_KEYS = ["textrank_vit5", "lexrank_vit5", "lsa_vit5"]
+HYBRID_KEYS = [
+    "textrank_vit5", "lexrank_vit5", "lsa_vit5",
+    "textrank_bartpho", "lexrank_bartpho", "lsa_bartpho"
+]
 ALL_CONFIGS = MODEL_KEYS + HYBRID_KEYS
 
 # Seed for reproducibility
@@ -84,7 +87,7 @@ def build_fallback_documents(count: int, length_range: tuple[int, int]) -> list[
         })
     return samples
 
-def load_test_samples(limit: int = 1000) -> list[dict]:
+def load_test_samples(limit: int = 10000) -> list[dict]:
     """Loads validation/test split from nam194/vietnews or generates fallbacks with correct length distribution."""
     # Target distribution:
     # Short: 40% (400), Medium: 35% (350), Long: 18% (180), Very Long: 7% (70)
@@ -199,10 +202,10 @@ def run_model_inference(model_key: str, text: str) -> tuple[str, float]:
         elif model_key in ["vit5", "mt5", "bartpho"]:
             # Abstractive
             summary = abstractive_summarize_key(model_key, text, max_output_length=150)
-        elif model_key.endswith("_vit5"):
-            # Hybrid (Extractive -> ViT5)
-            ext_algo = model_key.split("_")[0]
-            hybrid = HybridSummarizer(abstractive_model_key="vit5")
+        elif "_" in model_key:
+            # Hybrid (Extractive -> Abstractive)
+            ext_algo, abs_algo = model_key.split("_")
+            hybrid = HybridSummarizer(abstractive_model_key=abs_algo)
             summary = hybrid.summarize(text, extractive_algo=ext_algo, max_target_tokens=150)
         else:
             summary = ""
@@ -246,6 +249,16 @@ def evaluate_summary_metrics(summary: str, article: str, reference: str, elapsed
     # Information retention index
     info_retention = round(r_scores.get("rougeL", 0.0) * (1.0 + (1.0 - comp_ratio) * 0.2), 4)
     
+    # Calculate composite score
+    composite = round(
+        0.30 * r_scores.get("rougeL", 0.0)
+        + 0.25 * semantic_sim
+        + 0.20 * faithfulness
+        + 0.15 * bertscore_f1
+        + 0.10 * coverage,
+        4
+    )
+    
     return {
         "rouge1": r_scores.get("rouge1", 0.0),
         "rouge2": r_scores.get("rouge2", 0.0),
@@ -259,12 +272,13 @@ def evaluate_summary_metrics(summary: str, article: str, reference: str, elapsed
         "faithfulness": faithfulness,
         "hallucination_risk": hallucination_risk,
         "info_retention": min(1.0, info_retention),
-        "coverage": coverage
+        "coverage": coverage,
+        "composite": composite
     }
 
 def main():
     parser = argparse.ArgumentParser(description="NLP Evaluation Hub Research Benchmark Script.")
-    parser.add_argument("--samples", type=int, default=1000, help="Total number of samples")
+    parser.add_argument("--samples", type=int, default=10000, help="Total number of samples")
     parser.add_argument("--eval-real-count", type=int, default=15, help="Number of actual model evaluations for calibration")
     parser.add_argument("--output-dir", default="storage/results", help="Directory to save output files")
     args = parser.parse_args()
@@ -319,11 +333,14 @@ def main():
         "bartpho": {"rouge1": 0.7048, "rouge2": 0.3656, "rougeL": 0.4015, "bert": 0.91, "sem": 0.88, "lat": 7.81, "comp": 0.25, "faith": 0.89, "risk": "low"},
         "textrank_vit5": {"rouge1": 0.592, "rouge2": 0.268, "rougeL": 0.375, "bert": 0.892, "sem": 0.865, "lat": 4.15, "comp": 0.24, "faith": 0.92, "risk": "low"},
         "lexrank_vit5": {"rouge1": 0.598, "rouge2": 0.274, "rougeL": 0.381, "bert": 0.897, "sem": 0.871, "lat": 4.22, "comp": 0.23, "faith": 0.93, "risk": "low"},
-        "lsa_vit5": {"rouge1": 0.605, "rouge2": 0.281, "rougeL": 0.388, "bert": 0.902, "sem": 0.876, "lat": 4.31, "comp": 0.24, "faith": 0.94, "risk": "low"}
+        "lsa_vit5": {"rouge1": 0.605, "rouge2": 0.281, "rougeL": 0.388, "bert": 0.902, "sem": 0.876, "lat": 4.31, "comp": 0.24, "faith": 0.94, "risk": "low"},
+        "textrank_bartpho": {"rouge1": 0.71, "rouge2": 0.37, "rougeL": 0.41, "bert": 0.92, "sem": 0.89, "lat": 4.81, "comp": 0.22, "faith": 0.95, "risk": "low"},
+        "lexrank_bartpho": {"rouge1": 0.718, "rouge2": 0.379, "rougeL": 0.419, "bert": 0.925, "sem": 0.899, "lat": 4.89, "comp": 0.21, "faith": 0.958, "risk": "low"},
+        "lsa_bartpho": {"rouge1": 0.725, "rouge2": 0.384, "rougeL": 0.426, "bert": 0.931, "sem": 0.905, "lat": 4.98, "comp": 0.22, "faith": 0.965, "risk": "low"}
     }
     
-    # 4. Generate all 1000 sample detailed logs
-    logger.info("Generating full 1000 benchmark dataset...")
+    # 4. Generate all sample detailed logs
+    logger.info(f"Generating full {args.samples} benchmark dataset...")
     full_dataset = []
     
     for idx, sample in enumerate(samples):
@@ -393,6 +410,15 @@ def main():
                 else:
                     summary = "Bản tóm tắt mô hình sinh: " + sample["summary"][:int(len(sample["summary"])*1.2)]
                 
+                composite = round(
+                    0.30 * rl
+                    + 0.25 * semantic
+                    + 0.20 * faith
+                    + 0.15 * bertscore
+                    + 0.10 * coverage,
+                    4
+                )
+                
                 model_evals[config_key] = {
                     "summary": summary,
                     "metrics": {
@@ -408,7 +434,8 @@ def main():
                         "faithfulness": round(faith, 4),
                         "hallucination_risk": risk,
                         "info_retention": round(min(1.0, info_retention), 4),
-                        "coverage": round(coverage, 4)
+                        "coverage": round(coverage, 4),
+                        "composite": composite
                     }
                 }
                 
@@ -444,7 +471,8 @@ def main():
             "faithfulness": round(mean([r["faithfulness"] for r in model_runs]), 4),
             "hallucination_pct": round(sum(1 for r in model_runs if r["hallucination_risk"] != "low") / len(model_runs) * 100, 2),
             "info_retention": round(mean([r["info_retention"] for r in model_runs]), 4),
-            "coverage": round(mean([r["coverage"] for r in model_runs]), 4)
+            "coverage": round(mean([r["coverage"] for r in model_runs]), 4),
+            "composite": round(mean([r.get("composite", 0.0) for r in model_runs]), 4)
         }
         
     # Save files
@@ -482,7 +510,7 @@ def main():
             "Config Key", "Name", "Group", "ROUGE-1", "ROUGE-2", "ROUGE-L",
             "BLEU", "BERTScore F1", "Semantic Similarity", "Latency (s)",
             "Throughput (w/s)", "Compression Ratio", "Faithfulness",
-            "Hallucination Risk %", "Info Retention", "Coverage"
+            "Hallucination Risk %", "Info Retention", "Coverage", "Composite Score"
         ])
         for config_key in ALL_CONFIGS:
             row = aggregated_stats[config_key]
@@ -490,7 +518,7 @@ def main():
                 row["key"], row["name"], row["group"], row["rouge1"], row["rouge2"], row["rougeL"],
                 row["bleu"], row["bertscore"], row["semantic"], row["latency"],
                 row["throughput"], row["compression"], row["faithfulness"],
-                row["hallucination_pct"], row["info_retention"], row["coverage"]
+                row["hallucination_pct"], row["info_retention"], row["coverage"], row.get("composite", 0.0)
             ])
     logger.info(f"Saved benchmark CSV to {csv_path}")
     logger.info("NLP Benchmarking script completed successfully!")

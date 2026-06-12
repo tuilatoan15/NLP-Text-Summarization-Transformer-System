@@ -122,8 +122,14 @@ class ModelRegistry:
         if algorithm.key in {"mt5", "bartpho"} and not loaded_from_hub:
             diff = abs(model_vocab - tok_vocab)
             if diff <= 256 and model_vocab != tok_vocab:
-                model.resize_token_embeddings(tok_vocab)
-                logger.info("[%s] Aligned embeddings to local tokenizer size %d", algorithm.key, tok_vocab)
+                if model_vocab > tok_vocab:
+                    logger.warning(
+                        "[%s] Tokenizer smaller than model (%d vs %d) — keeping model embeddings",
+                        algorithm.key, tok_vocab, model_vocab,
+                    )
+                else:
+                    model.resize_token_embeddings(tok_vocab)
+                    logger.info("[%s] Aligned embeddings to local tokenizer size %d", algorithm.key, tok_vocab)
             return tokenizer
 
         if algorithm.key == "vit5" and loaded_from_hub:

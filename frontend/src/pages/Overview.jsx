@@ -1,32 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  Bot, Cpu, Activity, Clock, Loader2, CheckCircle2,
+  Bot, Cpu, Activity, Clock, CheckCircle2,
   Sparkles, MessageSquare, GitCompareArrows, ArrowRight,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { getAnalyticsDashboard, getHealth, getMetrics } from '../services/apiService';
+import { useOverviewBundleQuery } from '../hooks/useApiQueries';
+import { useCacheHitLogger } from '../hooks/useCacheHitLogger';
 import { getChartTheme, dateLocale } from '../theme/chartTheme';
 
-/* ─── Skeleton ─── */
-const Skeleton = ({ className = '' }) => (
+const Skeleton = memo(({ className = '' }) => (
   <div className={`ui-skeleton ${className}`} />
-);
+));
 
-const StatSkeleton = () => (
+const StatSkeleton = memo(() => (
   <div className="ui-card p-5">
     <Skeleton className="h-3 w-20 mb-3" />
     <Skeleton className="h-8 w-16 mb-2" />
     <Skeleton className="h-3 w-28" />
   </div>
-);
+));
 
-/* ─── Stat Card ─── */
-const StatCard = ({ title, value, subtext, icon: Icon, color }) => (
+const StatCard = memo(({ title, value, subtext, icon: Icon, color }) => (
   <motion.div
     initial={{ opacity: 0, y: 8 }}
     animate={{ opacity: 1, y: 0 }}
@@ -44,10 +43,9 @@ const StatCard = ({ title, value, subtext, icon: Icon, color }) => (
     <h3 className="text-2xl font-bold text-[var(--text-primary)] mb-1">{value}</h3>
     {subtext && <p className="text-xs text-[var(--text-faint)]">{subtext}</p>}
   </motion.div>
-);
+));
 
-/* ─── Quick Action ─── */
-const QuickAction = ({ icon: Icon, label, to, color }) => (
+const QuickAction = memo(({ icon: Icon, label, to, color }) => (
   <Link to={to}>
     <motion.div
       whileHover={{ y: -2 }}
@@ -66,58 +64,35 @@ const QuickAction = ({ icon: Icon, label, to, color }) => (
       <ArrowRight className="w-4 h-4 text-[var(--text-faint)] group-hover:text-[var(--text-muted)] transition-colors" />
     </motion.div>
   </Link>
-);
+));
 
-/* ─── Main ─── */
 const Overview = () => {
-  const { t, locale, isDark, overviewCache, setOverviewCache } = useApp();
-  const [health, setHealth] = useState(() => overviewCache?.health || null);
-  const [metrics, setMetrics] = useState(() => overviewCache?.metrics || null);
-  const [dashboard, setDashboard] = useState(() => overviewCache?.dashboard || null);
-  const [loading, setLoading] = useState(!overviewCache);
+  const { t, locale, isDark } = useApp();
+  const { data, isLoading, isFetching } = useOverviewBundleQuery();
+  useCacheHitLogger('overview bundle', data, isFetching);
+
+  const health = data?.health;
+  const metrics = data?.metrics;
+  const dashboard = data?.dashboard;
+  const loading = isLoading && !data;
+
   const chart = getChartTheme(isDark);
   const dLocale = dateLocale(locale);
-
-  useEffect(() => {
-    if (overviewCache) {
-      setLoading(false);
-      return;
-    }
-    async function fetchData() {
-      try {
-        const [healthData, metricsData, dash] = await Promise.all([
-          getHealth(),
-          getMetrics(),
-          getAnalyticsDashboard('30d', 10),
-        ]);
-        setHealth(healthData);
-        setMetrics(metricsData);
-        setDashboard(dash);
-        setOverviewCache({ health: healthData, metrics: metricsData, dashboard: dash });
-      } catch (err) {
-        console.error('Failed to fetch overview data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [overviewCache, setOverviewCache]);
 
   const dashMetrics = dashboard?.metrics || {};
   const timeseries = dashboard?.visualization?.timeseries || [];
   const recentRuns = dashboard?.recent_runs || [];
-  const modelCount = metrics?.models_preloaded
-    ? Object.keys(metrics.model_load_times || {}).length
-    : 0;
+  const modelCount = useMemo(
+    () => (metrics?.models_preloaded ? Object.keys(metrics.model_load_times || {}).length : 0),
+    [metrics],
+  );
   const algorithmOutputs = dashMetrics.total_algorithm_outputs ?? 0;
 
-  // Greeting based on time
   const hour = new Date().getHours();
   const greeting = hour < 12 ? '☀️ Chào buổi sáng' : hour < 18 ? '🌤️ Chào buổi chiều' : '🌙 Chào buổi tối';
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Greeting */}
       <div>
         <h1 className="ui-heading-1 mb-1 flex items-center gap-2">
           {loading ? <Skeleton className="h-8 w-48" /> : greeting}
@@ -136,7 +111,6 @@ const Overview = () => {
         </p>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {loading ? (
           <>
@@ -179,7 +153,6 @@ const Overview = () => {
         )}
       </div>
 
-      {/* Quick Actions */}
       <div>
         <h2 className="ui-overline mb-3">Thao tác nhanh</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -190,9 +163,7 @@ const Overview = () => {
         </div>
       </div>
 
-      {/* Charts & Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Chart */}
         <div className="ui-card p-5">
           <div className="mb-4">
             <h3 className="ui-heading-3 mb-0.5">{t('chartRunsTitle')}</h3>
@@ -224,7 +195,6 @@ const Overview = () => {
           </div>
         </div>
 
-        {/* Recent Activity */}
         <div className="ui-card p-5 flex flex-col">
           <h3 className="ui-heading-3 mb-4">{t('recentActivity')}</h3>
           <div className="flex-1 space-y-3 overflow-y-auto max-h-64">
@@ -286,4 +256,4 @@ const Overview = () => {
   );
 };
 
-export default Overview;
+export default memo(Overview);

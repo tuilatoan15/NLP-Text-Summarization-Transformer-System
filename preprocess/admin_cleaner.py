@@ -16,8 +16,15 @@ TIEU_NGU_RE = re.compile(
 SO_HIEU_RE = re.compile(
     r"\bSố\s*:\s*\d+(?:/[A-Z0-9-]+)*\b", re.IGNORECASE
 )
+# Require a real administrative date header (e.g. "ngày 10 tháng 06 năm 2026"),
+# not incidental phrases like "ngày càng nghiêm trọng".
 NGAY_THANG_RE = re.compile(
-    r"\bngày\s*[\.\s]*\s*(?:tháng\s*[\.\s]*\s*)?(?:năm\s*[\.\s]*\s*\d*)?\b", re.IGNORECASE
+    r"(?:^|[,.\n]\s*)(?:[\w\s,.-]{0,40},?\s*)?ngày\s+\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+DOC_TYPE_HEADER_RE = re.compile(
+    r"^\s*(?:QUYẾT\s*ĐỊNH|THÔNG\s*TƯ|NGHỊ\s*QUYẾT|CÔNG\s*VĂN|TỜ\s*TRÌNH|BÁO\s*CÁO|ĐỒ\s*ÁN)\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 CO_QUAN_KEYWORDS = [
     "ỦY BAN NHÂN DÂN", "BỘ", "SỞ", "TỔNG CỤC", "CỤC", "TÒA ÁN NHÂN DÂN",
@@ -81,30 +88,35 @@ class AdministrativeDocumentCleaner:
         """Heuristic to detect if a document has Vietnamese administrative or academic report formatting."""
         if not text:
             return False
-        
-        matches = 0
+
+        structural = 0
         if QUOC_HIEU_RE.search(text):
-            matches += 1
+            structural += 1
         if TIEU_NGU_RE.search(text):
-            matches += 1
+            structural += 1
         if SO_HIEU_RE.search(text):
-            matches += 1
+            structural += 1
         if NGAY_THANG_RE.search(text):
-            matches += 1
-            
+            structural += 1
+
+        has_doc_header = bool(DOC_TYPE_HEADER_RE.search(text))
+
         academic_keywords = ["BÁO CÁO", "ĐỒ ÁN", "TỐT NGHIỆP", "MSSV", "LỚP", "HƯỚNG DẪN", "HỌ TÊN", "ĐỀ TÀI"]
-        for akw in academic_keywords:
-            if re.search(r"\b" + re.escape(akw) + r"\b", text, re.IGNORECASE) or akw in text.upper():
-                matches += 1
-                break
-        
-        # Check if type keywords exist
-        for kw in ["QUYẾT ĐỊNH", "THÔNG TƯ", "NGHỊ QUYẾT", "CÔNG VĂN", "TỜ TRÌNH", "BÁO CÁO", "ĐỒ ÁN"]:
-            if re.search(r"\b" + re.escape(kw) + r"\b", text, re.IGNORECASE) or kw in text.upper():
-                matches += 1
-                break
-                
-        return matches >= 2
+        has_academic = any(
+            re.search(rf"^\s*{re.escape(akw)}\b", text, re.IGNORECASE | re.MULTILINE)
+            for akw in academic_keywords
+        )
+
+        # Strong combo: national header block + formal document type
+        if structural >= 2 and (has_doc_header or has_academic):
+            return True
+        # Quốc hiệu + tiêu ngữ alone is a reliable admin signal
+        if QUOC_HIEU_RE.search(text) and TIEU_NGU_RE.search(text):
+            return True
+        # Formal document number + type header (typical QĐ/CV layout)
+        if SO_HIEU_RE.search(text) and has_doc_header:
+            return True
+        return False
 
     def clean(self, text: str) -> str:
         """Runs the document cleaning pipeline on raw text."""
@@ -170,7 +182,11 @@ class AdministrativeDocumentCleaner:
                 if QUOC_HIEU_RE.search(stripped_line) or TIEU_NGU_RE.search(stripped_line):
                     idx += 1
                     continue
-                if SO_HIEU_RE.search(stripped_line) or NGAY_THANG_RE.search(stripped_line):
+                if SO_HIEU_RE.search(stripped_line):
+                    idx += 1
+                    continue
+                # Only drop standalone date-header lines, never an entire article body line.
+                if NGAY_THANG_RE.search(stripped_line) and len(stripped_line.split()) <= 12:
                     idx += 1
                     continue
                 if ACADEMIC_METADATA_RE.search(stripped_line):

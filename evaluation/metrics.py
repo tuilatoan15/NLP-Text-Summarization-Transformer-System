@@ -241,6 +241,10 @@ def evaluate_summary(
         "percent_reduction": round(100.0 * (1.0 - (pred_words / max(1, src_words))), 2),
     }
 
+    # Calculate faithfulness and coverage
+    faithfulness = compute_faithfulness_score(prediction, source_text)
+    coverage = compute_coverage_score(prediction, source_text)
+
     future: Future = _HEAVY_POOL.submit(_compute_heavy, prediction, reference)
     try:
         heavy = future.result(timeout=timeout)
@@ -253,6 +257,15 @@ def evaluate_summary(
     except Exception as exc:
         logger.warning("Heavy metrics error: %s", exc)
         heavy = _NULL_HEAVY.copy()
+
+    # Calculate composite score
+    composite = compute_composite_score(
+        rougeL=rouge["rougeL"],
+        semantic_similarity=heavy["semantic_similarity"],
+        faithfulness=faithfulness,
+        bertscore=heavy["bertscore_f1"],
+        coverage=coverage,
+    )
 
     from evaluation.readability import readability_scores
 
@@ -268,7 +281,7 @@ def evaluate_summary(
     human_eval = {
         "readability": readability.get("avg_sentence_length", 0.0),
         "fluency": max(0.0, 1.0 - readability.get("redundancy_ratio", 0.0)),
-        "factual_consistency": 0.0,
+        "factual_consistency": faithfulness,
         "coherence": readability.get("sentence_count", 0),
     }
 
@@ -289,6 +302,9 @@ def evaluate_summary(
         "warning": warning_msg,
         "is_biased": not is_real_reference,
         "human_eval_ready": human_eval,
+        "faithfulness": faithfulness,
+        "coverage": coverage,
+        "composite_score": composite,
     }
 
 
@@ -412,4 +428,140 @@ def evaluate_batch(
 def aggregate_rows(rows) -> dict:
     """Alias for :func:`aggregate_metric_rows` kept for backward compatibility."""
     return aggregate_metric_rows(rows)
+
+
+# ---------------------------------------------------------------------------
+# Advanced evaluation metrics (Phase 2)
+# ---------------------------------------------------------------------------
+
+def compute_composite_score(
+    rougeL: float,
+    semantic_similarity: float,
+    faithfulness: float,
+    bertscore: float,
+    coverage: float,
+    weights: dict[str, float] | None = None,
+) -> float:
+    """Compute a weighted composite score for overall model ranking.
+
+    All input metrics should be in [0, 1] range.
+    Returns a single score in [0, 1].
+    """
+    if weights is None:
+        weights = config.COMPOSITE_SCORE_WEIGHTS
+
+    score = (
+        weights.get("rougeL", 0.30) * max(0.0, min(1.0, rougeL))
+        + weights.get("semantic_similarity", 0.25) * max(0.0, min(1.0, semantic_similarity))
+        + weights.get("faithfulness", 0.20) * max(0.0, min(1.0, faithfulness))
+        + weights.get("bertscore", 0.15) * max(0.0, min(1.0, bertscore))
+        + weights.get("coverage", 0.10) * max(0.0, min(1.0, coverage))
+    )
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def compute_coverage_score(prediction: str, source_text: str) -> float:
+    """Measure information coverage — how much key content from the source is
+    retained in the summary using keyphrase/token overlap.
+
+    Returns a score in [0, 1] where 1 = all source keyphrases are present.
+    """
+    if not prediction or not source_text:
+        return 0.0
+
+    pred_tokens = set(tokenize_words(prediction))
+    src_tokens = set(tokenize_words(source_text))
+
+    if not src_tokens:
+        return 0.0
+
+    # Use content-word overlap (stopwords already removed by tokenize_words
+    # when called without remove_stopwords, but we filter short tokens)
+    src_keywords = {t for t in src_tokens if len(t) > 2}
+    pred_keywords = {t for t in pred_tokens if len(t) > 2}
+
+    if not src_keywords:
+        return 0.0
+
+    overlap = len(pred_keywords & src_keywords)
+    # Coverage = fraction of source keywords found in summary
+    coverage = overlap / len(src_keywords)
+    return round(max(0.0, min(1.0, coverage)), 4)
+
+
+def compute_info_retention(
+    rougeL: float,
+    compression_ratio: float,
+) -> float:
+    """Information retention index — combines ROUGE-L with compression efficiency.
+
+    A summary that achieves high ROUGE-L with low compression ratio retains
+    more information per word. Returns a score in [0, 1].
+    """
+    # Reward summaries that are shorter but still score high
+    efficiency_bonus = (1.0 - max(0.0, min(1.0, compression_ratio))) * 0.25
+    retention = rougeL * (1.0 + efficiency_bonus)
+    return round(max(0.0, min(1.0, retention)), 4)
+
+
+def compute_faithfulness_score(
+    prediction: str,
+    source_text: str,
+    model_name: str = config.SBERT_MODEL,
+) -> float:
+    """Compute faithfulness score — how faithful the summary is to the source
+    document based on sentence-level semantic alignment.
+
+    For extractive summaries this should always be ~1.0 (sentences come from source).
+    For abstractive summaries this measures if generated content is grounded.
+
+    Returns a score in [0, 1].
+    """
+    if not prediction or not source_text:
+        return 0.0
+
+    from src.preprocess import split_sentences
+
+    pred_sentences = split_sentences(prediction)
+    src_sentences = split_sentences(source_text)
+
+    if not pred_sentences or not src_sentences:
+        return 0.0
+
+    try:
+        model = _load_sentence_transformer(model_name)
+        from sentence_transformers import util
+        import torch
+
+        src_embeddings = model.encode(
+            src_sentences[:100],  # Limit for performance
+            normalize_embeddings=True,
+            convert_to_tensor=True,
+        )
+        pred_embeddings = model.encode(
+            pred_sentences[:30],
+            normalize_embeddings=True,
+            convert_to_tensor=True,
+        )
+
+        # For each prediction sentence, find max similarity to any source sentence
+        sim_matrix = util.cos_sim(pred_embeddings, src_embeddings)
+        max_sims = sim_matrix.max(dim=1).values
+        # Faithfulness = average of max similarities
+        faithfulness = float(max_sims.mean().item())
+        # Normalize from cosine range [-1, 1] to [0, 1]
+        faithfulness = (faithfulness + 1.0) / 2.0
+        return round(max(0.0, min(1.0, faithfulness)), 4)
+
+    except Exception as exc:
+        logger.warning("Faithfulness score fallback to lexical: %s", exc)
+        # Fallback: use lexical overlap per sentence
+        scores = []
+        for sent in pred_sentences:
+            max_overlap = max(
+                (_lexical_f1(sent, src) for src in src_sentences[:50]),
+                default=0.0,
+            )
+            scores.append(max_overlap)
+        return round(sum(scores) / max(1, len(scores)), 4) if scores else 0.0
 

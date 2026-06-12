@@ -32,6 +32,19 @@ class TestAdministrativeDocumentCleaner(unittest.TestCase):
         )
         self.assertFalse(self.cleaner.is_admin_document(news_text))
 
+    def test_un_news_with_nghi_quyet_not_admin(self):
+        """News mentioning 'nghị quyết' and 'ngày càng' must not be stripped as admin chrome."""
+        un_news = (
+            "Hội đồng Bảo an Liên Hợp Quốc đã họp khẩn cấp để thảo luận về tình hình "
+            "leo thang căng thẳng ở Trung Đông. Nga và Trung Quốc phản đối dự thảo nghị quyết, "
+            "cho rằng văn kiện còn thiếu cân bằng. Cuộc khủng hoảng nhân đạo ngày càng nghiêm trọng."
+        )
+        self.assertFalse(self.cleaner.is_admin_document(un_news))
+        cleaned = self.cleaner.clean(un_news)
+        self.assertGreater(len(cleaned.split()), 10)
+        from src.preprocess import clean_text
+        self.assertGreater(len(clean_text(un_news, aggressive=True).split()), 10)
+
     def test_clean_quoc_hieu_tieu_ngu(self):
         dirty = (
             "ỦY BAN NHÂN DÂN TỈNH NGHỆ AN\n"

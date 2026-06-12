@@ -52,18 +52,23 @@ class SummaryLengthManager:
     def get_extractive_sentences(cls, length_mode: str, analysis: dict[str, Any]) -> int:
         """
         Returns the number of sentences to extract based on the length mode.
+        Scales with source sentence count so short news articles are not over-compressed.
         """
         mode = length_mode.lower().strip() if length_mode else "auto"
         if mode == "auto":
             mode = analysis.get("suggested_mode", "standard")
 
         if mode == "short":
-            return 3
-        elif mode == "standard":
-            return 5
+            floor, cap = 3, 6
         elif mode == "detailed" or mode == "extremely_long":
-            return 8
-        return 5
+            floor, cap = 8, 15
+        else:
+            floor, cap = 5, 10
+
+        source_sentences = max(1, int(analysis.get("sentence_count", floor)))
+        # ~two-thirds of source sentences, bounded by mode floor/cap
+        proportional = max(floor, (source_sentences * 2 + 2) // 3)
+        return min(source_sentences, cap, proportional)
 
     @classmethod
     def get_abstractive_limits(
@@ -144,15 +149,15 @@ class SummaryLengthManager:
             chunk_summaries = []
             for chunk in chunks:
                 # Summarize chunk with short preset
-                summary = abstractive_summarize_key(chunk, algorithm, max_output_length=100, min_output_length=30)
+                summary = abstractive_summarize_key(algorithm, chunk, max_output_length=100, min_output_length=30)
                 chunk_summaries.append(summary)
 
             merged_text = " ".join(chunk_summaries)
             analysis = {"suggested_mode": "detailed"}
             min_tok, max_tok = cls.get_abstractive_limits(algorithm, length_mode, analysis)
             final_summary = abstractive_summarize_key(
-                merged_text,
                 algorithm,
+                merged_text,
                 max_output_length=max_tok,
                 min_output_length=min_tok,
             )

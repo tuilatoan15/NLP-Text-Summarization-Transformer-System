@@ -62,6 +62,16 @@ def _prefix_text(key: str, text: str) -> str:
     return text
 
 
+def _max_words_per_chunk(key: str) -> int:
+    """Model-specific input word budget before tokenization/truncation."""
+    if key == "bartpho":
+        # Syllable tokenizer expands ~1.8× vs whitespace word count.
+        return max(120, int(config.MAX_INPUT_TOKENS * 0.30))
+    if key == "mt5":
+        return max(150, int(config.MAX_INPUT_TOKENS * 0.48))
+    return max(180, int(config.MAX_INPUT_TOKENS * 0.55))
+
+
 def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
     """Split text into chunks at sentence boundaries, respecting max_words_per_chunk.
     Limit to config.ABSTRACTIVE_MAX_CHUNKS (default 16) to bound memory usage."""
@@ -384,9 +394,7 @@ def abstractive_summarize_key(
     target_words = max(12, int(max_output_length))
     source_words = count_words(text)
 
-    # Chunk threshold: roughly how many words fit in MAX_INPUT_TOKENS
-    # BARTPho syllable tokenizer expands word count ~1.8×, so be conservative.
-    max_words = max(180, int(config.MAX_INPUT_TOKENS * 0.55))
+    max_words = _max_words_per_chunk(key)
 
     if source_words > max_words:
         chunks = _chunk_text(text, max_words)

@@ -100,8 +100,29 @@ def _select_summary(
     if len(scores) != len(sentences):
         scores = np.ones(len(sentences), dtype=np.float32)
 
-    ranked = sorted(range(len(sentences)), key=lambda i: (float(scores[i]), -i), reverse=True)
-    selected_idxs = sorted(ranked[:count])
+    # Greedy selection with light position continuity bias (helps LSA/LexRank coherence).
+    norm_scores = scores.astype(np.float32).copy()
+    if norm_scores.max() > 0:
+        norm_scores = norm_scores / norm_scores.max()
+
+    selected_idxs: list[int] = []
+    remaining = set(range(len(sentences)))
+    while len(selected_idxs) < count and remaining:
+        best_idx = -1
+        best_value = -1.0
+        for idx in remaining:
+            position_bonus = 0.0
+            if selected_idxs:
+                nearest = min(abs(idx - s) for s in selected_idxs)
+                position_bonus = 0.12 if nearest == 1 else (0.06 if nearest <= 2 else 0.0)
+            value = float(norm_scores[idx]) + position_bonus
+            if value > best_value or (value == best_value and idx < best_idx):
+                best_value = value
+                best_idx = idx
+        selected_idxs.append(best_idx)
+        remaining.remove(best_idx)
+
+    selected_idxs = sorted(selected_idxs)
     max_score = float(np.max(scores)) if len(scores) and float(np.max(scores)) > 0 else 1.0
 
     selected = [

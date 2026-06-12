@@ -75,6 +75,20 @@ def audit_summary(
     sem_total = max(1, len(sentence_audits))
     semantic_coverage = round(sem_supported / sem_total, 4)
 
+    # Calculate faithfulness and coverage scores
+    from evaluation.metrics import compute_faithfulness_score, compute_coverage_score, compute_info_retention
+
+    faithfulness_val = compute_faithfulness_score(summary, source_text)
+    coverage_val = compute_coverage_score(summary, source_text)
+    
+    # Estimate compression ratio for info retention
+    pred_words = len(summary.split())
+    src_words = len(source_text.split())
+    comp_ratio = pred_words / max(1, src_words)
+    # Use lexical overlap with source as a proxy for ROUGE-L in info_retention
+    source_overlap = lexical_overlap(source_text, summary)
+    info_retention_val = compute_info_retention(source_overlap, comp_ratio)
+
     status = consistency.get("status", "unknown")
     nli_available = bool(semantic_scores)
     if grounding_coverage >= 0.7 and consistency.get("consistency_score", 0) >= 0.55 and semantic_coverage >= 0.6:
@@ -94,4 +108,8 @@ def audit_summary(
         "hallucination_risk": risk,
         "contradiction_flag": status in {"unsupported", "suspicious"},
         "nli_mode": "embedding-alignment" if nli_available else "lexical-fallback",
+        "faithfulness_score": faithfulness_val,
+        "coverage_score": coverage_val,
+        "info_retention": info_retention_val,
     }
+

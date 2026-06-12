@@ -67,8 +67,8 @@ GENERATION_CONFIGS: dict[str, dict] = {
         min_new_tokens=20,
         num_beams=4,
         no_repeat_ngram_size=3,
-        repetition_penalty=1.2,
-        length_penalty=1.0,
+        repetition_penalty=1.35,
+        length_penalty=1.05,
         early_stopping=True,
         do_sample=False,
     ),
@@ -89,8 +89,8 @@ GENERATION_CONFIGS: dict[str, dict] = {
         min_new_tokens=25,
         num_beams=4,
         no_repeat_ngram_size=3,
-        repetition_penalty=1.15,
-        length_penalty=1.0,
+        repetition_penalty=1.35,
+        length_penalty=1.15,
         early_stopping=True,
         do_sample=False,
         forced_bos_token_id=None,
@@ -146,8 +146,30 @@ WITH_REFERENCE_RANKING_WEIGHTS: dict[str, float] = {
     "compression_score": 0.10,
 }
 
+# ─────────────────────────── COMPOSITE SCORE ───────────────
+# Trọng số điểm tổng hợp (Final Composite Score) cho bảng xếp hạng.
+# Điều chỉnh theo kết quả nghiên cứu để cân bằng giữa overlap metrics
+# và semantic quality metrics.
+COMPOSITE_SCORE_WEIGHTS: dict[str, float] = {
+    "rougeL": float(os.getenv("COMPOSITE_W_ROUGEL", "0.30")),
+    "semantic_similarity": float(os.getenv("COMPOSITE_W_SEMANTIC", "0.25")),
+    "faithfulness": float(os.getenv("COMPOSITE_W_FAITHFULNESS", "0.20")),
+    "bertscore": float(os.getenv("COMPOSITE_W_BERTSCORE", "0.15")),
+    "coverage": float(os.getenv("COMPOSITE_W_COVERAGE", "0.10")),
+}
+
+# ─────────────────────────── BENCHMARK CATEGORIES ──────────
+BENCHMARK_DOCUMENT_CATEGORIES: dict[str, tuple[int, int]] = {
+    "Short": (100, 500),
+    "Medium": (500, 2000),
+    "Long": (2000, 10000),
+    "Very Long": (10000, 100000),
+}
+
 # ─────────────────────────── METRICS ───────────────────────
-BERTSCORE_MODEL = os.getenv("BERTSCORE_MODEL", "bert-base-multilingual-cased")
+# xlm-roberta-base cho BERTScore: tốt hơn bert-base-multilingual-cased
+# cho ngôn ngữ có dấu như tiếng Việt (tokenizer xử lý tốt syllable/diacritics).
+BERTSCORE_MODEL = os.getenv("BERTSCORE_MODEL", "xlm-roberta-base")
 BERTSCORE_LANG = os.getenv("BERTSCORE_LANG", "vi")
 SBERT_MODEL = os.getenv("SBERT_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 HEAVY_METRICS_TIMEOUT = float(os.getenv("HEAVY_METRICS_TIMEOUT", "30.0"))

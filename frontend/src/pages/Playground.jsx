@@ -1,11 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Sliders
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-
-const getAPI = () => import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+import { usePlaygroundStore, filesFingerprint } from '../stores/playgroundStore';
+import { extractFilesFromUpload, streamCompareSummaries } from '../services/cachedApi';
+import { invalidateAfterSummarization, invalidateFileExtractCache } from '../lib/cacheInvalidation';
+import { queryKeys } from '../lib/queryKeys';
+import { cacheLog } from '../lib/cacheLogger';
 
 const ALGORITHMS = [
   { key: 'textrank', name: 'TextRank', group: 'extractive', color: '#14b8a6' },
@@ -39,33 +43,6 @@ function byKey(key) {
 
 function initialRunState(keys) {
   return Object.fromEntries(keys.map(key => [key, { status: STATUS.idle, result: null, error: null }]));
-}
-
-async function consumeCompareStream(response, onEvent) {
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `HTTP ${response.status}`);
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('Streaming not supported by browser');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() || '';
-    for (const chunk of chunks) {
-      for (const line of chunk.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        onEvent(JSON.parse(trimmed.slice(5).trim()));
-      }
-    }
-  }
 }
 
 const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
@@ -331,17 +308,17 @@ const containerVariants = {
 
 const Playground = () => {
   const { t, addNotification } = useApp();
-  const [text, setText] = useState(SAMPLE_TEXT);
-  const [reference, setReference] = useState('');
+  const queryClient = useQueryClient();
+  const {
+    text, reference, fileMetas, selected, summaryLength, result, runState, completedCount,
+    setText, setReference, setFileMetas, setSelected, setSummaryLength,
+    setResult, setRunState, setCompletedCount, setLastExtractFingerprint,
+  } = usePlaygroundStore();
+
   const [files, setFiles] = useState([]);
-  const [selected, setSelected] = useState(ALGORITHMS.map(item => item.key));
-  const [summaryLength, setSummaryLength] = useState('auto');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState(null);
-  const [runState, setRunState] = useState({});
   const [runningKey, setRunningKey] = useState(null);
-  const [completedCount, setCompletedCount] = useState(0);
 
   const rows = useMemo(() => result?.results || [], [result]);
   
@@ -390,35 +367,48 @@ const Playground = () => {
     const selectedFiles = Array.from(e.target.files || []);
     setFiles(selectedFiles);
     setError('');
+    invalidateFileExtractCache(queryClient);
 
     if (selectedFiles.length > 0) {
       const file = selectedFiles[0];
+      const metas = selectedFiles.map((f) => ({
+        name: f.name,
+        size: f.size,
+        lastModified: f.lastModified,
+        type: f.type,
+      }));
+      setFileMetas(metas);
+      const fingerprint = filesFingerprint(metas);
+      setLastExtractFingerprint(fingerprint);
+
       const suffix = file.name.split('.').pop()?.toLowerCase();
-      
-      // If it is standard txt/md, read client side
+
       if (suffix === 'txt' || suffix === 'md') {
         const reader = new FileReader();
         reader.onload = (event) => {
           if (event.target?.result) {
-            setText(event.target.result);
+            setText(String(event.target.result));
           }
         };
         reader.readAsText(file);
       } else {
-        // PDF, Word, Doc, Docx: Extract from backend immediately
         setLoading(true);
         try {
-          const form = new FormData();
-          form.append('files', file);
-          const API = getAPI();
-          const response = await fetch(`${API}/summarize/files/extract`, { method: 'POST', body: form });
-          if (!response.ok) {
-            const body = await response.text();
-            throw new Error(body || `HTTP ${response.status}`);
+          const cacheKey = queryKeys.fileExtract(fingerprint);
+          const cached = queryClient.getQueryData(cacheKey);
+          let extractedText;
+          if (cached?.text) {
+            cacheLog('HIT', 'file extract', fingerprint);
+            extractedText = cached.text;
+          } else {
+            cacheLog('MISS', 'file extract', fingerprint);
+            const payload = await extractFilesFromUpload(selectedFiles);
+            extractedText = payload.text;
+            queryClient.setQueryData(cacheKey, payload);
+            cacheLog('SET', 'file extract', fingerprint);
           }
-          const { text: extractedText } = await response.json();
           setText(extractedText);
-          
+
           addNotification({
             title: t('notifyFileExtracted', 'Đã trích xuất thành công'),
             message: t('notifyFileExtractedMsg', 'Nội dung tài liệu đã được tải vào khung Văn bản.'),
@@ -452,61 +442,60 @@ const Playground = () => {
     setRunningKey(null);
     setResult(null);
 
-    const API = getAPI();
-    const response = await fetch(`${API}/summarize/compare/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await streamCompareSummaries(
+      {
         text: textToUse,
         reference: reference || null,
         algorithms: selected,
-        summary_length: summaryLength,
-        save_result: true,
-      }),
-    });
-
-    await consumeCompareStream(response, (evt) => {
-      if (evt.event === 'start') {
-        const keys = evt.algorithms || selected;
-        setRunState(initialRunState(keys));
-      } else if (evt.event === 'running') {
-        setRunningKey(evt.algorithm);
-        setRunState(prev => ({
-          ...prev,
-          [evt.algorithm]: { ...prev[evt.algorithm], status: STATUS.running },
-        }));
-      } else if (evt.event === 'done') {
-        setRunningKey(null);
-        setCompletedCount(evt.completed ?? 0);
-        setRunState(prev => ({
-          ...prev,
-          [evt.algorithm]: { status: STATUS.done, result: evt.result, error: null },
-        }));
-      } else if (evt.event === 'finished') {
-        setRunningKey(null);
-        const finalData = docMetadata ? { ...evt.data, documents: docMetadata } : evt.data;
-        setResult(finalData);
-        setCompletedCount((evt.data?.results || []).length);
-        const best = evt.data?.best_model?.algorithm || evt.data?.ranking?.[0]?.algorithm || '—';
-        addNotification({
-          title: t('notifyCompareDone'),
-          message: t('notifyCompareDoneMsg', {
-            count: (evt.data?.results || []).length,
-            best,
-          }),
-          type: 'success',
-          link: '/playground',
-          showBrowser: true,
-        });
-      } else if (evt.event === 'error') {
-        throw new Error(evt.error || 'Stream failed');
-      }
-    });
+        summaryLength,
+        saveResult: true,
+      },
+      (evt) => {
+        if (evt.event === 'start') {
+          const keys = evt.algorithms || selected;
+          setRunState(initialRunState(keys));
+        } else if (evt.event === 'running') {
+          setRunningKey(evt.algorithm);
+          setRunState(prev => ({
+            ...prev,
+            [evt.algorithm]: { ...prev[evt.algorithm], status: STATUS.running },
+          }));
+        } else if (evt.event === 'done') {
+          setRunningKey(null);
+          setCompletedCount(evt.completed ?? 0);
+          setRunState(prev => ({
+            ...prev,
+            [evt.algorithm]: { status: STATUS.done, result: evt.result, error: null },
+          }));
+        } else if (evt.event === 'finished') {
+          setRunningKey(null);
+          const finalData = docMetadata ? { ...evt.data, documents: docMetadata } : evt.data;
+          setResult(finalData);
+          setCompletedCount((evt.data?.results || []).length);
+          invalidateAfterSummarization(queryClient);
+          const best = evt.data?.best_model?.algorithm || evt.data?.ranking?.[0]?.algorithm || '—';
+          addNotification({
+            title: t('notifyCompareDone'),
+            message: t('notifyCompareDoneMsg', {
+              count: (evt.data?.results || []).length,
+              best,
+            }),
+            type: 'success',
+            link: '/playground',
+            showBrowser: true,
+          });
+        } else if (evt.event === 'error') {
+          throw new Error(evt.error || 'Stream failed');
+        }
+      },
+    );
   }
 
   async function runFilesBatch() {
-    const form = new FormData();
-    files.forEach(file => form.append('files', file));
+    const formFiles = files.length ? files : [];
+    if (!formFiles.length && fileMetas.length) {
+      throw new Error('Vui lòng chọn lại tệp để chạy so sánh.');
+    }
 
     setRunState(prev => {
       const next = { ...prev };
@@ -515,20 +504,25 @@ const Playground = () => {
     });
     setRunningKey(selected[0] || null);
 
-    const API = getAPI();
-    // 1. Extract text from uploaded files
-    const response = await fetch(`${API}/summarize/files/extract`, { method: 'POST', body: form });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(body || `HTTP ${response.status}`);
+    const fingerprint = filesFingerprint(
+      formFiles.map((f) => ({
+        name: f.name,
+        size: f.size,
+        lastModified: f.lastModified,
+        type: f.type,
+      })),
+    );
+    const cacheKey = queryKeys.fileExtract(fingerprint);
+    let payload = queryClient.getQueryData(cacheKey);
+    if (!payload?.text) {
+      payload = await extractFilesFromUpload(formFiles);
+      queryClient.setQueryData(cacheKey, payload);
+    } else {
+      cacheLog('HIT', 'file extract batch', fingerprint);
     }
-    const { text: extractedText, documents } = await response.json();
-    
-    // Save to textbox so user can see it
-    setText(extractedText);
-    
-    // 2. Run streaming comparison over the extracted text
-    await runTextStream(extractedText, documents);
+
+    setText(payload.text);
+    await runTextStream(payload.text, payload.documents);
   }
 
   async function runComparison(event) {
@@ -639,9 +633,9 @@ const Playground = () => {
               </div>
             </div>
 
-            {files.length > 0 && (
+            {files.length > 0 || fileMetas.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-1">
-                {files.map((f, i) => (
+                {(files.length ? files : fileMetas).map((f, i) => (
                   <div
                     key={i}
                     className="text-[10px] text-[var(--text-secondary)] flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-elevated)] border border-[var(--border)] rounded-full shadow-sm"
@@ -650,8 +644,10 @@ const Playground = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        setFiles(files.filter((_, idx) => idx !== i));
-                        if (files.length === 1) setText(SAMPLE_TEXT);
+                        setFiles([]);
+                        setFileMetas([]);
+                        invalidateFileExtractCache(queryClient);
+                        if (!files.length && !fileMetas.length) setText(SAMPLE_TEXT);
                       }}
                       className="text-red-500 hover:text-red-600 font-bold text-xs cursor-pointer focus:outline-none transition-colors"
                     >
@@ -660,7 +656,7 @@ const Playground = () => {
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* STEP 2: Full-Width Rich Text Editor */}
@@ -850,4 +846,4 @@ const Playground = () => {
   );
 };
 
-export default Playground;
+export default memo(Playground);

@@ -193,3 +193,9 @@ export async function runResearchBenchmark(): Promise<any> {
   return parseJson(response, 'Run research benchmark');
 }
 
+export async function getLeaderboardByCategory(category: string): Promise<any> {
+  const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}`);
+  return parseJson(response, 'Leaderboard by category');
+}
+
+

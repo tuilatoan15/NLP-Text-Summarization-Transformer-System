@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
+import { QueryProvider } from './providers/QueryProvider';
 import DashboardLayout from './layouts/DashboardLayout';
 
 // Lazy-loaded pages for code splitting
@@ -15,6 +16,7 @@ const DocumentExplainability = lazy(() => import('./pages/documents/DocumentExpl
 
 const App = () => {
   return (
+    <QueryProvider>
     <AppProvider>
       <BrowserRouter>
         <Routes>
@@ -46,6 +48,7 @@ const App = () => {
         </Routes>
       </BrowserRouter>
     </AppProvider>
+    </QueryProvider>
   );
 };
 

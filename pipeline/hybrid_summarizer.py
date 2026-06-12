@@ -19,6 +19,50 @@ from src.utils import count_words
 logger = logging.getLogger(__name__)
 
 
+class SemanticChunker:
+    """Split text into semantically cohesive chunks using sentence embeddings."""
+    def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", threshold: float = 0.5):
+        self.model_name = model_name
+        self.threshold = threshold
+        self._model = None
+
+    def _get_model(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+    def chunk_document(self, sentences: list[str]) -> list[str]:
+        if len(sentences) <= 1:
+            return sentences
+        
+        try:
+            model = self._get_model()
+            embeddings = model.encode(sentences, normalize_embeddings=True)
+            
+            chunks = []
+            current_chunk = [sentences[0]]
+            
+            for i in range(len(sentences) - 1):
+                # Calculate cosine similarity between adjacent sentence embeddings
+                sim = float(embeddings[i] @ embeddings[i+1])
+                if sim < self.threshold:
+                    chunks.append(" ".join(current_chunk))
+                    current_chunk = [sentences[i+1]]
+                else:
+                    current_chunk.append(sentences[i+1])
+            
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+            return chunks
+        except Exception as exc:
+            logger.warning(f"Semantic chunking failed, fallback to sentence grouping: {exc}")
+            chunks = []
+            for i in range(0, len(sentences), 3):
+                chunks.append(" ".join(sentences[i:i+3]))
+            return chunks
+
+
 class HybridSummarizer:
     """
     Hệ thống tóm tắt thông minh nhiều tầng kết hợp Extractive + Abstractive.
@@ -36,12 +80,13 @@ class HybridSummarizer:
         extractive_algo: str = "textrank",
         temperature: float = 0.7,
         num_beams: int = 4,
-        repetition_penalty: float = 2.0
+        repetition_penalty: float = 2.0,
+        use_semantic_chunking: bool = False
     ) -> str:
         """
         Thực hiện tóm tắt văn bản thông minh:
           1. Tách câu và lọc tiền xử lý.
-          2. Dùng thuật toán Extractive (TextRank/LexRank/LSA) để lọc ra Top N% câu quan trọng nhất.
+          2. Dùng thuật toán Extractive (hoặc Semantic Chunking) để lọc ra Top N% câu quan trọng nhất.
           3. Ghép các câu cốt lõi lại thành văn bản cô đọng (Condensed Context).
           4. Đưa văn bản cô đọng vào Transformer (Abstractive) để sinh bản tóm tắt tối ưu.
 
@@ -53,6 +98,7 @@ class HybridSummarizer:
             temperature:              Nhiệt độ sinh từ của Transformer
             num_beams:                Số lượng beam search
             repetition_penalty:       Tham số phạt lặp từ
+            use_semantic_chunking:    Sử dụng Semantic Chunking để lọc câu ngữ nghĩa
 
         Returns:
             Bản tóm tắt cuối cùng dạng sinh (Abstractive Summary)
@@ -68,23 +114,41 @@ class HybridSummarizer:
             logger.info("Văn bản quá ngắn, chuyển trực tiếp sang tóm tắt Abstractive nguyên bản.")
             return self._run_abstractive_direct(cleaned_text, max_target_tokens, temperature, num_beams, repetition_penalty)
 
-        # ── Bước 1: Extractive Filtering (Nén văn bản) ───────────────────
-        # Tính toán số câu cần giữ lại dựa trên tỷ lệ nén (khống chế tối thiểu 3 câu, tối đa 25 câu)
+        # Lấy số câu cần chọn lọc
         num_sentences = max(3, min(int(len(sentences) * compression_ratio), 25))
-        
-        logger.info(
-            f"⚡ [Hybrid Summarizer] Extractive Stage: {len(sentences)} câu ➔ Lọc lấy top {num_sentences} câu "
-            f"bằng thuật toán '{extractive_algo}' (tỷ lệ nén {compression_ratio * 100:.1f}%)"
-        )
-        
-        extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo)
-        if not extractive_runner:
-            logger.warning(f"Thuật toán extractive '{extractive_algo}' không tìm thấy. Fallback sang 'textrank'")
-            extractive_runner = EXTRACTIVE_RUNNERS["textrank"]
+
+        # ── Bước 1: Filtering (Nén văn bản) ───────────────────
+        if use_semantic_chunking:
+            logger.info(f"⚡ [Hybrid Summarizer] Semantic Chunking Stage: Lọc lấy top {num_sentences} câu")
+            chunker = SemanticChunker(threshold=0.45)
+            semantic_chunks = chunker.chunk_document(sentences)
             
-        # Lấy bản tóm tắt extractive
-        condensed_details = extractive_runner(cleaned_text, sentence_count=num_sentences)
-        condensed_text = condensed_details.get("summary", "")
+            selected_sentences = []
+            sents_per_chunk = max(1, int(num_sentences / max(1, len(semantic_chunks))))
+            
+            for chunk in semantic_chunks:
+                chunk_sents = split_sentences(chunk)
+                if len(chunk_sents) <= sents_per_chunk:
+                    selected_sentences.extend(chunk_sents)
+                else:
+                    extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo) or EXTRACTIVE_RUNNERS["textrank"]
+                    details = extractive_runner(chunk, sentence_count=sents_per_chunk)
+                    selected_sentences.extend(split_sentences(details.get("summary", "")))
+            
+            condensed_text = " ".join(selected_sentences[:num_sentences])
+        else:
+            logger.info(
+                f"⚡ [Hybrid Summarizer] Extractive Stage: {len(sentences)} câu ➔ Lọc lấy top {num_sentences} câu "
+                f"bằng thuật toán '{extractive_algo}' (tỷ lệ nén {compression_ratio * 100:.1f}%)"
+            )
+            
+            extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo)
+            if not extractive_runner:
+                logger.warning(f"Thuật toán extractive '{extractive_algo}' không tìm thấy. Fallback sang 'textrank'")
+                extractive_runner = EXTRACTIVE_RUNNERS["textrank"]
+                
+            condensed_details = extractive_runner(cleaned_text, sentence_count=num_sentences)
+            condensed_text = condensed_details.get("summary", "")
         
         condensed_word_count = count_words(condensed_text)
         logger.info(

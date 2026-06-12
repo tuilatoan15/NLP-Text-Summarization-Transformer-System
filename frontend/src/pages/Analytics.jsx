@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
@@ -6,18 +6,19 @@ import {
 import { Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getAnalyticsDashboard } from '../services/apiService';
+import { useAnalyticsDashboardQuery } from '../hooks/useApiQueries';
+import { useCacheHitLogger } from '../hooks/useCacheHitLogger';
 import { getChartTheme, dateLocale } from '../theme/chartTheme';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6'];
 
-const StatBox = ({ title, value, sub }) => (
+const StatBox = memo(({ title, value, sub }) => (
   <div className="ui-card p-6">
     <p className="text-sm text-[var(--text-muted)] mb-2">{title}</p>
     <span className="text-3xl font-bold text-[var(--text)]">{value}</span>
     {sub && <p className="text-xs text-[var(--text-faint)] mt-2">{sub}</p>}
   </div>
-);
+));
 
 const rangeKey = (range) => {
   if (range === '7d') return 'range7d';
@@ -27,40 +28,14 @@ const rangeKey = (range) => {
 };
 
 const Analytics = () => {
-  const { t, locale, isDark, analyticsCache, setAnalyticsCache } = useApp();
+  const { t, locale, isDark } = useApp();
   const [timeRange, setTimeRange] = useState('30d');
-  const [data, setData] = useState(() => analyticsCache['30d'] || null);
-  const [loading, setLoading] = useState(!analyticsCache['30d']);
-  const [error, setError] = useState('');
+  const { data, isLoading, isFetching, error } = useAnalyticsDashboardQuery(timeRange, 20);
+  useCacheHitLogger(`analytics ${timeRange}`, data, isFetching);
+
+  const loading = isLoading && !data;
   const chart = getChartTheme(isDark);
   const dLocale = dateLocale(locale);
-
-  useEffect(() => {
-    if (analyticsCache[timeRange]) {
-      setData(analyticsCache[timeRange]);
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError('');
-      try {
-        const payload = await getAnalyticsDashboard(timeRange, 20);
-        if (!cancelled) {
-          setData(payload);
-          setAnalyticsCache(prev => ({ ...prev, [timeRange]: payload }));
-        }
-      } catch (err) {
-        if (!cancelled) setError(err.message || t('analyticsLoadError'));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [timeRange, analyticsCache, setAnalyticsCache]);
 
   const metrics = data?.metrics || {};
   const modelRows = data?.visualization?.model_performance || [];
@@ -109,7 +84,7 @@ const Analytics = () => {
 
       {error && (
         <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 rounded-lg px-4 py-3">
-          {error}
+          {error.message || t('analyticsLoadError')}
         </p>
       )}
 
@@ -267,4 +242,4 @@ const Analytics = () => {
   );
 };
 
-export default Analytics;
+export default memo(Analytics);

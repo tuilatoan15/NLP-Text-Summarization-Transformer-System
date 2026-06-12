@@ -89,3 +89,17 @@ class TestResearchEndpoints:
         data = response.json()
         assert data["status"] == "success"
         assert "message" in data
+
+    def test_get_leaderboard_by_category(self, client):
+        response = client.get("/research/leaderboard/by-category?category=Short")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["category"] == "Short"
+        assert "total_samples" in data
+        assert "leaderboard" in data
+        assert isinstance(data["leaderboard"], list)
+        if len(data["leaderboard"]) > 0:
+            item = data["leaderboard"][0]
+            assert "key" in item
+            assert "composite" in item
+

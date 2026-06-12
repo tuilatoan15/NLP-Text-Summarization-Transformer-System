@@ -364,7 +364,8 @@ def clean_generated_summary(text: str) -> str:
         text = re.sub(r"\b(\w+\s+\w+\s+\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
         text = re.sub(r"\b(\w+\s+\w+\s+\w+\s+\w+)(?:\s+\1\b)+", r"\1", text, flags=re.IGNORECASE | re.UNICODE)
 
-    text = clean_text(text, aggressive=True)
+    # Do not run administrative chrome stripping on model output — it can erase valid summaries.
+    text = clean_text(text, aggressive=False)
 
     text = re.sub(r"\s*,\s*,", ", ", text)
     text = re.sub(r"\s*\.\s*\.", ". ", text)

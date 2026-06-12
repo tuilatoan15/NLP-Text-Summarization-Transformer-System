@@ -33,7 +33,7 @@ def hierarchical_summarize(
             method = "extractive-textrank"
         else:
             try:
-                summary = abstractive_summarize_key(text, model_key, max_output_length=max_chunk_output)
+                summary = abstractive_summarize_key(model_key, text, max_output_length=max_chunk_output)
                 method = f"abstractive-{model_key}"
             except Exception as exc:
                 logger.warning("Chunk abstractive failed, TextRank fallback: %s", exc)
@@ -63,8 +63,8 @@ def hierarchical_summarize(
     reduce_input = "\n".join(s["summary"] for s in section_summaries) or source_text[:12000]
     try:
         global_summary = abstractive_summarize_key(
-            reduce_input,
             model_key,
+            reduce_input,
             max_output_length=max_global_output,
         )
         global_method = f"abstractive-{model_key}"

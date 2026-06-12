@@ -1,12 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getExplainability } from '../../services/apiService';
-import { useDocumentContext } from '../../context/DocumentContext';
+import { Brain, BarChart3, Network, CheckCircle2, XCircle, Info } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
-import { Brain, BarChart3, Network, CheckCircle2, XCircle, Info } from 'lucide-react';
+import { useDocumentContext } from '../../context/DocumentContext';
+import { useExplainabilityQuery } from '../../hooks/useApiQueries';
+import { useCacheHitLogger } from '../../hooks/useCacheHitLogger';
 
 const ALGO_OPTIONS = [
   { key: 'textrank', label: 'TextRank', color: '#14b8a6' },
@@ -29,24 +30,15 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: React.Ele
   );
 }
 
-export default function DocumentExplainability() {
+function DocumentExplainability() {
   const { document } = useDocumentContext();
-  const [algorithm, setAlgorithm] = useState('textrank');
-  const [payload, setPayload] = useState<Record<string, any> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const prevDocId = useRef<string | null>(null);
+  const [algorithm, setAlgorithm] = React.useState('textrank');
+  const docId = document?.document_id as string | undefined;
+
+  const { data: payload, isLoading, isFetching } = useExplainabilityQuery(docId, algorithm);
+  useCacheHitLogger(`explainability ${algorithm}`, payload, isFetching);
 
   const current = ALGO_OPTIONS.find(a => a.key === algorithm)!;
-
-  useEffect(() => {
-    if (!document) return;
-    const docId = document.document_id as string;
-    setLoading(true);
-    getExplainability(docId, algorithm)
-      .then(r => setPayload(r as Record<string, any>))
-      .catch(() => setPayload(null))
-      .finally(() => setLoading(false));
-  }, [document, algorithm]);
 
   if (!document) {
     return (
@@ -62,7 +54,6 @@ export default function DocumentExplainability() {
   const keywords: Array<{ term: string; score: number }> = payload?.keywords ?? [];
   const selectedCount = nodes.filter(n => n.selected).length;
 
-  // Bar chart data — top 15 sentences by score
   const barData = nodes
     .slice(0, 15)
     .map((n, i) => ({
@@ -72,7 +63,6 @@ export default function DocumentExplainability() {
       text: String(n.label ?? '').slice(0, 80),
     }));
 
-  // Keyword chart
   const kwData = keywords.slice(0, 12).map(k => ({
     term: k.term,
     score: Number(k.score ?? 0),
@@ -80,7 +70,6 @@ export default function DocumentExplainability() {
 
   return (
     <div className="space-y-5">
-      {/* Algorithm selector */}
       <div className="flex flex-wrap gap-2">
         {ALGO_OPTIONS.map(a => (
           <button
@@ -98,12 +87,11 @@ export default function DocumentExplainability() {
             {a.label}
           </button>
         ))}
-        {loading && (
+        {isLoading && (
           <span className="text-xs text-[var(--text-muted)] self-center animate-pulse">Đang tải...</span>
         )}
       </div>
 
-      {/* Summary stats */}
       {nodes.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -122,7 +110,6 @@ export default function DocumentExplainability() {
         </motion.div>
       )}
 
-      {/* Sentence score bar chart */}
       {barData.length > 0 && (
         <Panel title={`Sentence Ranking — ${current.label}`} icon={BarChart3}>
           <div className="h-64">
@@ -132,9 +119,9 @@ export default function DocumentExplainability() {
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} domain={[0, 'auto']} />
                 <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const d = payload[0].payload;
+                  content={({ active, payload: tipPayload }) => {
+                    if (!active || !tipPayload?.length) return null;
+                    const d = tipPayload[0].payload;
                     return (
                       <div className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-xl p-3 shadow-xl max-w-xs text-xs">
                         <p className="font-bold text-[var(--text)] mb-1">{d.name}</p>
@@ -159,20 +146,9 @@ export default function DocumentExplainability() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="flex gap-4 mt-2 text-xs text-[var(--text-muted)]">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded" style={{ background: current.color }} />
-              Câu được chọn
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-[var(--border)]" />
-              Câu bị loại
-            </span>
-          </div>
         </Panel>
       )}
 
-      {/* Keyword importance */}
       {kwData.length > 0 && (
         <Panel title="Keyword Importance" icon={Network}>
           <div className="h-56">
@@ -192,7 +168,6 @@ export default function DocumentExplainability() {
         </Panel>
       )}
 
-      {/* Sentences detail */}
       {nodes.length > 0 && (
         <Panel title="Chi tiết câu — Selected vs Rejected" icon={Brain}>
           <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
@@ -217,10 +192,7 @@ export default function DocumentExplainability() {
                     <span className="font-bold text-[var(--text-muted)]">#{node.index ?? i + 1}</span>
                     <span
                       className="font-mono px-1.5 py-0.5 rounded text-[10px]"
-                      style={{
-                        background: `${current.color}20`,
-                        color: current.color,
-                      }}
+                      style={{ background: `${current.color}20`, color: current.color }}
                     >
                       {Number(node.rank_score ?? node.score ?? 0).toFixed(4)}
                     </span>
@@ -235,7 +207,7 @@ export default function DocumentExplainability() {
         </Panel>
       )}
 
-      {!payload && !loading && (
+      {!payload && !isLoading && (
         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)] bg-[var(--surface-inset)] rounded-xl px-4 py-3">
           <Info size={15} />
           Không có dữ liệu explainability cho thuật toán này.
@@ -244,3 +216,5 @@ export default function DocumentExplainability() {
     </div>
   );
 }
+
+export default memo(DocumentExplainability);

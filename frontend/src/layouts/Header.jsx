@@ -4,6 +4,7 @@ import {
   Search, Moon, Sun, Bell, CheckCircle2, AlertCircle, Info, X, Command,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import RefreshDataButton from '../components/RefreshDataButton';
 
 const typeIcon = {
   success: CheckCircle2,
@@ -129,6 +130,9 @@ const Header = () => {
             EN
           </button>
         </div>
+
+        {/* Refresh cached data */}
+        <RefreshDataButton />
 
         {/* Theme */}
         <button

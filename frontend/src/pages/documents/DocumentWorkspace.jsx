@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, memo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, Cell,
@@ -10,6 +11,10 @@ import {
 import {
   compareDocumentSummaries, ingestDocument, searchDocument,
 } from '../../services/apiService';
+import { useDocumentWorkspaceStore } from '../../stores/documentWorkspaceStore';
+import { invalidateAfterDocumentUpload, invalidateAfterSummarization } from '../../lib/cacheInvalidation';
+import { queryKeys } from '../../lib/queryKeys';
+import { cacheLog } from '../../lib/cacheLogger';
 
 const algorithmOptions = [
   { key: 'textrank', label: 'TextRank', group: 'Extractive' },
@@ -50,14 +55,24 @@ function Panel({ title, icon: Icon, children, actions }) {
 }
 
 export default function DocumentWorkspace() {
-  const [tab, setTab] = useState('upload');
+  const queryClient = useQueryClient();
+  const {
+    document: documentState,
+    compareResult,
+    searchResult,
+    reference,
+    selectedAlgorithms,
+    activeTab: tab,
+    setDocument: setDocumentState,
+    setCompareResult,
+    setSearchResult,
+    setReference,
+    setSelectedAlgorithms,
+    setActiveTab: setTab,
+  } = useDocumentWorkspaceStore();
+
   const [file, setFile] = useState(null);
-  const [documentState, setDocumentState] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResult, setSearchResult] = useState(null);
-  const [compareResult, setCompareResult] = useState(null);
-  const [reference, setReference] = useState('');
-  const [selectedAlgorithms, setSelectedAlgorithms] = useState(['textrank', 'lexrank', 'lsa', 'tfidf']);
   const [uploading, setUploading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -80,6 +95,7 @@ export default function DocumentWorkspace() {
     setUploading(true);
     setError(null);
     try {
+      invalidateAfterDocumentUpload(queryClient);
       const payload = await ingestDocument(file, { includeEmbeddings: true, embeddingModel: 'hash' });
       setDocumentState(payload);
       setTab('analysis');
@@ -94,7 +110,17 @@ export default function DocumentWorkspace() {
     if (!documentState || !searchQuery.trim()) return;
     setSearching(true);
     try {
-      setSearchResult(await searchDocument(documentState.document_id, searchQuery, 5));
+      const cacheKey = ['document', documentState.document_id, 'search', searchQuery, 5];
+      const cached = queryClient.getQueryData(cacheKey);
+      if (cached) {
+        cacheLog('HIT', 'document search', searchQuery);
+        setSearchResult(cached);
+      } else {
+        cacheLog('MISS', 'document search', searchQuery);
+        const result = await searchDocument(documentState.document_id, searchQuery, 5);
+        queryClient.setQueryData(cacheKey, result);
+        setSearchResult(result);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -106,14 +132,29 @@ export default function DocumentWorkspace() {
     if (!documentState) return;
     setComparing(true);
     try {
-      const payload = await compareDocumentSummaries(documentState.document_id, {
-        reference: reference || null,
-        algorithms: selectedAlgorithms,
-        targetLengthRatio: 35,
-        extractiveSentences: 4,
-        maxAbstractiveLength: 160,
-      });
+      const cacheKey = queryKeys.documentCompare(
+        documentState.document_id,
+        selectedAlgorithms,
+        reference || null,
+      );
+      const cached = queryClient.getQueryData(cacheKey);
+      let payload;
+      if (cached) {
+        cacheLog('HIT', 'document compare');
+        payload = cached;
+      } else {
+        cacheLog('MISS', 'document compare');
+        payload = await compareDocumentSummaries(documentState.document_id, {
+          reference: reference || null,
+          algorithms: selectedAlgorithms,
+          targetLengthRatio: 35,
+          extractiveSentences: 4,
+          maxAbstractiveLength: 160,
+        });
+        queryClient.setQueryData(cacheKey, payload);
+      }
       setCompareResult(payload);
+      invalidateAfterSummarization(queryClient);
       setTab('evaluation');
     } catch (err) {
       setError(err.message);
@@ -123,7 +164,11 @@ export default function DocumentWorkspace() {
   }
 
   function toggleAlgorithm(key) {
-    setSelectedAlgorithms(c => (c.includes(key) ? c.filter(x => x !== key) : [...c, key]));
+    setSelectedAlgorithms(
+      selectedAlgorithms.includes(key)
+        ? selectedAlgorithms.filter(x => x !== key)
+        : [...selectedAlgorithms, key],
+    );
   }
 
   return (
@@ -166,7 +211,15 @@ export default function DocumentWorkspace() {
       {tab === 'upload' && (
         <Panel title="Upload tài liệu" icon={UploadCloud}>
           <label className="block border border-dashed border-[var(--border)] rounded-xl p-6 bg-[var(--surface-inset)] cursor-pointer">
-            <input type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={e => setFile(e.target.files?.[0] || null)} />
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt"
+              className="hidden"
+              onChange={(e) => {
+                setFile(e.target.files?.[0] || null);
+                invalidateAfterDocumentUpload(queryClient);
+              }}
+            />
             <p className="text-sm font-semibold">{file?.name || 'PDF, DOCX, TXT'}</p>
             <p className="text-xs text-[var(--text-muted)] mt-1">Structured parsing · semantic chunks · embeddings</p>
           </label>

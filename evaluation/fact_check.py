@@ -14,7 +14,8 @@ from src.preprocess import split_sentences
 from src.utils import logger
 
 
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+from src import config
+
 ConsistencyMode = Literal["fast", "full"]
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
@@ -26,8 +27,9 @@ def _get_embedding_model():
     try:
         from sentence_transformers import SentenceTransformer
 
-        logger.info(f"Loading consistency embedding model: {DEFAULT_EMBEDDING_MODEL}")
-        return SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
+        model_name = getattr(config, "SBERT_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        logger.info(f"Loading consistency embedding model: {model_name}")
+        return SentenceTransformer(model_name)
     except Exception as exc:
         logger.warning(f"SentenceTransformer unavailable, using lexical fallback: {exc}")
         return None
