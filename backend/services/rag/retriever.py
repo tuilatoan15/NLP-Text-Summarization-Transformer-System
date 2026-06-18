@@ -71,13 +71,23 @@ class HybridRetriever:
           Bước 4: Sắp xếp theo RRF Score và lấy Top Candidates.
           Bước 5: Đưa qua Cross-Encoder Reranker để lấy kết quả có độ liên quan sâu sắc nhất.
         """
+        import time
+        self.last_latency = {
+            "bm25": 0.0,
+            "vector_rrf": 0.0,
+            "rerank": 0.0
+        }
+
         if not chunks:
             return []
 
         # ── Bước 1: Tính BM25 scores ──────────────────────────────────────
+        t_bm25_start = time.perf_counter()
         bm25_scores = self._bm25_scores(query, chunks)
+        t_bm25 = time.perf_counter() - t_bm25_start
 
         # ── Bước 2: Tính Dense Vector similarity (cosine) ──────────────────
+        t_dense_start = time.perf_counter()
         q = np.array(query_vector, dtype=np.float32)
         q_norm = np.linalg.norm(q) or 1.0
 
@@ -92,8 +102,10 @@ class HybridRetriever:
                 else:
                     sim = float(np.dot(q, vec) / ((np.linalg.norm(vec) or 1.0) * q_norm))
             dense_scored.append((idx, sim))
+        t_dense = time.perf_counter() - t_dense_start
 
         # ── Bước 3: Reciprocal Rank Fusion (RRF) ──────────────────────────
+        t_rrf_start = time.perf_counter()
         # Sắp xếp Dense để lấy hạng (rank)
         dense_scored.sort(key=lambda x: x[1], reverse=True)
         dense_ranks = {item[0]: rank for rank, item in enumerate(dense_scored, start=1)}
@@ -138,6 +150,7 @@ class HybridRetriever:
         
         # Lấy pre-rerank top K để làm đầu vào cho Reranker
         pre_rerank = rrf_scored[:RETRIEVAL_PRE_RERANK_TOP_K]
+        t_rrf = time.perf_counter() - t_rrf_start
 
         logger.debug(
             "🔍 Hybrid RRF retrieval complete: %d chunks → pre-rerank top %d",
@@ -145,6 +158,7 @@ class HybridRetriever:
         )
 
         # ── Bước 4: Cross-Encoder Reranking ───────────────────────────────
+        t_rerank_start = time.perf_counter()
         final_top_k = min(top_k, RETRIEVAL_FINAL_TOP_K)
         reranked = self._reranker.rerank(
             query=query,
@@ -166,12 +180,23 @@ class HybridRetriever:
                 top_k=1,
                 threshold=0.15,
             )
+        t_rerank = time.perf_counter() - t_rerank_start
+
+        # Lưu lại nhật ký thời gian đo đạc
+        self.last_latency = {
+            "bm25": round(t_bm25, 6),
+            "vector_rrf": round(t_dense + t_rrf, 6),
+            "rerank": round(t_rerank, 6)
+        }
 
         logger.info(
-            "✅ Retrieval hoàn tất: %d → %d chunks (Reranker=%s)",
+            "✅ Retrieval hoàn tất: %d → %d chunks (Reranker=%s, bm25=%.4fs, vector_rrf=%.4fs, rerank=%.4fs)",
             len(pre_rerank),
             len(reranked),
             "CrossEncoder" if self._reranker.is_available() else "fallback",
+            t_bm25,
+            t_dense + t_rrf,
+            t_rerank,
         )
         return reranked
 

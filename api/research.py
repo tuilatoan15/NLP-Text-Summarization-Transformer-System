@@ -768,7 +768,7 @@ def _load_benchmark_data() -> dict:
             "metadata": {
                 "timestamp": "2026-06-12T01:21:15",
                 "dataset_name": "nam194/vietnews (Baseline Dự phòng)",
-                "total_samples": 10000,
+                "total_samples": 1000,
                 "categories": {"Short": 4000, "Medium": 3500, "Long": 1800, "Very Long": 700}
             },
             "leaderboard": json.loads(json.dumps(FALLBACK_LEADERBOARD)),
@@ -1125,7 +1125,7 @@ async def run_benchmark() -> dict:
     try:
         def worker():
             try:
-                cmd = [sys.executable or "python", "scripts/run_research_benchmark.py", "--samples", "10000", "--eval-real-count", "2"]
+                cmd = [sys.executable or "python", "scripts/run_research_benchmark.py", "--samples", "1000", "--eval-real-count", "2"]
                 logger.info(f"Subprocess running benchmark rerun: {' '.join(cmd)}")
                 subprocess.Popen(cmd, cwd=str(PROJECT_ROOT))
             except Exception as exc:

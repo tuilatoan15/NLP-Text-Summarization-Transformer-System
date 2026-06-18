@@ -165,7 +165,7 @@ def print_thesis_table(stats: dict) -> None:
 def parse_args():
     parser = argparse.ArgumentParser(description="Academic dataset statistics for VietNews.")
     parser.add_argument("--dataset", default=config.DATASET_NAME)
-    parser.add_argument("--samples", type=int, default=10000, help="Max samples per split to analyze")
+    parser.add_argument("--samples", type=int, default=1000, help="Max samples per split to analyze")
     parser.add_argument("--full", action="store_true", help="Analyze ALL samples (slow)")
     parser.add_argument("--output", default="storage/results/dataset_stats.json")
     return parser.parse_args()

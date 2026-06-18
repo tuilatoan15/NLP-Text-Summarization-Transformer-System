@@ -369,39 +369,69 @@ def compute_bertscore_metrics_batch(samples: list[dict], summaries_db: dict, che
     from bert_score import score as bert_score_fn
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    for idx, s in enumerate(samples):
+    pairs_to_compute = []
+    for s in samples:
         s_id = s["id"]
         ref = s["summary"]
-        
         for cfg, val in summaries_db[s_id].items():
             if "metrics" not in val:
                 val["metrics"] = {}
             metrics = val["metrics"]
             if "bertscore" in metrics:
                 continue
-                
             summary = val["summary"]
             if not summary:
                 metrics["bertscore"] = 0.0
                 continue
-                
+            pairs_to_compute.append((summary, ref, s_id, cfg))
+            
+    if pairs_to_compute:
+        logger.info(f"Computing BERTScore for {len(pairs_to_compute)} candidate-reference pairs in batch...")
+        cands = [p[0] for p in pairs_to_compute]
+        refs = [p[1] for p in pairs_to_compute]
+        
+        batch_size = 64
+        all_f1s = []
+        
+        for i in range(0, len(cands), batch_size):
+            cand_batch = cands[i:i+batch_size]
+            ref_batch = refs[i:i+batch_size]
             try:
                 precision, recall, f1 = bert_score_fn(
-                    [summary], [ref],
+                    cand_batch, ref_batch,
                     lang="vi",
                     model_type="bert-base-multilingual-cased",
                     verbose=False,
-                    device=device
+                    device=device,
+                    batch_size=batch_size
                 )
-                metrics["bertscore"] = round(float(f1[0]), 4)
+                all_f1s.extend([round(float(val), 4) for val in f1])
             except Exception as e:
-                logger.warning(f"BERTScore failed: {e}. Fallback to semantic sim.")
-                metrics["bertscore"] = metrics.get("semantic", 0.0)
+                logger.warning(f"BERTScore batch failed: {e}. Falling back to individual scoring for this batch.")
+                for cb, rb in zip(cand_batch, ref_batch):
+                    try:
+                        p, r, f = bert_score_fn(
+                            [cb], [rb],
+                            lang="vi",
+                            model_type="bert-base-multilingual-cased",
+                            verbose=False,
+                            device=device
+                        )
+                        all_f1s.append(round(float(f[0]), 4))
+                    except Exception as ex:
+                        logger.warning(f"BERTScore individual fallback failed: {ex}")
+                        all_f1s.append(0.0)
+            
+            if (i // batch_size + 1) % 10 == 0 or i + batch_size >= len(cands):
+                logger.info(f"BERTScore progress: {min(i + batch_size, len(cands))}/{len(cands)}")
                 
-        if (idx + 1) % 50 == 0:
-            logger.info(f"BERTScore metrics: completed {idx+1}/{len(samples)}")
-            save_checkpoint(checkpoint_path, summaries_db)
-    save_checkpoint(checkpoint_path, summaries_db)
+        # Write back to summaries_db
+        for (summary, ref, s_id, cfg), f1_val in zip(pairs_to_compute, all_f1s):
+            if f1_val == 0.0:
+                f1_val = summaries_db[s_id][cfg]["metrics"].get("semantic", 0.0)
+            summaries_db[s_id][cfg]["metrics"]["bertscore"] = f1_val
+            
+        save_checkpoint(checkpoint_path, summaries_db)
     
     # Clear bert_score cache
     import bert_score

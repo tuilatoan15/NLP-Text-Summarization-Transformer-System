@@ -157,7 +157,7 @@ class RAGChatService:
         query: str,
         conversation_id: str | None,
         document_ids: list[str] | None,
-        # Các tham số dưới đây bị IGNORE — hardcode từ rag_config
+        # Các tham số dưới đây được hỗ trợ cấu hình động truyền vào
         top_k: int = RETRIEVAL_FINAL_TOP_K,
         threshold: float = RETRIEVAL_THRESHOLD,
         retrieval_mode: str = "hybrid",
@@ -165,12 +165,7 @@ class RAGChatService:
         embedding_model: str = EMBEDDING_MODEL,
         temperature: float = 0.2,
     ) -> dict[str, Any]:
-        # Hardcode: luôn dùng cấu hình tối ưu
-        top_k = RETRIEVAL_FINAL_TOP_K
-        threshold = RETRIEVAL_THRESHOLD
-        retrieval_mode = "hybrid"
-        use_reranking = True
-        embedding_model = EMBEDDING_MODEL
+        t_total_start = time.perf_counter()
 
         conv_id = self.repository.ensure_conversation(
             conversation_id, title=query[:60] or "New chat"
@@ -186,13 +181,28 @@ class RAGChatService:
         intent = classify_intent(query, document_ids)
 
         # Embed query
+        t_embed_start = time.perf_counter()
         query_vector = self.embedding_service.embed_query(query, embedding_model)
+        embedding_time = time.perf_counter() - t_embed_start
 
         # 1. GENERAL INTENT (No retrieval needed)
         if intent == "GENERAL":
+            t_gen_start = time.perf_counter()
             generation = self.generator.build_answer(
                 query, [], chat_history=chat_history, temperature=temperature, general_chat=True
             )
+            generation_time = time.perf_counter() - t_gen_start
+            total_time = time.perf_counter() - t_total_start
+
+            latency_details = {
+                "embedding": f"{embedding_time:.4f}s",
+                "retrieval": "0.0000s",
+                "reranking": "0.0000s",
+                "generation": f"{generation_time:.4f}s",
+                "total": f"{total_time:.4f}s"
+            }
+            logger.info("RAG Latency Details (GENERAL):\n%s", json.dumps(latency_details, indent=2))
+
             response = {
                 "conversation_id": conv_id,
                 "answer": generation["answer"],
@@ -204,6 +214,7 @@ class RAGChatService:
                 "retrieval_threshold": threshold,
                 "prompt_template": f"General Chat: {query}",
                 "intent": "general",
+                "latency_details": latency_details,
                 "rag_config": {
                     "embedding_model": embedding_model,
                     "retrieval_mode": "none",
@@ -224,7 +235,8 @@ class RAGChatService:
             return response
 
         # 2. DOCUMENT_QA INTENT (With Multi-query Expansion)
-        elif intent == "DOCUMENT_QA":
+        t_retrieval_start = time.perf_counter()
+        if intent == "DOCUMENT_QA":
             # Lấy candidates từ query gốc
             candidates = self.vector_store.query(
                 query_vector=query_vector,
@@ -268,11 +280,24 @@ class RAGChatService:
             retrieval_mode=retrieval_mode,
             use_reranking=use_reranking,
         )
+        retrieval_time = time.perf_counter() - t_retrieval_start
+
+        # Lấy chi tiết thời gian từ retriever
+        bm25_time = self.retriever.last_latency.get("bm25", 0.0)
+        fusion_time = self.retriever.last_latency.get("vector_rrf", 0.0)
+        rerank_time = self.retriever.last_latency.get("rerank", 0.0)
+
+        # Tính lại retrieval_time loại trừ rerank nếu muốn tách biệt rõ ràng
+        # retrieval_time ở đây là tổng thời gian từ vector search + bm25 + fusion
+        # (tổng thời gian retrieval trừ đi thời gian rerank)
+        actual_retrieval_only = max(0.0, retrieval_time - rerank_time)
 
         # Sinh câu trả lời bằng Transformer
+        t_gen_start = time.perf_counter()
         generation = self.generator.build_answer(
             query, retrieved, chat_history=chat_history, temperature=temperature
         )
+        generation_time = time.perf_counter() - t_gen_start
         prompt = self.generator.prompt_template(retrieved, query)
 
         # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk)
@@ -281,7 +306,7 @@ class RAGChatService:
             try:
                 from evaluation.hallucination import audit_summary
                 source_text = "\n\n".join(c["text"] for c in retrieved)
-                formatted_chunks = [{"chunk_id": c["id"], "text": c["text"]} for c in retrieved]
+                formatted_chunks = [{"chunk_id": c.get("chunk_id") or c.get("id"), "text": c["text"]} for c in retrieved]
                 audit_res = audit_summary(generation["answer"], source_text, chunks=formatted_chunks, mode="fast")
                 eval_metrics = {
                     "consistency_score": float(audit_res.get("consistency_score", 0.0)),
@@ -291,6 +316,23 @@ class RAGChatService:
                 }
             except Exception as exc:
                 logger.error("Failed to run hallucination audit on chat response: %s", exc)
+
+        total_time = time.perf_counter() - t_total_start
+
+        latency_details = {
+            "embedding": f"{embedding_time:.4f}s",
+            "retrieval": f"{actual_retrieval_only:.4f}s",
+            "reranking": f"{rerank_time:.4f}s",
+            "generation": f"{generation_time:.4f}s",
+            "total": f"{total_time:.4f}s"
+        }
+        logger.info("RAG Latency Details:\n%s", json.dumps(latency_details, indent=2))
+
+        # Ghi log chi tiết phụ cho các bước nhỏ để phục vụ Root Cause Analysis
+        logger.info(
+            "RAG Latency Breakdowns: bm25_time=%.4fs, fusion_time=%.4fs",
+            bm25_time, fusion_time
+        )
 
         response: dict[str, Any] = {
             "conversation_id": conv_id,
@@ -304,6 +346,7 @@ class RAGChatService:
             "prompt_template": prompt,
             "intent": intent.lower(),
             "evaluation": eval_metrics,
+            "latency_details": latency_details,
             "rag_config": {
                 "embedding_model": embedding_model,
                 "retrieval_mode": retrieval_mode,
@@ -311,7 +354,7 @@ class RAGChatService:
                 "bm25_weight": 0.30,
                 "top_k": top_k,
                 "threshold": threshold,
-                "reranking": True,
+                "reranking": use_reranking,
             },
         }
 

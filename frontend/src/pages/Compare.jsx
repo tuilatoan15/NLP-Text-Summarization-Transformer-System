@@ -873,7 +873,7 @@ const Compare = () => {
                     <select
                       value={activeSampleIndex}
                       onChange={(e) => setActiveSampleIndex(Number(e.target.value))}
-                      className="ui-select max-w-[200px] text-xs !py-1.5 font-semibold"
+                      className="ui-select max-w-[320px] text-xs !py-1.5 font-semibold"
                     >
                       {samples.map((s, idx) => (
                         <option key={s.id} value={idx}>

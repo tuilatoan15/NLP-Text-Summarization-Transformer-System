@@ -89,7 +89,7 @@ const Overview = () => {
   const algorithmOutputs = dashMetrics.total_algorithm_outputs ?? 0;
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? '☀️ Chào buổi sáng' : hour < 18 ? '🌤️ Chào buổi chiều' : '🌙 Chào buổi tối';
+  const greeting = hour < 12 ? t('morningGreeting') : hour < 18 ? t('afternoonGreeting') : t('eveningGreeting');
 
   return (
     <div className="space-y-6 pb-12">

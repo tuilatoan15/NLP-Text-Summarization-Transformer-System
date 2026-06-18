@@ -141,24 +141,35 @@ class SentenceTransformerEmbedder:
         finally:
             self._clear_cuda_cache()
 
+    _model_cache: dict[str, Any] = {}
+
     def _load_model(self):
         if self.config.model_name.lower() in {"hash", "hash-fallback", "offline"}:
             return None
         if self._model is not None:
             return self._model
+            
+        model_name = self.config.model_name
+        if model_name in self._model_cache:
+            self._model = self._model_cache[model_name]
+            return self._model
+
         try:
             from sentence_transformers import SentenceTransformer
 
             kwargs = {"trust_remote_code": self.config.trust_remote_code}
             if self.config.device:
                 kwargs["device"] = self.config.device
-            self._model = SentenceTransformer(self.config.model_name, **kwargs)
+            model = SentenceTransformer(self.config.model_name, **kwargs)
             try:
-                self._model.max_seq_length = self.config.max_seq_length
+                model.max_seq_length = self.config.max_seq_length
             except Exception:
                 pass
+            self._model = model
             if self.config.use_fp16:
                 self._try_half_precision()
+                
+            self._model_cache[model_name] = self._model
             return self._model
         except Exception as exc:
             if not self.config.fallback_to_hashing:

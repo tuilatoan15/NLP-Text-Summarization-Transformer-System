@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Search, Moon, Sun, Bell, CheckCircle2, AlertCircle, Info, X, Command,
@@ -18,17 +18,6 @@ const typeColor = {
   info: 'text-blue-500',
 };
 
-const routeLabels = {
-  '/': 'Dashboard',
-  '/summarize': 'Tóm tắt',
-  '/chat': 'Chat với Tài liệu',
-  '/compare': 'So sánh Mô hình',
-  '/search': 'Semantic Search',
-  '/analytics': 'Phân tích & Báo cáo',
-  '/settings': 'Cài đặt',
-  '/documents': 'Tài liệu',
-};
-
 const Header = () => {
   const {
     isDark, locale, toggleTheme, setLanguage, t,
@@ -41,6 +30,19 @@ const Header = () => {
   const location = useLocation();
   const panelRef = useRef(null);
   const bellRef = useRef(null);
+
+  // Build routeLabels dynamically using translation function
+  const routeLabels = useMemo(() => ({
+    '/': t('navOverview'),
+    '/summarize': t('navSummarize'),
+    '/chat': t('navChat'),
+    '/compare': t('navCompare'),
+    '/search': t('navSearch'),
+    '/analytics': t('analyticsTitle'),
+    '/settings': t('settingsTitle'),
+    '/documents': t('navDocuments'),
+    '/benchmark': t('navBenchmark') || 'Benchmark',
+  }), [t]);
 
   useEffect(() => {
     requestNotificationPermission();

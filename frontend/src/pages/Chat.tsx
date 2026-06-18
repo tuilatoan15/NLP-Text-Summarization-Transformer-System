@@ -7,6 +7,7 @@ import {
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
 } from 'lucide-react';
 import * as ragApi from '../services/ragApi';
+import { useApp } from '../context/AppContext';
 const formatModelName = (name: string | null | undefined) => {
   if (!name) return "";
   const n = name.toLowerCase();
@@ -21,6 +22,9 @@ const formatModelName = (name: string | null | undefined) => {
 };
 
 export default function Chat() {
+  // --- Context & Hooks ---
+  const { t } = useApp();
+
   // --- Refs ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isStreamingRef = useRef(false);
@@ -475,7 +479,7 @@ export default function Chat() {
             <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText size={16} className="text-blue-500" />
-                <h2 className="text-sm font-bold text-[var(--text)]">Tài liệu RAG</h2>
+                <h2 className="text-sm font-bold text-[var(--text)]">{t('ragDocuments')}</h2>
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
                 {documents.length} File
@@ -735,7 +739,7 @@ export default function Chat() {
                   <div className="grid grid-cols-1 gap-2">
                     {[
                       "Tóm tắt ngắn gọn các nội dung cốt lõi của tài liệu.",
-                      "Tài liệu này đề cập đến các vấn đề chính nào?",
+                      t('mainIssues'),
                       "Tìm các thông tin quan trọng nhất trong văn bản."
                     ].map((promptText) => (
                       <motion.button

@@ -10,6 +10,8 @@ const Playground = lazy(() => import('./pages/Playground'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Compare = lazy(() => import('./pages/Compare'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Benchmark = lazy(() => import('./pages/Benchmark'));
 const DocumentLayout = lazy(() => import('./pages/documents/DocumentLayout'));
 const DocumentEvaluation = lazy(() => import('./pages/documents/DocumentEvaluation'));
 const DocumentExplainability = lazy(() => import('./pages/documents/DocumentExplainability'));
@@ -30,6 +32,7 @@ const App = () => {
 
             {/* AI features */}
             <Route path="/compare" element={<Compare />} />
+            <Route path="/benchmark" element={<Benchmark />} />
             <Route path="/search" element={<Chat />} />
 
             {/* Document routes */}
@@ -39,8 +42,8 @@ const App = () => {
               <Route path="explainability" element={<DocumentExplainability />} />
             </Route>
 
-            {/* Settings placeholder */}
-            <Route path="/settings" element={<Analytics />} />
+            {/* Settings page */}
+            <Route path="/settings" element={<Settings />} />
 
             {/* Backward compatibility redirects */}
             <Route path="/playground" element={<Navigate to="/summarize" replace />} />
