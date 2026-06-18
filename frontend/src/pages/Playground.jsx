@@ -20,7 +20,7 @@ const ALGORITHMS = [
   { key: 'bartpho', name: 'BARTPho', group: 'abstractive', color: '#fb7185' },
 ];
 
-const SAMPLE_TEXT = `Tập đoàn Điện lực Việt Nam cho biết nhu cầu tiêu thụ điện trong mùa nắng nóng tiếp tục tăng cao tại nhiều địa phương. Các nhà máy thủy điện ở miền Bắc được yêu cầu vận hành thận trọng do mực nước một số hồ chứa chưa phục hồi hoàn toàn.`;
+const SAMPLE_TEXT = ``;
 
 const STATUS = {
   idle: 'idle',
@@ -77,11 +77,10 @@ const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
                   type="button"
                   disabled={disabled}
                   onClick={() => toggle(item.key)}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-400 dark:border-blue-800 text-blue-600 dark:text-blue-400 font-bold'
-                      : 'bg-[var(--surface-elevated)] border-[var(--border)] text-[var(--text-muted)] hover:border-blue-300 dark:hover:border-blue-700'
-                  } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition cursor-pointer ${isSelected
+                    ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-400 dark:border-blue-800 text-blue-600 dark:text-blue-400 font-bold'
+                    : 'bg-[var(--surface-elevated)] border-[var(--border)] text-[var(--text-muted)] hover:border-blue-300 dark:hover:border-blue-700'
+                    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span className="w-2.5 h-2.5 rounded-full mb-1" style={{ background: item.color }} />
                   <span className="text-xs truncate w-full">{item.name}</span>
@@ -115,9 +114,9 @@ const StatusBadge = ({ status }) => {
 // Motion variants for staggered elements
 const itemVariants = {
   hidden: { opacity: 0, y: 12, scale: 0.98 },
-  show: { 
-    opacity: 1, 
-    y: 0, 
+  show: {
+    opacity: 1,
+    y: 0,
     scale: 1,
     transition: { type: 'spring', stiffness: 350, damping: 25 }
   }
@@ -134,9 +133,8 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
     <motion.article
       variants={itemVariants}
       animate={isRunning ? { scale: 1.015, borderColor: 'var(--accent)' } : { scale: 1 }}
-      className={`algo-card ui-card p-4 transition-all duration-300 ${
-        isRunning ? 'algo-card-running border-blue-300 dark:border-blue-600 shadow-md shadow-blue-100 dark:shadow-blue-900/30' : ''
-      } ${isDone ? 'algo-card-done' : ''}`}
+      className={`algo-card ui-card p-4 transition-all duration-300 ${isRunning ? 'algo-card-running border-blue-300 dark:border-blue-600 shadow-md shadow-blue-100 dark:shadow-blue-900/30' : ''
+        } ${isDone ? 'algo-card-done' : ''}`}
       style={{ '--algo-color': meta.color }}
     >
       <header className="flex items-start justify-between gap-3 mb-3">
@@ -321,7 +319,7 @@ const Playground = () => {
   const [runningKey, setRunningKey] = useState(null);
 
   const rows = useMemo(() => result?.results || [], [result]);
-  
+
   const rankByKey = useMemo(() => {
     const map = {};
     (result?.ranking || []).forEach(item => { map[item.key] = item.rank; });
@@ -590,9 +588,9 @@ const Playground = () => {
       >
         {/* Subtle top ambient glow */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
-        
+
         <form onSubmit={runComparison} className="space-y-6">
-          
+
           {/* STEP 1: Sleek Horizontal Document Uploader (Full-width) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -681,7 +679,7 @@ const Playground = () => {
 
           {/* ROW 2: Two Columns for Reference Options (Left) and Algorithms / Trigger (Right) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-5 border-t border-[var(--border-subtle)]">
-            
+
             {/* Left Column (Reference, Length Ratio slider & Advanced Settings) */}
             <div className="space-y-4 bg-[var(--surface-inset)] p-4 rounded-2xl border border-[var(--border-subtle)] flex flex-col justify-between">
               <section className="space-y-2 flex flex-col">
@@ -715,11 +713,10 @@ const Playground = () => {
                       type="button"
                       disabled={loading}
                       onClick={() => setSummaryLength(option.key)}
-                      className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer select-none ${
-                        summaryLength === option.key
-                          ? 'border-blue-500 bg-blue-50/10 shadow-sm ring-1 ring-blue-500/20'
-                          : 'border-[var(--border)] bg-[var(--surface-elevated)] hover:border-[var(--border-strong)]'
-                      }`}
+                      className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer select-none ${summaryLength === option.key
+                        ? 'border-blue-500 bg-blue-50/10 shadow-sm ring-1 ring-blue-500/20'
+                        : 'border-[var(--border)] bg-[var(--surface-elevated)] hover:border-[var(--border-strong)]'
+                        }`}
                     >
                       <span className="text-xs font-bold text-[var(--text)]">{option.label}</span>
                       <span className="text-[9px] text-[var(--text-muted)] mt-0.5">{option.desc}</span>
@@ -751,11 +748,10 @@ const Playground = () => {
                 <button
                   type="submit"
                   disabled={loading || selected.length === 0 || (!text.trim() && !files.length)}
-                  className={`ui-btn-primary w-full py-3.5 rounded-xl font-bold shadow-lg transition-all duration-300 relative overflow-hidden group cursor-pointer ${
-                    loading 
-                      ? 'opacity-80' 
-                      : 'hover:scale-[1.01] hover:shadow-blue-500/20 active:scale-[0.99]'
-                  }`}
+                  className={`ui-btn-primary w-full py-3.5 rounded-xl font-bold shadow-lg transition-all duration-300 relative overflow-hidden group cursor-pointer ${loading
+                    ? 'opacity-80'
+                    : 'hover:scale-[1.01] hover:shadow-blue-500/20 active:scale-[0.99]'
+                    }`}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 opacity-100 transition-opacity" />
                   <span className="relative z-10 flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider">
@@ -772,14 +768,14 @@ const Playground = () => {
                 )}
               </div>
             </div>
-            
+
           </div>
         </form>
       </motion.div>
 
       {/* Stacked Results Section (Vertical below top inputs) */}
       <div className="space-y-6">
-        
+
         {/* Full-width elegant Progress indicator */}
         <RunProgress
           loading={loading}
@@ -840,7 +836,7 @@ const Playground = () => {
             <p className="text-xs text-[var(--text-muted)] font-bold">{t('pgEmptyState')}</p>
           </motion.div>
         )}
-        
+
       </div>
     </div>
   );

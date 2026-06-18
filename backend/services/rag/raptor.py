@@ -167,7 +167,7 @@ class RaptorIndexer:
                 model_key = _pick_available_model()
                 if model_key:
                     profile = GENERATION_PROFILES[model_key]
-                    summary = _run_transformer_generate(model_key, prompt, profile)
+                    summary = _run_transformer_generate(model_key, text, profile)
                     
             if not summary:
                 # Extractive fallback tối giản

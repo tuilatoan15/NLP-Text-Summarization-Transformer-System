@@ -151,11 +151,12 @@ WITH_REFERENCE_RANKING_WEIGHTS: dict[str, float] = {
 # Điều chỉnh theo kết quả nghiên cứu để cân bằng giữa overlap metrics
 # và semantic quality metrics.
 COMPOSITE_SCORE_WEIGHTS: dict[str, float] = {
-    "rougeL": float(os.getenv("COMPOSITE_W_ROUGEL", "0.30")),
-    "semantic_similarity": float(os.getenv("COMPOSITE_W_SEMANTIC", "0.25")),
-    "faithfulness": float(os.getenv("COMPOSITE_W_FAITHFULNESS", "0.20")),
-    "bertscore": float(os.getenv("COMPOSITE_W_BERTSCORE", "0.15")),
+    "rougeL": float(os.getenv("COMPOSITE_W_ROUGEL", "0.25")),
+    "bertscore": float(os.getenv("COMPOSITE_W_BERTSCORE", "0.25")),
+    "semantic_similarity": float(os.getenv("COMPOSITE_W_SEMANTIC", "0.20")),
+    "faithfulness": float(os.getenv("COMPOSITE_W_FAITHFULNESS", "0.15")),
     "coverage": float(os.getenv("COMPOSITE_W_COVERAGE", "0.10")),
+    "fluency": float(os.getenv("COMPOSITE_W_FLUENCY", "0.05")),
 }
 
 # ─────────────────────────── BENCHMARK CATEGORIES ──────────

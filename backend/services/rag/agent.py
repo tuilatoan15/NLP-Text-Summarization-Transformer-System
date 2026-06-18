@@ -128,10 +128,8 @@ Phân loại:"""
                     return "DOCUMENT_QA"
                 return val
 
-    # 3. Fallback mặc định
-    if document_ids:
-        return "DOCUMENT_QA"
-    return "GENERAL"
+    # 3. Fallback mặc định: Nếu không phải trò chuyện xã giao, mặc định là hỏi đáp tài liệu
+    return "DOCUMENT_QA"
 
 
 def expand_query(query: str) -> list[str]:

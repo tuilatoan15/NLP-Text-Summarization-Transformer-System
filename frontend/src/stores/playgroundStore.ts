@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { cacheLog } from '../lib/cacheLogger';
 
-const SAMPLE_TEXT = `Tập đoàn Điện lực Việt Nam cho biết nhu cầu tiêu thụ điện trong mùa nắng nóng tiếp tục tăng cao tại nhiều địa phương. Các nhà máy thủy điện ở miền Bắc được yêu cầu vận hành thận trọng do mực nước một số hồ chứa chưa phục hồi hoàn toàn.`;
+const SAMPLE_TEXT = ``;
 
 export type PlaygroundFileMeta = {
   name: string;
@@ -60,17 +60,17 @@ export const usePlaygroundStore = create<PlaygroundState>()(
       setText: (text) => set({ text }),
       setReference: (reference) => set({ reference }),
       setFileMetas: (fileMetas) => set({ fileMetas }),
-  setSelected: (selected) => set((state) => ({
-    selected: typeof selected === 'function' ? selected(state.selected) : selected,
-  })),
-  setSummaryLength: (summaryLength) => set({ summaryLength }),
-  setResult: (result) => {
-    cacheLog('SET', 'playground summarize result');
-    set({ result: typeof result === 'function' ? result(usePlaygroundStore.getState().result) : result });
-  },
-  setRunState: (runState) => set((state) => ({
-    runState: typeof runState === 'function' ? runState(state.runState) : runState,
-  })),
+      setSelected: (selected) => set((state) => ({
+        selected: typeof selected === 'function' ? selected(state.selected) : selected,
+      })),
+      setSummaryLength: (summaryLength) => set({ summaryLength }),
+      setResult: (result) => {
+        cacheLog('SET', 'playground summarize result');
+        set({ result: typeof result === 'function' ? result(usePlaygroundStore.getState().result) : result });
+      },
+      setRunState: (runState) => set((state) => ({
+        runState: typeof runState === 'function' ? runState(state.runState) : runState,
+      })),
       setCompletedCount: (completedCount) => set({ completedCount }),
       setLastExtractFingerprint: (lastExtractFingerprint) => set({ lastExtractFingerprint }),
       clearUploadCache: () => {

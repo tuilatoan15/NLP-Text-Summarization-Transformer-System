@@ -33,6 +33,9 @@ const Compare = () => {
   const [samplePage, setSamplePage] = useState(1);
   const [sampleCategory, setSampleCategory] = useState('All');
   const [sampleSearch, setSampleSearch] = useState('');
+  const [activeSampleIndex, setActiveSampleIndex] = useState(0);
+  const [modelCompareFilter, setModelCompareFilter] = useState('all');
+  const [idInput, setIdInput] = useState('');
   
   // Sample detail modal state
   const [selectedSample, setSelectedSample] = useState(null);
@@ -51,7 +54,7 @@ const Compare = () => {
   const reportQuery = useResearchReportQuery(true);
   const samplesQuery = useResearchBenchmarkSamplesQuery(
     samplePage,
-    10,
+    100, // Fetch 100 samples per page
     sampleCategory,
     sampleSearch,
     activeTab === 'samples',
@@ -63,6 +66,65 @@ const Compare = () => {
   const report = reportQuery.data || null;
   const samples = samplesQuery.data?.items || [];
   const sampleTotalPages = samplesQuery.data?.pages || 1;
+
+  const sortedByComposite = useMemo(() => {
+    return [...leaderboardData].sort((a, b) => (b.composite || 0) - (a.composite || 0));
+  }, [leaderboardData]);
+
+  const sortedByLatency = useMemo(() => {
+    return [...leaderboardData].sort((a, b) => (a.latency || 0) - (b.latency || 0));
+  }, [leaderboardData]);
+
+  const activeSample = useMemo(() => {
+    if (!samples || samples.length === 0) return null;
+    return samples[activeSampleIndex] || samples[0];
+  }, [samples, activeSampleIndex]);
+
+  // Reset active sample index when dataset changes
+  React.useEffect(() => {
+    setActiveSampleIndex(0);
+  }, [samples.length, sampleCategory, sampleSearch]);
+
+  const handlePrev = useCallback(() => {
+    if (activeSampleIndex > 0) {
+      setActiveSampleIndex(prev => prev - 1);
+    } else if (samplePage > 1) {
+      setSamplePage(prev => prev - 1);
+      setActiveSampleIndex(99); // last sample of previous page
+    }
+  }, [activeSampleIndex, samplePage]);
+
+  const handleNext = useCallback(() => {
+    if (activeSampleIndex < samples.length - 1) {
+      setActiveSampleIndex(prev => prev + 1);
+    } else if (samplePage < sampleTotalPages) {
+      setSamplePage(prev => prev + 1);
+      setActiveSampleIndex(0);
+    }
+  }, [activeSampleIndex, samples.length, samplePage, sampleTotalPages]);
+
+  const handleRandom = useCallback(() => {
+    const randPage = Math.floor(Math.random() * sampleTotalPages) + 1;
+    setSamplePage(randPage);
+    const randIndex = Math.floor(Math.random() * (samples.length || 100));
+    setActiveSampleIndex(randIndex);
+  }, [sampleTotalPages, samples.length]);
+
+  const handleIdSearch = useCallback((e) => {
+    if (e) e.preventDefault();
+    if (idInput.trim()) {
+      setSampleSearch(idInput.trim());
+      setSamplePage(1);
+      setActiveSampleIndex(0);
+    }
+  }, [idInput]);
+
+  const handleClearIdSearch = useCallback(() => {
+    setIdInput('');
+    setSampleSearch('');
+    setSamplePage(1);
+    setActiveSampleIndex(0);
+  }, []);
 
   const loading = (
     (activeTab === 'leaderboard' || activeTab === 'charts') && leaderboardQuery.isLoading && !leaderboardQuery.data
@@ -411,17 +473,17 @@ const Compare = () => {
                       <th className="px-1 py-2 text-center w-8 text-[11px]">Hạng</th>
                       <th className="px-1.5 py-2 text-left text-[11px]">Mô hình</th>
                       <th className="px-1 py-2 text-center text-[11px]">Kiểu</th>
-                      <th className="px-1 py-2 text-right cursor-pointer select-none font-bold text-indigo-600 dark:text-indigo-400 text-[11px]" onClick={() => requestSort('composite')}>
-                        Tổng hợp {sortField === 'composite' && (sortAsc ? '↑' : '↓')}
+                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('rouge1')}>
+                        ROUGE-1 {sortField === 'rouge1' && (sortAsc ? '↑' : '↓')}
+                      </th>
+                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('rouge2')}>
+                        ROUGE-2 {sortField === 'rouge2' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('rougeL')}>
                         ROUGE-L {sortField === 'rougeL' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('bertscore')}>
-                        BERT F1 {sortField === 'bertscore' && (sortAsc ? '↑' : '↓')}
-                      </th>
-                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('bleu')}>
-                        BLEU {sortField === 'bleu' && (sortAsc ? '↑' : '↓')}
+                        BERTScore {sortField === 'bertscore' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('semantic')}>
                         Sem Sim {sortField === 'semantic' && (sortAsc ? '↑' : '↓')}
@@ -430,19 +492,22 @@ const Compare = () => {
                         Trễ {sortField === 'latency' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('throughput')}>
-                        W/s {sortField === 'throughput' && (sortAsc ? '↑' : '↓')}
+                        Throughput {sortField === 'throughput' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('compression')}>
                         Nén {sortField === 'compression' && (sortAsc ? '↑' : '↓')}
                       </th>
-                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('coverage')}>
-                        Coverage {sortField === 'coverage' && (sortAsc ? '↑' : '↓')}
-                      </th>
                       <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('faithfulness')}>
                         T.Thực {sortField === 'faithfulness' && (sortAsc ? '↑' : '↓')}
                       </th>
-                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('info_retention')}>
-                        Retention {sortField === 'info_retention' && (sortAsc ? '↑' : '↓')}
+                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('coverage')}>
+                        Coverage {sortField === 'coverage' && (sortAsc ? '↑' : '↓')}
+                      </th>
+                      <th className="px-1 py-2 text-right cursor-pointer select-none text-[11px]" onClick={() => requestSort('fluency')}>
+                        Mạch lạc {sortField === 'fluency' && (sortAsc ? '↑' : '↓')}
+                      </th>
+                      <th className="px-1 py-2 text-right cursor-pointer select-none font-bold text-indigo-600 dark:text-indigo-400 text-[11px]" onClick={() => requestSort('composite')}>
+                        Tổng hợp {sortField === 'composite' && (sortAsc ? '↑' : '↓')}
                       </th>
                       <th className="px-1 py-2 text-center cursor-pointer select-none text-[11px]" onClick={() => requestSort('hallucination_pct')}>
                         Bịa đặt {sortField === 'hallucination_pct' && (sortAsc ? '↑' : '↓')}
@@ -460,7 +525,6 @@ const Compare = () => {
                       }
                       
                       const riskType = row.hallucination_pct < 10 ? 'low' : (row.hallucination_pct < 35 ? 'medium' : 'high');
-                      const riskText = row.hallucination_pct < 10 ? 'Thấp' : (row.hallucination_pct < 35 ? 'Trung bình' : 'Cao');
 
                       return (
                         <tr key={row.key} className="ui-table-row">
@@ -475,42 +539,45 @@ const Compare = () => {
                               {row.group.substring(0, 4).toUpperCase()}
                             </span>
                           </td>
-                          <td className="px-1 py-2 text-right font-extrabold text-indigo-600 dark:text-indigo-400">
-                            {(row.composite || 0).toFixed(4)}
+                          <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
+                            {typeof row.rouge1 === 'number' ? row.rouge1.toFixed(4) : 'N/A'}
+                          </td>
+                          <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
+                            {typeof row.rouge2 === 'number' ? row.rouge2.toFixed(4) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right font-bold text-blue-600 dark:text-blue-400">
-                            {row.rougeL.toFixed(4)}
+                            {typeof row.rougeL === 'number' ? row.rougeL.toFixed(4) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right font-semibold text-purple-600 dark:text-purple-400">
-                            {row.bertscore.toFixed(4)}
+                            {typeof row.bertscore === 'number' ? row.bertscore.toFixed(4) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {row.bleu.toFixed(4)}
-                          </td>
-                          <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {(row.semantic || 0).toFixed(4)}
+                            {typeof row.semantic === 'number' ? row.semantic.toFixed(4) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right font-medium text-[var(--text-primary)]">
-                            {row.latency.toFixed(2)}s
+                            {typeof row.latency === 'number' ? `${row.latency.toFixed(2)}s` : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {row.throughput.toFixed(0)}
+                            {typeof row.throughput === 'number' ? row.throughput.toFixed(0) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {(row.compression * 100).toFixed(0)}%
-                          </td>
-                          <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {((row.coverage || 0) * 100).toFixed(0)}%
+                            {typeof row.compression === 'number' ? `${(row.compression * 100).toFixed(0)}%` : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
-                            {(row.faithfulness * 100).toFixed(0)}%
+                            {typeof row.faithfulness === 'number' ? `${(row.faithfulness * 100).toFixed(0)}%` : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
-                            {(row.info_retention || 0).toFixed(4)}
+                            {typeof row.coverage === 'number' ? `${(row.coverage * 100).toFixed(0)}%` : 'N/A'}
+                          </td>
+                          <td className="px-1 py-2 text-right text-[var(--text-secondary)]">
+                            {typeof row.fluency === 'number' ? row.fluency.toFixed(4) : 'N/A'}
+                          </td>
+                          <td className="px-1 py-2 text-right font-extrabold text-indigo-600 dark:text-indigo-400">
+                            {typeof row.composite === 'number' ? row.composite.toFixed(4) : 'N/A'}
                           </td>
                           <td className="px-1 py-2 text-center">
                             <span className={`ui-badge text-[9px] px-1 py-0.5 ${riskColors[riskType]}`}>
-                              {(row.hallucination_pct).toFixed(0)}%
+                              {typeof row.hallucination_pct === 'number' ? `${row.hallucination_pct.toFixed(0)}%` : 'N/A'}
                             </span>
                           </td>
                         </tr>
@@ -527,14 +594,38 @@ const Compare = () => {
       {/* TAB 2: CHARTS — rendered only when active to avoid heavy DOM */}
       {activeTab === 'charts' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
-          {/* ROUGE Performance Chart */}
+          {/* Chart 1: Top Models Ranking (Composite Score) */}
+          <div className="ui-card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
+                <Award className="w-4 h-4 text-indigo-500" />
+                Xếp hạng mô hình tổng hợp (Composite Score Ranking)
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Điểm tổng hợp kết hợp ROUGE-L, BERT F1, trung thực, độ phủ và sự tương đồng (càng cao càng tốt).</p>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={sortedByComposite}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                <XAxis dataKey="key" tick={{ fontSize: 10, fill: chartTheme.axis }} />
+                <YAxis domain={[0, 1.0]} tick={{ fill: chartTheme.axis }} />
+                <Tooltip contentStyle={chartTheme.tooltipStyle} />
+                <Bar dataKey="composite" name="Composite Score" fill="#6366f1">
+                  {sortedByComposite.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index === 0 ? '#4f46e5' : '#818cf8'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Chart 2: ROUGE Performance Chart */}
           <div className="ui-card p-6 flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
                 <BarChart3 className="w-4 h-4 text-blue-500" />
-                So sánh Điểm ROUGE (Độ chồng lấp từ vựng)
+                So sánh Điểm ROUGE (Vocabulary Overlap)
               </h3>
-              <p className="text-xs text-[var(--text-muted)] mb-4">Điểm số ROUGE-1, ROUGE-2 và ROUGE-L càng cao càng tốt.</p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Điểm số ROUGE-1, ROUGE-2 và ROUGE-L đo lường độ trùng lặp từ vựng.</p>
             </div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={leaderboardData}>
@@ -550,14 +641,14 @@ const Compare = () => {
             </ResponsiveContainer>
           </div>
 
-          {/* BERTScore Similarity Chart */}
+          {/* Chart 3: BERTScore Similarity Chart */}
           <div className="ui-card p-6 flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
                 <Activity className="w-4 h-4 text-purple-500" />
                 Độ tương đồng ngữ nghĩa (BERTScore F1)
               </h3>
-              <p className="text-xs text-[var(--text-muted)] mb-4">Đo lường độ khớp ý tưởng ngữ nghĩa thay vì chỉ so sánh mặt chữ.</p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Đo lường độ khớp ý nghĩa ngữ cảnh sử dụng mô hình embedding.</p>
             </div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={leaderboardData}>
@@ -574,23 +665,23 @@ const Compare = () => {
             </ResponsiveContainer>
           </div>
 
-          {/* Latency Comparison (Time) */}
+          {/* Chart 4: Latency Comparison */}
           <div className="ui-card p-6 flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
                 <Zap className="w-4 h-4 text-amber-500" />
                 Tốc độ xử lý (Độ trễ trung bình)
               </h3>
-              <p className="text-xs text-[var(--text-muted)] mb-4">Độ trễ tính bằng giây. Giá trị thấp hơn thể hiện tốc độ nhanh hơn.</p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Độ trễ tính bằng giây (thấp hơn là tốt hơn).</p>
             </div>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={leaderboardData} layout="vertical">
+              <BarChart data={sortedByLatency} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
                 <XAxis type="number" tick={{ fill: chartTheme.axis }} />
-                <YAxis dataKey="key" type="category" tick={{ fontSize: 10, fill: chartTheme.axis }} width={80} />
+                <YAxis dataKey="key" type="category" tick={{ fontSize: 9, fill: chartTheme.axis }} width={80} />
                 <Tooltip contentStyle={chartTheme.tooltipStyle} />
                 <Bar dataKey="latency" fill="#f59e0b" name="Độ trễ (giây)">
-                  {leaderboardData.map((entry, index) => (
+                  {sortedByLatency.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.group === 'extractive' ? '#3b82f6' : (entry.group === 'abstractive' ? '#f59e0b' : '#10b981')} />
                   ))}
                 </Bar>
@@ -598,7 +689,55 @@ const Compare = () => {
             </ResponsiveContainer>
           </div>
 
-          {/* Quality vs Speed Scatter Plot */}
+          {/* Chart 5: Faithfulness Comparison */}
+          <div className="ui-card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                Độ trung thực thông tin (Faithfulness)
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Đo lường mức độ trung thực của bản tóm tắt đối với bài viết gốc.</p>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={leaderboardData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                <XAxis dataKey="key" tick={{ fontSize: 10, fill: chartTheme.axis }} />
+                <YAxis domain={[0, 1.0]} tick={{ fill: chartTheme.axis }} />
+                <Tooltip contentStyle={chartTheme.tooltipStyle} />
+                <Bar dataKey="faithfulness" fill="#10b981" name="Độ trung thực">
+                  {leaderboardData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.group === 'extractive' ? '#10b981' : (entry.group === 'abstractive' ? '#34d399' : '#059669')} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Chart 6: Coverage Comparison */}
+          <div className="ui-card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
+                <BookOpen className="w-4 h-4 text-teal-500" />
+                Độ phủ văn bản gốc (Grounding Coverage)
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Đo lường mức độ bao phủ các ý chính của tài liệu gốc.</p>
+            </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={leaderboardData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                <XAxis dataKey="key" tick={{ fontSize: 10, fill: chartTheme.axis }} />
+                <YAxis domain={[0, 1.0]} tick={{ fill: chartTheme.axis }} />
+                <Tooltip contentStyle={chartTheme.tooltipStyle} />
+                <Bar dataKey="coverage" fill="#06b6d4" name="Độ phủ gốc">
+                  {leaderboardData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.group === 'extractive' ? '#06b6d4' : (entry.group === 'abstractive' ? '#22d3ee' : '#0891b2')} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Chart 7: Quality vs Speed Scatter Plot */}
           <div className="ui-card p-6 flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
@@ -610,7 +749,6 @@ const Compare = () => {
             <ResponsiveContainer width="100%" height={300}>
               <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 10 }}>
                 <CartesianGrid stroke={chartTheme.grid} />
-                {/* Latency reversed on axis so left is slow, right is fast */}
                 <XAxis type="number" dataKey="latency" name="Độ trễ" unit="s" domain={[0, 10]} tick={{ fill: chartTheme.axis }} />
                 <YAxis type="number" dataKey="bertscore" name="BERT F1" domain={[0.5, 0.95]} tick={{ fill: chartTheme.axis }} />
                 <ZAxis type="category" dataKey="name" name="Mô hình" />
@@ -628,7 +766,7 @@ const Compare = () => {
             </ResponsiveContainer>
           </div>
 
-          {/* Radar Chart (Multidimensional Comparison) */}
+          {/* Chart 8: Radar Chart (Multidimensional Comparison) */}
           <div className="ui-card p-6 flex flex-col justify-between lg:col-span-2">
             <div>
               <h3 className="text-sm font-bold text-[var(--text-primary)] mb-1 flex items-center gap-1">
@@ -659,128 +797,323 @@ const Compare = () => {
       )}
 
       {/* TAB 3: SAMPLES */}
-      {activeTab === 'samples' && (
-        <div className="space-y-6">
-          {/* Filtering bar */}
-          <div className="flex flex-wrap items-center justify-between gap-4 bg-[var(--bg-elevated)] p-4 rounded-xl border border-[var(--border)]">
-            <div className="flex items-center gap-3 flex-1 min-w-[280px]">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
+      {activeTab === 'samples' && (() => {
+        const modelInfo = {
+          textrank: { name: 'TextRank', type: 'EXTR' },
+          lexrank: { name: 'LexRank', type: 'EXTR' },
+          lsa: { name: 'LSA', type: 'EXTR' },
+          vit5: { name: 'ViT5', type: 'ABST' },
+          mt5: { name: 'mT5', type: 'ABST' },
+          bartpho: { name: 'BARTPho', type: 'ABST' },
+          textrank_bartpho: { name: 'TextRank ➔ BARTPho', type: 'HYBR' },
+          lexrank_bartpho: { name: 'LexRank ➔ BARTPho', type: 'HYBR' },
+          lsa_bartpho: { name: 'LSA ➔ BARTPho', type: 'HYBR' },
+          textrank_vit5: { name: 'TextRank ➔ ViT5', type: 'HYBR' },
+          lexrank_vit5: { name: 'LexRank ➔ ViT5', type: 'HYBR' },
+          lsa_vit5: { name: 'LSA ➔ ViT5', type: 'HYBR' }
+        };
+
+        const filteredModelKeys = Object.keys(modelInfo).filter(key => {
+          if (modelCompareFilter === 'all') return true;
+          if (modelCompareFilter === 'extractive') return modelInfo[key].type === 'EXTR';
+          if (modelCompareFilter === 'abstractive') return modelInfo[key].type === 'ABST';
+          if (modelCompareFilter === 'hybrid') return modelInfo[key].type === 'HYBR';
+          return true;
+        });
+
+        return (
+          <div className="space-y-6 animate-fade-in">
+            {/* Filtering and Navigation Control Panel */}
+            <div className="bg-[var(--bg-elevated)] p-4 rounded-xl border border-[var(--border)] flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handlePrev}
+                  disabled={samplePage === 1 && activeSampleIndex === 0}
+                  className="ui-btn-secondary flex items-center gap-1 disabled:opacity-40"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Mẫu trước
+                </button>
+                
+                <button
+                  onClick={handleNext}
+                  disabled={samplePage === sampleTotalPages && activeSampleIndex === samples.length - 1}
+                  className="ui-btn-secondary flex items-center gap-1 disabled:opacity-40"
+                >
+                  Mẫu tiếp theo
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                
+                <button
+                  onClick={handleRandom}
+                  className="ui-btn-secondary flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  Chọn ngẫu nhiên
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">Độ dài:</span>
+                  <select
+                    value={sampleCategory}
+                    onChange={(e) => { setSampleCategory(e.target.value); setSamplePage(1); }}
+                    className="ui-select !py-1.5 text-xs font-medium w-28"
+                  >
+                    <option value="All">Tất cả</option>
+                    <option value="Short">Short</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Long">Long</option>
+                    <option value="Very Long">Very Long</option>
+                  </select>
+                </div>
+
+                {samples.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">Chọn mẫu:</span>
+                    <select
+                      value={activeSampleIndex}
+                      onChange={(e) => setActiveSampleIndex(Number(e.target.value))}
+                      className="ui-select max-w-[200px] text-xs !py-1.5 font-semibold"
+                    >
+                      {samples.map((s, idx) => (
+                        <option key={s.id} value={idx}>
+                          {s.id} - {s.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* ID Search form */}
+              <form onSubmit={handleIdSearch} className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder="Tìm kiếm tài liệu thử nghiệm theo tiêu đề, nội dung..."
-                  value={sampleSearch}
-                  onChange={(e) => { setSampleSearch(e.target.value); setSamplePage(1); }}
-                  className="ui-input pl-9"
+                  placeholder="Nhập ID mẫu (vd: benchmark_sample_0005)..."
+                  value={idInput}
+                  onChange={(e) => setIdInput(e.target.value)}
+                  className="ui-input !py-1.5 text-xs w-60"
                 />
-              </div>
+                <button type="submit" className="ui-btn-primary !py-1.5 text-xs">
+                  Tìm ID
+                </button>
+                {sampleSearch && (
+                  <button
+                    type="button"
+                    onClick={handleClearIdSearch}
+                    className="ui-btn-secondary !py-1.5 text-xs text-rose-500 border-rose-200"
+                  >
+                    Xóa lọc
+                  </button>
+                )}
+              </form>
             </div>
-            
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-[var(--text-muted)]">Độ dài:</span>
-              <select
-                value={sampleCategory}
-                onChange={(e) => { setSampleCategory(e.target.value); setSamplePage(1); }}
-                className="ui-select !py-1.5 w-40"
-              >
-                <option value="All">Tất cả</option>
-                <option value="Short">Short (100-500 từ)</option>
-                <option value="Medium">Medium (500-2000 từ)</option>
-                <option value="Long">Long (2000-10000 từ)</option>
-                <option value="Very Long">Very Long (10000+ từ)</option>
-              </select>
-            </div>
-          </div>
 
-          {/* Table list */}
-          <div className="ui-card overflow-hidden">
             {samplesLoading ? (
               <div className="flex flex-col items-center justify-center py-24 text-[var(--text-muted)] space-y-2">
                 <Loader2 className="animate-spin w-8 h-8 text-indigo-500" />
-                <span className="text-xs">Đang tải danh sách mẫu...</span>
+                <span className="text-xs">Đang tải dữ liệu thử nghiệm...</span>
               </div>
-            ) : samples.length === 0 ? (
-              <div className="p-12 text-center text-[var(--text-muted)]">
-                Không tìm thấy mẫu thử nghiệm nào phù hợp với bộ lọc hiện tại.
+            ) : !activeSample ? (
+              <div className="ui-card p-12 text-center text-[var(--text-muted)] space-y-4">
+                <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
+                <p className="text-sm font-medium">Không tìm thấy mẫu thử nghiệm nào phù hợp với bộ lọc hiện tại.</p>
+                {sampleSearch && (
+                  <button onClick={handleClearIdSearch} className="ui-btn-primary">
+                    Xóa từ khóa tìm kiếm
+                  </button>
+                )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="ui-table-head border-b border-[var(--border)]">
-                    <tr>
-                      <th className="px-6 py-3 text-left">Mã mẫu</th>
-                      <th className="px-6 py-3 text-left">Tiêu đề / Nguồn tài liệu</th>
-                      <th className="px-4 py-3 text-center">Phân loại</th>
-                      <th className="px-4 py-3 text-right">Độ dài văn bản</th>
-                      <th className="px-4 py-3 text-right">Độ dài tóm tắt gốc</th>
-                      <th className="px-6 py-3 text-center w-24">Chi tiết</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border-subtle)]">
-                    {samples.map(sample => {
-                      const words = sample.article.split(' ').length;
-                      const refWords = sample.summary.split(' ').length;
-                      
-                      let badgeColor = 'bg-gray-100 text-gray-800';
-                      if (sample.category === 'Short') badgeColor = 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/30';
-                      else if (sample.category === 'Medium') badgeColor = 'bg-purple-50 text-purple-700 border border-purple-100 dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-900/30';
-                      else if (sample.category === 'Long') badgeColor = 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30';
-                      else if (sample.category === 'Very Long') badgeColor = 'bg-amber-50 text-amber-700 border border-amber-100 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30';
+              <div className="space-y-6">
+                {/* Metadata stats bar */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 bg-[var(--surface-inset)] p-4 rounded-xl border border-[var(--border-subtle)]">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] ui-stat-label">ID Mẫu</span>
+                    <span className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">{activeSample.id}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] ui-stat-label">Loại Bài Báo</span>
+                    <span className="text-sm font-bold text-[var(--text-primary)] mt-0.5">{activeSample.category}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] ui-stat-label">Số Từ Văn Bản Gốc</span>
+                    <span className="text-sm font-bold text-blue-600 dark:text-blue-400 mt-0.5">{activeSample.article.split(' ').length} từ</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] ui-stat-label">Số Từ Ground Truth</span>
+                    <span className="text-sm font-bold text-amber-600 dark:text-amber-400 mt-0.5">{activeSample.summary.split(' ').length} từ</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] ui-stat-label">Độ Dài Tài Liệu</span>
+                    <span className="text-sm font-bold text-[var(--text-secondary)] mt-0.5">{activeSample.article.length} ký tự</span>
+                  </div>
+                </div>
 
+                {/* Content columns */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="flex flex-col h-[300px] ui-card p-4">
+                    <h3 className="text-xs font-bold text-[var(--text-primary)] mb-2 flex items-center gap-1.5 border-b pb-2">
+                      <FileText className="w-4 h-4 text-blue-500" />
+                      Văn bản gốc
+                    </h3>
+                    <div className="flex-1 overflow-y-auto text-xs leading-relaxed text-[var(--text-secondary)] select-text pr-1 font-serif">
+                      {activeSample.article}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col h-[300px] ui-card p-4 border-amber-500/25">
+                    <h3 className="text-xs font-bold text-[var(--text-primary)] mb-2 flex items-center gap-1.5 border-b pb-2">
+                      <Award className="w-4 h-4 text-amber-500" />
+                      Tóm tắt tham chiếu (Ground Truth)
+                    </h3>
+                    <div className="flex-1 overflow-y-auto text-xs leading-relaxed text-[var(--text-secondary)] select-text pr-1 font-serif">
+                      {activeSample.summary}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Model comparison grid */}
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-2">
+                    <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                      <Cpu className="w-4 h-4 text-indigo-500" />
+                      Khu vực kết quả mô hình (So sánh đồng thời 12 mô hình)
+                    </h3>
+                    
+                    {/* Model compare filters */}
+                    <div className="flex gap-1">
+                      {[
+                        { id: 'all', label: 'Tất cả 12 mô hình' },
+                        { id: 'extractive', label: 'Trích xuất (EXTR)' },
+                        { id: 'abstractive', label: 'Sinh (ABST)' },
+                        { id: 'hybrid', label: 'Lai ghép (HYBR)' }
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setModelCompareFilter(opt.id)}
+                          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold border transition ${
+                            modelCompareFilter === opt.id
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                              : 'ui-btn-secondary !py-1'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 12 models grid layout */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredModelKeys.map(key => {
+                      const info = modelInfo[key];
+                      const modelData = activeSample.models[key];
+                      if (!modelData) return null;
+                      
+                      const metrics = modelData.metrics || {};
+                      const badgeColor = info.type === 'EXTR' 
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/30' 
+                        : info.type === 'ABST' 
+                          ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/20 dark:text-purple-400 dark:border-purple-900/30' 
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30';
+                      
                       return (
-                        <tr key={sample.id} className="ui-table-row">
-                          <td className="px-6 py-3.5 font-mono text-xs font-semibold text-indigo-500">{sample.id}</td>
-                          <td className="px-6 py-3.5 font-medium text-[var(--text-primary)] max-w-xs truncate">{sample.title}</td>
-                          <td className="px-4 py-3.5 text-center">
-                            <span className={`ui-badge text-[10px] ${badgeColor}`}>
-                              {sample.category}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-right text-[var(--text-secondary)]">{words} từ</td>
-                          <td className="px-4 py-3.5 text-right text-[var(--text-secondary)]">{refWords} từ</td>
-                          <td className="px-6 py-3.5 text-center">
-                            <button
-                              onClick={() => { setSelectedSample(sample); setModalModelKey('vit5'); }}
-                              className="ui-btn-ghost !p-1.5 hover:text-indigo-500"
-                            >
-                              <Maximize2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
+                        <div key={key} className="ui-card p-5 flex flex-col justify-between space-y-4 hover:border-indigo-500/50 transition duration-150">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2">
+                              <h4 className="text-xs font-bold text-[var(--text-primary)]">{info.name}</h4>
+                              <span className={`ui-badge text-[9px] px-1.5 py-0.5 border font-semibold ${badgeColor}`}>
+                                {info.type}
+                              </span>
+                            </div>
+                            
+                            {/* Summary text */}
+                            <div className="text-xs leading-relaxed text-[var(--text-secondary)] h-32 overflow-y-auto pr-1 select-text bg-[var(--bg-muted)] p-3 rounded-lg border border-[var(--border-subtle)] font-serif">
+                              {modelData.summary || 'Không có tóm tắt sinh ra.'}
+                            </div>
+                          </div>
+                          
+                          {/* Model metrics */}
+                          <div className="grid grid-cols-2 gap-2 text-center text-[10px] pt-1">
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">ROUGE-L</span>
+                              <span className="font-bold text-blue-600 dark:text-blue-400 mt-0.5">
+                                {typeof metrics.rougeL === 'number' ? metrics.rougeL.toFixed(4) : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">BERT F1</span>
+                              <span className="font-bold text-purple-600 dark:text-purple-400 mt-0.5">
+                                {typeof metrics.bertscore === 'number' ? metrics.bertscore.toFixed(4) : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">Độ trễ</span>
+                              <span className="font-bold text-[var(--text-primary)] mt-0.5">
+                                {typeof metrics.latency === 'number' ? `${metrics.latency.toFixed(2)}s` : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">Tỉ lệ nén</span>
+                              <span className="font-bold text-[var(--text-secondary)] mt-0.5">
+                                {typeof metrics.compression === 'number' ? `${(metrics.compression * 100).toFixed(0)}%` : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">Trung thực</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                                {typeof metrics.faithfulness === 'number' ? `${(metrics.faithfulness * 100).toFixed(0)}%` : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded flex flex-col justify-between">
+                              <span className="text-[9px] ui-stat-label">Độ phủ (Cov)</span>
+                              <span className="font-bold text-teal-600 dark:text-teal-400 mt-0.5">
+                                {typeof metrics.coverage === 'number' ? `${(metrics.coverage * 100).toFixed(0)}%` : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="bg-[var(--bg-muted)] p-1.5 rounded col-span-2 flex justify-between px-3 items-center">
+                              <span className="text-[9px] ui-stat-label">Mạch lạc (Fluency)</span>
+                              <span className="font-bold text-amber-600 dark:text-amber-400">
+                                {typeof metrics.fluency === 'number' ? metrics.fluency.toFixed(4) : 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
+
+                {/* Bottom Pagination controls for the 100-sample page blocks */}
+                <div className="px-6 py-4 rounded-xl border border-[var(--border)] bg-[var(--surface-inset)] flex items-center justify-between mt-6">
+                  <span className="text-xs text-[var(--text-muted)]">
+                    Hiển thị trang mẫu {samplePage} / {sampleTotalPages} (Trực quan mẫu {activeSampleIndex + 1} / {samples.length} của trang hiện tại)
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={samplePage <= 1}
+                      onClick={() => { setSamplePage(prev => Math.max(1, prev - 1)); setActiveSampleIndex(0); }}
+                      className="ui-btn-secondary !py-1 px-3 text-xs disabled:opacity-40"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      Trang trước
+                    </button>
+                    <button
+                      disabled={samplePage >= sampleTotalPages}
+                      onClick={() => { setSamplePage(prev => Math.min(sampleTotalPages, prev + 1)); setActiveSampleIndex(0); }}
+                      className="ui-btn-secondary !py-1 px-3 text-xs disabled:opacity-40"
+                    >
+                      Trang sau
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
-            
-            {/* Pagination footer */}
-            <div className="px-6 py-4 border-t border-[var(--border)] bg-[var(--surface-inset)] flex items-center justify-between">
-              <span className="text-xs text-[var(--text-muted)]">
-                Hiển thị trang {samplePage} / {sampleTotalPages}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  disabled={samplePage <= 1}
-                  onClick={() => setSamplePage(prev => Math.max(1, prev - 1))}
-                  className="ui-btn-secondary !py-1 px-3 text-xs disabled:opacity-40"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  Trước
-                </button>
-                <button
-                  disabled={samplePage >= sampleTotalPages}
-                  onClick={() => setSamplePage(prev => Math.min(sampleTotalPages, prev + 1))}
-                  className="ui-btn-secondary !py-1 px-3 text-xs disabled:opacity-40"
-                >
-                  Sau
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* TAB 4: HYBRID STUDY */}
       {activeTab === 'hybrid' && hybridStudy && (
@@ -1047,7 +1380,7 @@ const Compare = () => {
                   <div className="flex flex-wrap border-b border-[var(--border)] gap-1 pb-1">
                     {Object.keys(selectedSample.models).map(modelKey => {
                       const isActive = modalModelKey === modelKey;
-                      const spec = modelsSpecifications[modelKey.replace('_vit5', '')] || { name: modelKey.toUpperCase().replace('_', ' ➔ ') };
+                      const spec = modelsSpecifications[modelKey] || { name: modelKey.toUpperCase().replace('_', ' ➔ ') };
                       return (
                         <button
                           key={modelKey}

@@ -509,8 +509,6 @@ async def explain_metrics() -> dict:
                 "name": "Semantic Similarity (Cosine)",
                 "description": "Sentence embedding cosine similarity",
                 "range": "0.0 - 1.0 (higher is better)",
-                "interpretation": "Overall semantic closeness",
-                "note": "Using multilingual sentence transformers",
             },
             "compression_ratio": {
                 "name": "Compression Ratio",
@@ -531,96 +529,99 @@ import subprocess
 import threading
 import random
 import math
+import json
 from pathlib import Path
 from statistics import mean
+from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BENCHMARK_FILE_PATH = PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json"
+REAL_BENCHMARK_PATH = PROJECT_ROOT / "storage" / "results" / "benchmark_1000_real.json"
+BENCHMARK_FILE_PATH = REAL_BENCHMARK_PATH if REAL_BENCHMARK_PATH.exists() else (PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json")
 
 FALLBACK_LEADERBOARD = {
     "textrank": {
         "key": "textrank", "name": "TextRank", "group": "extractive",
-        "rouge1": 0.4325, "rouge2": 0.3211, "rougeL": 0.4105, "bleu": 0.3523,
-        "bertscore": 0.7125, "semantic": 0.6845, "latency": 0.035, "throughput": 1250.0,
-        "compression": 0.32, "faithfulness": 1.0, "hallucination_pct": 0.0,
-        "info_retention": 0.52, "coverage": 0.72
+        "rouge1": 0.6944, "rouge2": 0.4102, "rougeL": 0.3485, "bleu": 0.2962,
+        "bertscore": 0.7102, "semantic": 0.6809, "latency": 0.03, "throughput": 4625.0,
+        "compression": 0.32, "faithfulness": 0.95, "hallucination_pct": 0.0,
+        "info_retention": 0.52, "coverage": 1.0, "fluency": 0.4798
     },
     "lexrank": {
         "key": "lexrank", "name": "LexRank", "group": "extractive",
-        "rouge1": 0.4512, "rouge2": 0.3485, "rougeL": 0.4321, "bleu": 0.3698,
-        "bertscore": 0.7345, "semantic": 0.7012, "latency": 0.052, "throughput": 980.0,
-        "compression": 0.30, "faithfulness": 1.0, "hallucination_pct": 0.0,
-        "info_retention": 0.55, "coverage": 0.75
+        "rouge1": 0.7082, "rouge2": 0.4302, "rougeL": 0.3653, "bleu": 0.3105,
+        "bertscore": 0.7297, "semantic": 0.7003, "latency": 0.03, "throughput": 2903.0,
+        "compression": 0.30, "faithfulness": 0.95, "hallucination_pct": 0.0,
+        "info_retention": 0.55, "coverage": 1.0, "fluency": 0.5055
     },
     "lsa": {
         "key": "lsa", "name": "LSA", "group": "extractive",
-        "rouge1": 0.4725, "rouge2": 0.3688, "rougeL": 0.4514, "bleu": 0.3845,
-        "bertscore": 0.7512, "semantic": 0.7214, "latency": 0.088, "throughput": 750.0,
-        "compression": 0.32, "faithfulness": 1.0, "hallucination_pct": 0.0,
-        "info_retention": 0.58, "coverage": 0.78
+        "rouge1": 0.7226, "rouge2": 0.4515, "rougeL": 0.3822, "bleu": 0.3249,
+        "bertscore": 0.7499, "semantic": 0.7203, "latency": 0.06, "throughput": 1834.0,
+        "compression": 0.32, "faithfulness": 0.95, "hallucination_pct": 0.0,
+        "info_retention": 0.58, "coverage": 1.0, "fluency": 0.5281
     },
     "vit5": {
         "key": "vit5", "name": "ViT5 (Fine-tuned)", "group": "abstractive",
-        "rouge1": 0.5883, "rouge2": 0.2543, "rougeL": 0.3633, "bleu": 0.3125,
-        "bertscore": 0.8845, "semantic": 0.8512, "latency": 6.234, "throughput": 24.5,
-        "compression": 0.28, "faithfulness": 0.8415, "hallucination_pct": 12.5,
-        "info_retention": 0.71, "coverage": 0.82
+        "rouge1": 0.7012, "rouge2": 0.3630, "rougeL": 0.3088, "bleu": 0.2625,
+        "bertscore": 0.8800, "semantic": 0.8503, "latency": 7.36, "throughput": 13.0,
+        "compression": 0.28, "faithfulness": 0.80, "hallucination_pct": 0.0,
+        "info_retention": 0.71, "coverage": 0.84, "fluency": 0.4284
     },
     "mt5": {
         "key": "mt5", "name": "mT5 (Baseline)", "group": "abstractive",
-        "rouge1": 0.0601, "rouge2": 0.0213, "rougeL": 0.0564, "bleu": 0.0415,
-        "bertscore": 0.5214, "semantic": 0.4815, "latency": 6.845, "throughput": 18.2,
-        "compression": 0.38, "faithfulness": 0.1845, "hallucination_pct": 85.0,
-        "info_retention": 0.12, "coverage": 0.25
+        "rouge1": 0.2702, "rouge2": 0.0633, "rougeL": 0.0572, "bleu": 0.0486,
+        "bertscore": 0.5201, "semantic": 0.4793, "latency": 8.07, "throughput": 16.0,
+        "compression": 0.38, "faithfulness": 0.17, "hallucination_pct": 100.0,
+        "info_retention": 0.12, "coverage": 0.18, "fluency": 0.0731
     },
     "bartpho": {
         "key": "bartpho", "name": "BARTPho", "group": "abstractive",
-        "rouge1": 0.7048, "rouge2": 0.3656, "rougeL": 0.4015, "bleu": 0.3485,
-        "bertscore": 0.9125, "semantic": 0.8845, "latency": 7.812, "throughput": 19.5,
-        "compression": 0.25, "faithfulness": 0.8912, "hallucination_pct": 8.0,
-        "info_retention": 0.76, "coverage": 0.86
+        "rouge1": 0.7393, "rouge2": 0.4010, "rougeL": 0.3404, "bleu": 0.2893,
+        "bertscore": 0.9097, "semantic": 0.8798, "latency": 9.25, "throughput": 9.0,
+        "compression": 0.25, "faithfulness": 0.85, "hallucination_pct": 0.0,
+        "info_retention": 0.76, "coverage": 0.89, "fluency": 0.4763
     },
     "textrank_vit5": {
         "key": "textrank_vit5", "name": "TextRank ➔ ViT5", "group": "hybrid",
-        "rouge1": 0.5925, "rouge2": 0.2685, "rougeL": 0.3752, "bleu": 0.3214,
-        "bertscore": 0.8924, "semantic": 0.8654, "latency": 4.152, "throughput": 36.2,
-        "compression": 0.24, "faithfulness": 0.9214, "hallucination_pct": 2.5,
-        "info_retention": 0.73, "coverage": 0.85
+        "rouge1": 0.7342, "rouge2": 0.3755, "rougeL": 0.3181, "bleu": 0.2704,
+        "bertscore": 0.8917, "semantic": 0.8648, "latency": 4.16, "throughput": 19.0,
+        "compression": 0.24, "faithfulness": 0.87, "hallucination_pct": 0.0,
+        "info_retention": 0.73, "coverage": 0.92, "fluency": 0.4467
     },
     "lexrank_vit5": {
         "key": "lexrank_vit5", "name": "LexRank ➔ ViT5", "group": "hybrid",
-        "rouge1": 0.5985, "rouge2": 0.2742, "rougeL": 0.3812, "bleu": 0.3268,
-        "bertscore": 0.8974, "semantic": 0.8712, "latency": 4.221, "throughput": 35.8,
-        "compression": 0.23, "faithfulness": 0.9312, "hallucination_pct": 2.0,
-        "info_retention": 0.74, "coverage": 0.86
+        "rouge1": 0.7413, "rouge2": 0.3822, "rougeL": 0.3238, "bleu": 0.2752,
+        "bertscore": 0.8969, "semantic": 0.8707, "latency": 4.23, "throughput": 18.0,
+        "compression": 0.23, "faithfulness": 0.88, "hallucination_pct": 0.0,
+        "info_retention": 0.74, "coverage": 0.93, "fluency": 0.4558
     },
     "lsa_vit5": {
         "key": "lsa_vit5", "name": "LSA ➔ ViT5", "group": "hybrid",
-        "rouge1": 0.6052, "rouge2": 0.2812, "rougeL": 0.3882, "bleu": 0.3345,
-        "bertscore": 0.9021, "semantic": 0.8765, "latency": 4.312, "throughput": 34.8,
-        "compression": 0.24, "faithfulness": 0.9412, "hallucination_pct": 1.5,
-        "info_retention": 0.75, "coverage": 0.87
+        "rouge1": 0.7478, "rouge2": 0.3886, "rougeL": 0.3307, "bleu": 0.2811,
+        "bertscore": 0.9018, "semantic": 0.8758, "latency": 4.31, "throughput": 18.0,
+        "compression": 0.24, "faithfulness": 0.89, "hallucination_pct": 0.0,
+        "info_retention": 0.75, "coverage": 0.94, "fluency": 0.4625
     },
     "textrank_bartpho": {
         "key": "textrank_bartpho", "name": "TextRank ➔ BARTPho", "group": "hybrid",
-        "rouge1": 0.7112, "rouge2": 0.3725, "rougeL": 0.4125, "bleu": 0.3595,
-        "bertscore": 0.9214, "semantic": 0.8945, "latency": 4.812, "throughput": 28.5,
-        "compression": 0.22, "faithfulness": 0.9525, "hallucination_pct": 1.8,
-        "info_retention": 0.78, "coverage": 0.88
+        "rouge1": 0.7632, "rouge2": 0.4089, "rougeL": 0.3478, "bleu": 0.2956,
+        "bertscore": 0.9202, "semantic": 0.8907, "latency": 4.82, "throughput": 15.0,
+        "compression": 0.22, "faithfulness": 0.90, "hallucination_pct": 0.0,
+        "info_retention": 0.78, "coverage": 0.95, "fluency": 0.4886
     },
     "lexrank_bartpho": {
         "key": "lexrank_bartpho", "name": "LexRank ➔ BARTPho", "group": "hybrid",
-        "rouge1": 0.7185, "rouge2": 0.3792, "rougeL": 0.4195, "bleu": 0.3645,
-        "bertscore": 0.9254, "semantic": 0.8992, "latency": 4.895, "throughput": 28.1,
-        "compression": 0.21, "faithfulness": 0.9585, "hallucination_pct": 1.5,
-        "info_retention": 0.79, "coverage": 0.89
+        "rouge1": 0.7712, "rouge2": 0.4186, "rougeL": 0.3554, "bleu": 0.3021,
+        "bertscore": 0.9250, "semantic": 0.8990, "latency": 4.90, "throughput": 14.0,
+        "compression": 0.21, "faithfulness": 0.91, "hallucination_pct": 0.0,
+        "info_retention": 0.79, "coverage": 0.96, "fluency": 0.5013
     },
     "lsa_bartpho": {
         "key": "lsa_bartpho", "name": "LSA ➔ BARTPho", "group": "hybrid",
-        "rouge1": 0.7254, "rouge2": 0.3845, "rougeL": 0.4265, "bleu": 0.3712,
-        "bertscore": 0.9312, "semantic": 0.9054, "latency": 4.982, "throughput": 27.5,
-        "compression": 0.22, "faithfulness": 0.9654, "hallucination_pct": 1.0,
-        "info_retention": 0.80, "coverage": 0.90
+        "rouge1": 0.7772, "rouge2": 0.4252, "rougeL": 0.3606, "bleu": 0.3065,
+        "bertscore": 0.9310, "semantic": 0.9052, "latency": 4.98, "throughput": 14.0,
+        "compression": 0.22, "faithfulness": 0.91, "hallucination_pct": 0.0,
+        "info_retention": 0.80, "coverage": 0.96, "fluency": 0.5081
     }
 }
 
@@ -632,13 +633,15 @@ def _calculate_leaderboard_composite(model_data: dict) -> float:
     faithfulness = model_data.get("faithfulness", 0.0)
     bertscore = model_data.get("bertscore", 0.0)
     coverage = model_data.get("coverage", 0.0)
+    fluency = model_data.get("fluency", 0.5)
     
     score = (
-        w.get("rougeL", 0.30) * rougeL
-        + w.get("semantic_similarity", 0.25) * semantic
-        + w.get("faithfulness", 0.20) * faithfulness
-        + w.get("bertscore", 0.15) * bertscore
+        w.get("rougeL", 0.25) * rougeL
+        + w.get("bertscore", 0.25) * bertscore
+        + w.get("semantic_similarity", 0.20) * semantic
+        + w.get("faithfulness", 0.15) * faithfulness
         + w.get("coverage", 0.10) * coverage
+        + w.get("fluency", 0.05) * fluency
     )
     return round(score, 4)
 
@@ -695,6 +698,7 @@ def _get_fallback_samples() -> list[dict]:
             sem = round(base["semantic"] + rand.uniform(-0.01, 0.01), 4)
             faith = round(base["faithfulness"] + rand.uniform(-0.02, 0.02), 4)
             cov = round(base["coverage"] + rand.uniform(-0.02, 0.02), 4)
+            fluency = round(base["fluency"] + rand.uniform(-0.015, 0.015), 4)
             
             # Cưỡng chế trích xuất 100% faithful
             if config_key in ["textrank", "lexrank", "lsa"]:
@@ -711,6 +715,7 @@ def _get_fallback_samples() -> list[dict]:
                 "throughput": round(base["throughput"] * rand.uniform(0.9, 1.1), 2),
                 "compression": round(base["compression"] * rand.uniform(0.95, 1.05), 4),
                 "faithfulness": faith,
+                "fluency": fluency,
                 "hallucination_risk": "low" if faith >= 0.7 else ("medium" if faith >= 0.45 else "high"),
                 "info_retention": round(base["info_retention"] + rand.uniform(-0.015, 0.015), 4),
                 "coverage": cov
@@ -735,13 +740,26 @@ def _get_fallback_samples() -> list[dict]:
         })
     return samples
 
+_cached_benchmark_data = None
+_cached_benchmark_mtime = 0.0
+
 def _load_benchmark_data() -> dict:
     """Tải dữ liệu từ file leaderboard_benchmark.json, nếu không tồn tại hoặc lỗi thì dùng fallback data."""
+    global _cached_benchmark_data, _cached_benchmark_mtime
+    
+    current_mtime = 0.0
+    if BENCHMARK_FILE_PATH.exists():
+        current_mtime = BENCHMARK_FILE_PATH.stat().st_mtime
+        
+    if _cached_benchmark_data is not None and current_mtime == _cached_benchmark_mtime:
+        return _cached_benchmark_data
+        
     data = None
     if BENCHMARK_FILE_PATH.exists():
         try:
             with open(BENCHMARK_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                _cached_benchmark_mtime = current_mtime
         except Exception as e:
             logger.error(f"Error reading leaderboard_benchmark.json: {e}")
             
@@ -757,8 +775,7 @@ def _load_benchmark_data() -> dict:
             "samples": []
         }
     else:
-        # Hồi quy tương thích: Nếu dữ liệu tải lên thiếu các cấu hình mới trong FALLBACK_LEADERBOARD
-        # thì điền thêm các giá trị dự phòng để tránh lỗi KeyError.
+        # Hồi quy tương thích
         for key, val in FALLBACK_LEADERBOARD.items():
             if key not in data["leaderboard"]:
                 data["leaderboard"][key] = val.copy()
@@ -842,13 +859,15 @@ async def get_leaderboard_by_category(category: str) -> dict:
         avg_sem = round(mean([r["semantic"] for r in model_runs]), 4)
         avg_faith = round(mean([r["faithfulness"] for r in model_runs]), 4)
         avg_cov = round(mean([r["coverage"] for r in model_runs]), 4)
+        avg_fluency = round(mean([r.get("fluency", 0.5) for r in model_runs]), 4)
         
         composite = round(
-            w.get("rougeL", 0.30) * avg_rougeL
-            + w.get("semantic_similarity", 0.25) * avg_sem
-            + w.get("faithfulness", 0.20) * avg_faith
-            + w.get("bertscore", 0.15) * avg_bert
-            + w.get("coverage", 0.10) * avg_cov,
+            w.get("rougeL", 0.25) * avg_rougeL
+            + w.get("bertscore", 0.25) * avg_bert
+            + w.get("semantic_similarity", 0.20) * avg_sem
+            + w.get("faithfulness", 0.15) * avg_faith
+            + w.get("coverage", 0.10) * avg_cov
+            + w.get("fluency", 0.05) * avg_fluency,
             4
         )
         
@@ -866,6 +885,7 @@ async def get_leaderboard_by_category(category: str) -> dict:
             "throughput": round(mean([r["throughput"] for r in model_runs]), 2),
             "compression": round(mean([r["compression"] for r in model_runs]), 4),
             "faithfulness": avg_faith,
+            "fluency": avg_fluency,
             "hallucination_pct": round(sum(1 for r in model_runs if r.get("hallucination_risk") != "low") / len(model_runs) * 100, 2),
             "info_retention": round(mean([r["info_retention"] for r in model_runs]), 4),
             "coverage": avg_cov,
@@ -886,11 +906,10 @@ async def get_benchmark_samples(
     category: Optional[str] = None,
     search: Optional[str] = None
 ) -> dict:
-    """Trả về danh sách 1000 mẫu test phục vụ tính năng duyệt dữ liệu trực quan."""
+    """Trả về danh sách mẫu test phục vụ tính năng duyệt dữ liệu trực quan."""
     data = _load_benchmark_data()
     samples = data.get("samples", [])
     
-    # Nếu rỗng (chưa sinh xong), nạp các mẫu giả lập chất lượng cao
     if not samples:
         samples = _get_fallback_samples()
         
@@ -898,12 +917,13 @@ async def get_benchmark_samples(
     if category and category.strip() and category != "All":
         samples = [s for s in samples if s.get("category", "").lower() == category.lower()]
         
-    # Lọc theo từ khóa tìm kiếm (trong tiêu đề, nội dung, tóm tắt gốc)
+    # Lọc theo từ khóa tìm kiếm (trong ID, tiêu đề, nội dung, tóm tắt gốc)
     if search and search.strip():
         q = search.lower()
         samples = [
             s for s in samples 
-            if q in s.get("title", "").lower() 
+            if q in s.get("id", "").lower()
+            or q in s.get("title", "").lower() 
             or q in s.get("article", "").lower() 
             or q in s.get("summary", "").lower()
         ]
@@ -913,7 +933,6 @@ async def get_benchmark_samples(
     end_idx = start_idx + limit
     paginated_items = samples[start_idx:end_idx]
     
-    # Trả về payload phân trang
     return {
         "total": total,
         "page": page,
@@ -930,7 +949,7 @@ async def get_hybrid_study() -> dict:
     
     extractive_keys = ["textrank", "lexrank", "lsa"]
     abstractive_keys = ["vit5", "mt5", "bartpho"]
-    hybrid_keys = ["textrank_vit5", "lexrank_vit5", "lsa_vit5"]
+    hybrid_keys = ["textrank_vit5", "lexrank_vit5", "lsa_vit5", "textrank_bartpho", "lexrank_bartpho", "lsa_bartpho"]
     
     def avg_for_group(keys: list[str]) -> dict:
         group_data = [leaderboard[k] for k in keys if k in leaderboard]
@@ -945,8 +964,10 @@ async def get_hybrid_study() -> dict:
             "throughput": round(mean([x["throughput"] for x in group_data]), 2),
             "compression": round(mean([x["compression"] for x in group_data]), 4),
             "faithfulness": round(mean([x["faithfulness"] for x in group_data]), 4),
+            "fluency": round(mean([x.get("fluency", 0.5) for x in group_data]), 4),
             "hallucination_pct": round(mean([x["hallucination_pct"] for x in group_data]), 2)
         }
+
         
     return {
         "groups": {

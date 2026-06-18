@@ -319,7 +319,7 @@ class RAGTransformerSummarizer:
             model_key = _pick_available_model()
             if model_key:
                 profile = GENERATION_PROFILES[model_key]
-                summary = _run_transformer_generate(model_key, prompt, profile)
+                summary = _run_transformer_generate(model_key, full_context, profile)
 
         if not summary or len(summary.split()) < 10:
             # Fallback: extractive — ghép các câu quan trọng nhất
@@ -426,7 +426,7 @@ class RAGTransformerSummarizer:
             model_key = "extractive_fallback"
 
         confidence = min(0.99, contexts[0]["combined_score"]) if contexts else 0.0
-        if contexts[0].get("rerank_score") is not None:
+        if contexts and contexts[0].get("rerank_score") is not None:
             confidence = min(0.99, contexts[0]["rerank_score"])
 
         return {
