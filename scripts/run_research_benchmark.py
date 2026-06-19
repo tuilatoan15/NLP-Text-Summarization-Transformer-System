@@ -161,7 +161,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
             s_id = sample["id"]
             if s_id not in summaries_db:
                 summaries_db[s_id] = {}
-            if config_key in summaries_db[s_id]:
+            if config_key in summaries_db[s_id] and summaries_db[s_id][config_key].get("summary"):
                 continue
                 
             summary, elapsed = run_model_inference(config_key, sample["article"])
@@ -179,7 +179,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
 
     # 2. ViT5-based configurations
     vit5_configs = ["vit5", "textrank_vit5", "lexrank_vit5", "lsa_vit5"]
-    needs_vit5 = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] for cfg in vit5_configs) for s in samples)
+    needs_vit5 = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] or not summaries_db[s["id"]][cfg].get("summary") for cfg in vit5_configs) for s in samples)
     if needs_vit5:
         logger.info("Preloading ViT5 base model for inference window...")
         from summarizers.abstractive.abstractive_summarizer import get_summarizer
@@ -191,7 +191,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 s_id = sample["id"]
                 if s_id not in summaries_db:
                     summaries_db[s_id] = {}
-                if cfg in summaries_db[s_id]:
+                if cfg in summaries_db[s_id] and summaries_db[s_id][cfg].get("summary"):
                     continue
                 
                 summary, elapsed = run_model_inference(cfg, sample["article"])
@@ -212,7 +212,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
 
     # 3. mT5 configuration
     mt5_configs = ["mt5"]
-    needs_mt5 = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] for cfg in mt5_configs) for s in samples)
+    needs_mt5 = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] or not summaries_db[s["id"]][cfg].get("summary") for cfg in mt5_configs) for s in samples)
     if needs_mt5:
         logger.info("Preloading mT5 base model for inference window...")
         from summarizers.abstractive.abstractive_summarizer import get_summarizer
@@ -224,7 +224,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 s_id = sample["id"]
                 if s_id not in summaries_db:
                     summaries_db[s_id] = {}
-                if cfg in summaries_db[s_id]:
+                if cfg in summaries_db[s_id] and summaries_db[s_id][cfg].get("summary"):
                     continue
                     
                 summary, elapsed = run_model_inference(cfg, sample["article"])
@@ -245,7 +245,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
 
     # 4. BARTPho-based configurations
     bartpho_configs = ["bartpho", "textrank_bartpho", "lexrank_bartpho", "lsa_bartpho"]
-    needs_bartpho = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] for cfg in bartpho_configs) for s in samples)
+    needs_bartpho = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] or not summaries_db[s["id"]][cfg].get("summary") for cfg in bartpho_configs) for s in samples)
     if needs_bartpho:
         logger.info("Preloading BARTPho model for inference window...")
         from summarizers.abstractive.abstractive_summarizer import get_summarizer
@@ -257,7 +257,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 s_id = sample["id"]
                 if s_id not in summaries_db:
                     summaries_db[s_id] = {}
-                if cfg in summaries_db[s_id]:
+                if cfg in summaries_db[s_id] and summaries_db[s_id][cfg].get("summary"):
                     continue
                     
                 summary, elapsed = run_model_inference(cfg, sample["article"])

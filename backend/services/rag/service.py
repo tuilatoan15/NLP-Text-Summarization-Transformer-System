@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -34,6 +35,57 @@ from .vector_store import VectorStoreManager
 logger = logging.getLogger(__name__)
 
 
+def clean_generated_title(title: str) -> str:
+    title = title.strip().replace('"', '').replace("'", "")
+    # Keep letters, numbers, spaces, and Vietnamese diacritics
+    title = re.sub(
+        r"[^\w\s\dàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệđìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ"
+        r"ÀÁẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÈÉẺẼẸÊẾỀỂỄỆĐÌÍỈĨỊÒÓỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÙÚỦŨỤƯỨỪỬỮỰỲÝỶỸÝ]",
+        "",
+        title
+    )
+    title = " ".join(title.split())  # clean extra spaces
+    return title
+
+
+def generate_title_for_conversation(user_query: str) -> str:
+    # Build prompt
+    prompt = (
+        "Bạn là trợ lý ảo AI. Hãy đặt một tiêu đề ngắn gọn (từ 5 đến 10 từ) cho cuộc trò chuyện bắt đầu bằng câu hỏi sau đây.\n"
+        "Yêu cầu: Không chứa ký tự đặc biệt, không vượt quá 80 ký tự, tập trung vào chủ đề chính. Chỉ trả về tiêu đề duy nhất, không thêm lời dẫn giải.\n\n"
+        f"Câu hỏi: \"{user_query}\"\n\n"
+        "Tiêu đề tiếng Việt:"
+    )
+    
+    title = ""
+    try:
+        from .rag_config import RAG_GENERATOR_TYPE
+        if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+            from .summarizer import _run_llm_api
+            title = _run_llm_api(prompt, RAG_GENERATOR_TYPE)
+        
+        if not title:
+            from .summarizer import _pick_available_model, _run_transformer_generate, GENERATION_PROFILES
+            model_key = _pick_available_model()
+            if model_key:
+                profile = GENERATION_PROFILES[model_key]
+                title = _run_transformer_generate(model_key, prompt, profile)
+    except Exception as e:
+        logger.error(f"Error in auto title generation: {e}")
+        
+    cleaned_title = clean_generated_title(title)
+    word_count = len(cleaned_title.split())
+    if cleaned_title and 3 <= word_count <= 15 and len(cleaned_title) <= 80:
+        return cleaned_title
+    else:
+        # Fallback: Lấy 50 ký tự đầu tiên
+        fallback = user_query.strip()
+        fallback = re.sub(r"\s+", " ", fallback)
+        if len(fallback) > 50:
+            return fallback[:50] + "..."
+        return fallback[:50]
+
+
 class RAGChatService:
     def __init__(self) -> None:
         rag_dir = config.DOCUMENT_INTELLIGENCE_DIR / "rag"
@@ -47,6 +99,18 @@ class RAGChatService:
 
     def list_embedding_models(self) -> dict:
         return self.embedding_service.list_models()
+
+    def _trigger_auto_title(self, conv_id: str) -> None:
+        try:
+            messages = self.repository.list_messages(conv_id)
+            if 2 <= len(messages) <= 4:
+                first_user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
+                if first_user_msg:
+                    new_title = generate_title_for_conversation(first_user_msg)
+                    self.repository.rename_conversation(conv_id, new_title)
+                    logger.info(f"Auto title generated for conversation {conv_id}: {new_title}")
+        except Exception as e:
+            logger.error(f"Failed to auto-update conversation title: {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Upload — chunk_size và embedding_model được hardcode
@@ -80,6 +144,7 @@ class RAGChatService:
             "page_count": len(loaded["pages"]),
             "uploaded_at": int(time.time()),
             "rag_config_version": "v2-hardcoded",
+            "chunking_mode": "dynamic_semantic"
         }
         document_id = self.repository.create_document(
             filename=filename,
@@ -93,6 +158,9 @@ class RAGChatService:
             chunk_overlap=chunk_overlap,
             document_id=document_id,
             filename=filename,
+            embedding_service=self.embedding_service,
+            embedding_model=embedding_model,
+            chunking_mode="dynamic"
         )
         vectors = self.embedding_service.embed_documents(
             [c["text"] for c in chunks], embedding_model
@@ -100,7 +168,7 @@ class RAGChatService:
         self.repository.save_chunks(chunks, vectors, embedding_model)
         self.vector_store.upsert_chunks(chunks, vectors)
 
-        # RAPTOR-lite hierarchical indexing
+        # RAPTOR-lite hierarchical indexing (Recursive GMM Tree)
         try:
             from .raptor import RaptorIndexer
             indexer = RaptorIndexer(
@@ -109,7 +177,7 @@ class RAGChatService:
                 embedding_service=self.embedding_service,
                 generator=self.generator
             )
-            indexer.build_tree(document_id, chunks, vectors, embedding_model)
+            indexer.build_tree(document_id, chunks, vectors, embedding_model, max_levels=3)
         except Exception as exc:
             logger.error(f"❌ Failed to build RAPTOR tree for document {document_id}: {exc}", exc_info=True)
 
@@ -166,6 +234,16 @@ class RAGChatService:
         temperature: float = 0.2,
     ) -> dict[str, Any]:
         t_total_start = time.perf_counter()
+
+        # Resolve embedding model from document metadata if available to avoid dimension mismatch (e.g. 768 vs 1024)
+        if document_ids:
+            doc_record = self.repository.list_documents()
+            for doc in doc_record:
+                if doc["id"] in document_ids:
+                    embedding_model = doc.get("metadata", {}).get("embedding_model", EMBEDDING_MODEL)
+                    break
+        else:
+            embedding_model = EMBEDDING_MODEL
 
         conv_id = self.repository.ensure_conversation(
             conversation_id, title=query[:60] or "New chat"
@@ -232,75 +310,126 @@ class RAGChatService:
                 retrieval_threshold=threshold,
                 model_used=response.get("model_used"),
             )
+            self._trigger_auto_title(conv_id)
             return response
 
-        # 2. DOCUMENT_QA INTENT (With Multi-query Expansion)
-        t_retrieval_start = time.perf_counter()
-        if intent == "DOCUMENT_QA":
-            # Lấy candidates từ query gốc
-            candidates = self.vector_store.query(
-                query_vector=query_vector,
-                top_k=RETRIEVAL_INITIAL_TOP_K,
-                document_ids=document_ids or None,
-            )
-            # Query expansion
-            expanded = expand_query(query)
-            if expanded:
-                seen_ids = {c["id"] for c in candidates}
-                for eq in expanded:
-                    eq_vector = self.embedding_service.embed_query(eq, embedding_model)
-                    eq_candidates = self.vector_store.query(
-                        query_vector=eq_vector,
-                        top_k=5,
-                        document_ids=document_ids or None,
-                    )
-                    for eq_c in eq_candidates:
-                        if eq_c["id"] not in seen_ids:
-                            candidates.append(eq_c)
-                            seen_ids.add(eq_c["id"])
+        # 2. DOCUMENT_QA / SUMMARIZE INTENT (Vòng lặp Agentic RAG tự sửa lỗi)
+        current_query = query
+        retries = 0
+        max_retries = 2  # Cho phép thử lại tối đa 2 lần
+        current_threshold = threshold
+        current_top_k = top_k
         
-        # 3. SUMMARIZE INTENT (Hierarchical RAPTOR Retrieval)
-        else: # intent == "SUMMARIZE"
-            candidates = self.vector_store.query(
-                query_vector=query_vector,
-                top_k=RETRIEVAL_INITIAL_TOP_K,
-                document_ids=document_ids or None,
-            )
-            summary_candidates = [c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"]
-            if summary_candidates:
-                candidates = summary_candidates
+        t_retrieval_start = time.perf_counter()
+        
+        while True:
+            # Embed truy vấn hiện tại
+            t_embed_loop = time.perf_counter()
+            query_vector = self.embedding_service.embed_query(current_query, embedding_model)
+            loop_embedding_time = time.perf_counter() - t_embed_loop
+            
+            # Lấy candidates dựa trên intent
+            if intent == "DOCUMENT_QA":
+                candidates = self.vector_store.query(
+                    query_vector=query_vector,
+                    top_k=RETRIEVAL_INITIAL_TOP_K,
+                    document_ids=document_ids or None,
+                )
+                # Query expansion (chỉ chạy ở lần thử đầu tiên)
+                if retries == 0:
+                    expanded = expand_query(current_query)
+                    if expanded:
+                        seen_ids = {c["id"] for c in candidates}
+                        for eq in expanded:
+                            eq_vector = self.embedding_service.embed_query(eq, embedding_model)
+                            eq_candidates = self.vector_store.query(
+                                query_vector=eq_vector,
+                                top_k=5,
+                                document_ids=document_ids or None,
+                            )
+                            for eq_c in eq_candidates:
+                                if eq_c["id"] not in seen_ids:
+                                    candidates.append(eq_c)
+                                    seen_ids.add(eq_c["id"])
+            else:  # intent == "SUMMARIZE"
+                # Nếu document_ids rỗng nhưng intent là SUMMARIZE, chuyển về DOCUMENT_QA
+                if not document_ids:
+                    intent = "DOCUMENT_QA"
+                    candidates = self.vector_store.query(
+                        query_vector=query_vector,
+                        top_k=RETRIEVAL_INITIAL_TOP_K,
+                        document_ids=None,
+                    )
+                else:
+                    candidates = self.vector_store.query(
+                        query_vector=query_vector,
+                        top_k=RETRIEVAL_INITIAL_TOP_K,
+                        document_ids=document_ids,
+                    )
+                    summary_candidates = [c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"]
+                    if summary_candidates:
+                        candidates = summary_candidates
+                    # Nếu không có summary chunks, giữ nguyên ALL candidates (base chunks)
+                    # để retriever vẫn có dữ liệu để rerank thay vì trả rỗng
 
-        # Hybrid retrieval + Cross-Encoder reranking
-        retrieved = self.retriever.retrieve(
-            query=query,
-            query_vector=query_vector,
-            chunks=candidates,
-            top_k=top_k,
-            threshold=threshold,
-            retrieval_mode=retrieval_mode,
-            use_reranking=use_reranking,
-        )
+            # Hybrid retrieval + Cross-Encoder reranking
+            retrieved = self.retriever.retrieve(
+                query=current_query,
+                query_vector=query_vector,
+                chunks=candidates,
+                top_k=current_top_k,
+                threshold=current_threshold,
+                retrieval_mode=retrieval_mode,
+                use_reranking=use_reranking,
+            )
+
+            # Sinh câu trả lời bằng Generator
+            t_gen_loop = time.perf_counter()
+            generation = self.generator.build_answer(
+                current_query, retrieved, chat_history=chat_history, temperature=temperature
+            )
+            generation_time = time.perf_counter() - t_gen_loop
+
+            # Gọi LLM Judge đánh giá chất lượng câu trả lời (Self-Reflection)
+            if not retrieved:
+                judge_result = {
+                    "faithfulness": "yes",
+                    "relevance": "no",
+                    "sufficiency": "no",
+                    "feedback": "Không tìm thấy bất kỳ phân đoạn tài liệu phù hợp nào."
+                }
+            else:
+                context_str = "\n\n".join(c["text"] for c in retrieved)
+                from .agent import evaluate_answer
+                judge_result = evaluate_answer(query, context_str, generation["answer"])
+
+            # Kiểm tra xem có cần thử lại hay không
+            if judge_result["sufficiency"] == "no" and retries < max_retries:
+                retries += 1
+                logger.info(f"🔄 Agentic RAG [Lượt {retries}]: Phản hồi Judge báo thiếu thông tin: {judge_result['feedback']}")
+                
+                # Viết lại câu hỏi tập trung vào thông tin bị thiếu
+                from .agent import rewrite_query
+                current_query = rewrite_query(query, judge_result["feedback"])
+                
+                # Nới lỏng ngưỡng tương đồng và tăng số lượng chunk
+                current_threshold = max(0.1, current_threshold - 0.08)
+                current_top_k = current_top_k + 2
+                continue
+            else:
+                # Đạt yêu cầu hoặc đạt giới hạn số lần retry -> Kết thúc
+                break
+
         retrieval_time = time.perf_counter() - t_retrieval_start
 
         # Lấy chi tiết thời gian từ retriever
         bm25_time = self.retriever.last_latency.get("bm25", 0.0)
         fusion_time = self.retriever.last_latency.get("vector_rrf", 0.0)
         rerank_time = self.retriever.last_latency.get("rerank", 0.0)
-
-        # Tính lại retrieval_time loại trừ rerank nếu muốn tách biệt rõ ràng
-        # retrieval_time ở đây là tổng thời gian từ vector search + bm25 + fusion
-        # (tổng thời gian retrieval trừ đi thời gian rerank)
         actual_retrieval_only = max(0.0, retrieval_time - rerank_time)
+        prompt = self.generator.prompt_template(retrieved, current_query)
 
-        # Sinh câu trả lời bằng Transformer
-        t_gen_start = time.perf_counter()
-        generation = self.generator.build_answer(
-            query, retrieved, chat_history=chat_history, temperature=temperature
-        )
-        generation_time = time.perf_counter() - t_gen_start
-        prompt = self.generator.prompt_template(retrieved, query)
-
-        # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk)
+        # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk) bằng NLI audit
         eval_metrics = None
         if retrieved:
             try:
@@ -328,12 +457,6 @@ class RAGChatService:
         }
         logger.info("RAG Latency Details:\n%s", json.dumps(latency_details, indent=2))
 
-        # Ghi log chi tiết phụ cho các bước nhỏ để phục vụ Root Cause Analysis
-        logger.info(
-            "RAG Latency Breakdowns: bm25_time=%.4fs, fusion_time=%.4fs",
-            bm25_time, fusion_time
-        )
-
         response: dict[str, Any] = {
             "conversation_id": conv_id,
             "answer": generation["answer"],
@@ -355,6 +478,8 @@ class RAGChatService:
                 "top_k": top_k,
                 "threshold": threshold,
                 "reranking": use_reranking,
+                "agent_retries": retries,
+                "judge_feedback": judge_result.get("feedback", "")
             },
         }
 
@@ -368,6 +493,7 @@ class RAGChatService:
             model_used=response.get("model_used"),
             evaluation=response.get("evaluation"),
         )
+        self._trigger_auto_title(conv_id)
         return response
 
     # ─────────────────────────────────────────────────────────────────────────

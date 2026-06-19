@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   UploadCloud, Trash2, Plus, MessageSquare, Settings, Sliders,
   Loader2, Send, CheckCircle2, AlertTriangle, FileText,
   ChevronRight, Sparkles, ShieldCheck, Bookmark, Settings2,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
+  Search, Edit2
 } from 'lucide-react';
 import * as ragApi from '../services/ragApi';
 import { useApp } from '../context/AppContext';
@@ -30,9 +32,16 @@ export default function Chat() {
   const isStreamingRef = useRef(false);
 
   // --- State ---
+  const queryClient = useQueryClient();
+  const [leftTab, setLeftTab] = useState<'history' | 'documents'>('history');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editTitleVal, setEditTitleVal] = useState('');
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteTargetTitle, setDeleteTargetTitle] = useState('');
+
   const [documents, setDocuments] = useState<RAGDocument[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
-  const [conversations, setConversations] = useState<Array<{ id: string; title: string }>>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RAGMessage[]>([]);
   const [inputQuery, setInputQuery] = useState('');
@@ -78,10 +87,127 @@ export default function Chat() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // --- React Query Integrations ---
+  
+  // Conversations list query
+  const { data: conversationsData = [], isLoading: isConvsLoading } = useQuery({
+    queryKey: ['conversations', searchQuery],
+    queryFn: async () => {
+      if (searchQuery.trim()) {
+        return await ragApi.searchConversations(searchQuery.trim());
+      }
+      return await ragApi.listRagConversations();
+    },
+    placeholderData: (previousData) => previousData,
+  });
+
+  // Messages of active conversation query
+  const { data: fetchedMessages } = useQuery({
+    queryKey: ['messages', activeConversationId],
+    queryFn: async () => {
+      if (!activeConversationId) return [];
+      return await ragApi.listConversationMessages(activeConversationId);
+    },
+    enabled: !!activeConversationId,
+  });
+
+  // Sync React Query messages to local state (supporting streaming)
+  useEffect(() => {
+    if (activeConversationId && fetchedMessages) {
+      if (!isStreamingRef.current) {
+        setMessages(fetchedMessages);
+        
+        const assistantMsgs = fetchedMessages.filter(m => m.role === 'assistant');
+        if (assistantMsgs.length > 0) {
+          const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+          if (lastMsg.citations && lastMsg.citations.length > 0) {
+            setActiveCitations(lastMsg.citations);
+          } else {
+            setActiveCitations([]);
+          }
+        } else {
+          setActiveCitations([]);
+        }
+      }
+    } else if (!activeConversationId) {
+      setMessages(prev => prev.length === 0 ? prev : []);
+      setActiveCitations(prev => prev.length === 0 ? prev : []);
+    }
+  }, [fetchedMessages, activeConversationId]);
+
+  // Mutations
+  const createConversationMutation = useMutation({
+    mutationFn: async () => {
+      return await ragApi.createConversation("New chat");
+    },
+    onSuccess: (newConv) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setActiveConversationId(newConv.id);
+      setLeftTab('history');
+    },
+    onError: (err: any) => {
+      showError("Không thể tạo cuộc trò chuyện: " + err.message);
+    }
+  });
+
+  const renameConversationMutation = useMutation({
+    mutationFn: async ({ id, title }: { id: string; title: string }) => {
+      return await ragApi.renameConversation(id, title);
+    },
+    onMutate: async ({ id, title }) => {
+      await queryClient.cancelQueries({ queryKey: ['conversations'] });
+      const previousConvs = queryClient.getQueryData(['conversations']);
+      queryClient.setQueryData(['conversations'], (old: any) =>
+        old ? old.map((c: any) => c.id === id ? { ...c, title } : c) : []
+      );
+      return { previousConvs };
+    },
+    onError: (err: any, _, context) => {
+      if (context?.previousConvs) {
+        queryClient.setQueryData(['conversations'], context.previousConvs);
+      }
+      showError("Không thể đổi tên cuộc trò chuyện: " + err.message);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    }
+  });
+
+  const deleteConversationMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await ragApi.deleteConversation(id);
+    },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['conversations'] });
+      const previousConvs = queryClient.getQueryData(['conversations']);
+      queryClient.setQueryData(['conversations'], (old: any) =>
+        old ? old.filter((c: any) => c.id !== id) : []
+      );
+      return { previousConvs };
+    },
+    onSuccess: (_, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      if (activeConversationId === deletedId) {
+        setActiveConversationId(null);
+        setMessages([]);
+        setActiveCitations([]);
+      }
+      showSuccess("Đã xóa cuộc trò chuyện");
+    },
+    onError: (err: any, _, context) => {
+      if (context?.previousConvs) {
+        queryClient.setQueryData(['conversations'], context.previousConvs);
+      }
+      showError("Không thể xóa cuộc trò chuyện: " + err.message);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    }
+  });
+
   // --- Initial Data Load ---
   useEffect(() => {
     loadDocuments();
-    loadConversations();
     loadEmbeddingModels();
   }, []);
 
@@ -89,18 +215,6 @@ export default function Chat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
-
-  // Load message history when active conversation changes (excl. ongoing streams)
-  useEffect(() => {
-    if (activeConversationId) {
-      if (!isStreamingRef.current) {
-        loadMessages(activeConversationId);
-      }
-    } else {
-      setMessages([]);
-      setActiveCitations([]);
-    }
-  }, [activeConversationId]);
 
   // --- API Integrations ---
   const loadDocuments = async (selectNewId?: string) => {
@@ -117,15 +231,6 @@ export default function Chat() {
     }
   };
 
-  const loadConversations = async () => {
-    try {
-      const list = await ragApi.listRagConversations();
-      setConversations(list);
-    } catch (err: any) {
-      showError('Không thể tải lịch sử trò chuyện: ' + err.message);
-    }
-  };
-
   const loadEmbeddingModels = async () => {
     try {
       const models = await ragApi.listEmbeddingModels();
@@ -139,22 +244,51 @@ export default function Chat() {
     }
   };
 
-  const loadMessages = async (convId: string) => {
-    try {
-      const msgs = await ragApi.listConversationMessages(convId);
-      setMessages(msgs);
-      
-      const assistantMsgs = msgs.filter(m => m.role === 'assistant');
-      if (assistantMsgs.length > 0) {
-        const lastMsg = assistantMsgs[assistantMsgs.length - 1];
-        if (lastMsg.citations && lastMsg.citations.length > 0) {
-          setActiveCitations(lastMsg.citations);
-          setRightPanelTab('citations');
-        }
+  // --- Date Grouping Helper ---
+  const groupConversationsByDate = (convList: any[]) => {
+    const groups: Record<string, any[]> = {
+      today: [],
+      yesterday: [],
+      last7Days: [],
+      last30Days: [],
+      older: []
+    };
+    
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+    const startOf7DaysAgo = new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startOf30DaysAgo = new Date(startOfToday.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    convList.forEach(conv => {
+      const updatedDate = new Date(conv.updated_at);
+      if (updatedDate >= startOfToday) {
+        groups.today.push(conv);
+      } else if (updatedDate >= startOfYesterday) {
+        groups.yesterday.push(conv);
+      } else if (updatedDate >= startOf7DaysAgo) {
+        groups.last7Days.push(conv);
+      } else if (updatedDate >= startOf30DaysAgo) {
+        groups.last30Days.push(conv);
+      } else {
+        groups.older.push(conv);
       }
-    } catch (err: any) {
-      showError('Không thể tải tin nhắn: ' + err.message);
+    });
+
+    return groups;
+  };
+
+  // --- Inline Rename Handlers ---
+  const handleStartRename = (id: string, currentTitle: string) => {
+    setEditingConvId(id);
+    setEditTitleVal(currentTitle);
+  };
+
+  const handleRenameSubmit = (id: string) => {
+    if (editTitleVal.trim()) {
+      renameConversationMutation.mutate({ id, title: editTitleVal.trim() });
     }
+    setEditingConvId(null);
   };
 
   const showSuccess = (msg: string) => {
@@ -248,7 +382,7 @@ export default function Chat() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputQuery.trim() || chatLoading) return;
+    if (!inputQuery.trim() || chatLoading || selectedDocIds.length === 0) return;
 
     const currentQuery = inputQuery;
     setInputQuery('');
@@ -334,8 +468,12 @@ export default function Chat() {
         setActiveCitations([]);
       }
 
-      // Reload conversations dropdown
-      loadConversations();
+      const activeId = activeConversationId || finalResult.conversation_id;
+      if (!activeConversationId && finalResult.conversation_id) {
+        setActiveConversationId(finalResult.conversation_id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['messages', activeId] });
 
     } catch (err: any) {
       showError('Lỗi gửi tin nhắn: ' + err.message);
@@ -475,155 +613,353 @@ export default function Chat() {
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm shadow-black/5"
           >
-            {/* Header */}
-            <div className="p-4 border-b border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText size={16} className="text-blue-500" />
-                <h2 className="text-sm font-bold text-[var(--text)]">{t('ragDocuments')}</h2>
-              </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-bold">
-                {documents.length} File
-              </span>
+            {/* Tab Switcher Header */}
+            <div className="flex border-b border-[var(--border)] bg-[var(--surface-muted)] p-1 gap-1">
+              <button
+                onClick={() => setLeftTab('history')}
+                className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                  leftTab === 'history'
+                    ? 'bg-[var(--surface-elevated)] text-[var(--text)] shadow-sm'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)]'
+                }`}
+              >
+                <MessageSquare size={14} />
+                Hội thoại
+              </button>
+              <button
+                onClick={() => setLeftTab('documents')}
+                className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                  leftTab === 'documents'
+                    ? 'bg-[var(--surface-elevated)] text-[var(--text)] shadow-sm'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--surface-inset)]'
+                }`}
+              >
+                <FileText size={14} />
+                Tài liệu ({documents.length})
+              </button>
             </div>
 
-            {/* Ingestion & Selection Tabs */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-5">
-              {/* Upload Form */}
-              <div className="space-y-2">
-                <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                  Nạp tài liệu mới
-                </h3>
-                <form onSubmit={handleUpload} className="space-y-3">
-                  {/* Drag/Drop Box */}
-                  <motion.div
-                    onDragEnter={handleDrag}
-                    onDragOver={handleDrag}
-                    onDragLeave={handleDrag}
-                    onDrop={handleDrop}
-                    animate={{
-                      boxShadow: dragActive ? "0 0 15px rgba(37, 99, 235, 0.4)" : "0 0 0px rgba(0,0,0,0)",
-                      scale: dragActive ? 1.02 : 1
-                    }}
-                    className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
-                      dragActive
-                        ? 'border-blue-500 bg-blue-500/10'
-                        : uploadFile
-                        ? 'border-emerald-400 bg-emerald-400/5'
-                        : 'border-[var(--border)] hover:border-blue-400 hover:bg-[var(--surface-muted)]'
-                    }`}
-                    onClick={() => document.getElementById('file-upload-input')?.click()}
-                  >
-                    <input
-                      id="file-upload-input"
-                      type="file"
-                      accept=".pdf,.docx,.txt,.md"
-                      className="hidden"
-                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    />
-                    
-                    {uploadFile ? (
-                      <div className="space-y-1">
-                        <FileText className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <p className="text-xs font-semibold text-[var(--text)] truncate px-2">{uploadFile.name}</p>
-                        <p className="text-[10px] text-[var(--text-muted)]">{(uploadFile.size / 1024).toFixed(1)} KB</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <UploadCloud className="w-8 h-8 text-blue-500 mx-auto" />
-                        <p className="text-xs font-semibold text-[var(--text)]">Kéo thả hoặc nhấp để chọn file</p>
-                        <p className="text-[10px] text-[var(--text-faint)]">PDF, DOCX, TXT, MD</p>
-                      </div>
-                    )}
-                  </motion.div>
+            {leftTab === 'history' ? (
+              /* HISTORY TAB CONTENT */
+              <div className="flex-1 flex flex-col overflow-hidden p-4 space-y-4">
+                {/* New Chat Button */}
+                <button
+                  onClick={() => createConversationMutation.mutate()}
+                  disabled={createConversationMutation.isPending}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {createConversationMutation.isPending ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Plus size={14} />
+                  )}
+                  Cuộc trò chuyện mới
+                </button>
 
-                  <button
-                    type="submit"
-                    disabled={!uploadFile || uploading}
-                    className="ui-btn-primary w-full text-xs py-2 gap-1.5"
-                  >
-                    {uploading ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Đang nhúng & lưu...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={14} />
-                        Nạp tài liệu & Index
-                      </>
-                    )}
-                  </button>
-                </form>
-              </div>
-
-              <div className="h-px bg-[var(--border)]" />
-
-              {/* Documents Selection Checklist */}
-              <div className="space-y-2 flex-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
-                    Chọn tài liệu trò chuyện
-                  </h3>
-                  <button
-                    onClick={toggleSelectAllDocs}
-                    className="text-[10px] text-blue-500 font-bold hover:underline cursor-pointer"
-                  >
-                    {selectedDocIds.length === documents.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
-                  </button>
+                {/* Real-time Search Input */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
+                  <input
+                    type="text"
+                    placeholder="Tìm cuộc trò chuyện..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-[var(--border)] bg-[var(--surface-elevated)] focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-[var(--text)] outline-none"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-faint)] hover:text-[var(--text)] font-semibold"
+                    >
+                      Xóa
+                    </button>
+                  )}
                 </div>
 
-                {documents.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-[var(--text-faint)]">
-                    Chưa có tài liệu nào được nạp. Hãy tải file lên trước.
-                  </div>
-                ) : (
-                  <motion.div
-                    variants={containerVariants}
-                    initial="hidden"
-                    animate="show"
-                    className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1"
-                  >
-                    {documents.map((doc) => {
-                      const isChecked = selectedDocIds.includes(doc.id);
-                      return (
-                        <motion.div
-                          variants={itemVariants}
-                          key={doc.id}
-                          className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
-                            isChecked
-                              ? 'border-blue-500/30 bg-blue-500/5'
-                              : 'border-[var(--border)] hover:bg-[var(--surface-muted)]'
-                          }`}
-                        >
-                          <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleSelectDoc(doc.id)}
-                              className="rounded border-[var(--border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
-                            />
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-[var(--text)] truncate">{doc.filename}</p>
-                              <p className="text-[9px] text-[var(--text-faint)] flex items-center gap-1 mt-0.5">
-                                <span className="uppercase font-mono">{doc.source_type}</span> ·
-                                <span>{new Date(doc.created_at).toLocaleDateString()}</span>
-                              </p>
+                {/* Conversations List grouped by time */}
+                <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                  {isConvsLoading && conversationsData.length === 0 ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 size={16} className="animate-spin text-blue-500" />
+                    </div>
+                  ) : conversationsData.length === 0 ? (
+                    <div className="text-center text-xs text-[var(--text-faint)] py-8">
+                      Không tìm thấy cuộc trò chuyện nào.
+                    </div>
+                  ) : (
+                    (() => {
+                      const groups = groupConversationsByDate(conversationsData);
+                      const groupKeys: Array<{ key: keyof typeof groups; label: string }> = [
+                        { key: 'today', label: 'Hôm nay' },
+                        { key: 'yesterday', label: 'Hôm qua' },
+                        { key: 'last7Days', label: '7 ngày gần nhất' },
+                        { key: 'last30Days', label: '30 ngày gần nhất' },
+                        { key: 'older', label: 'Cũ hơn' }
+                      ];
+
+                      const formatUpdateTime = (dateStr: string) => {
+                        try {
+                          const d = new Date(dateStr);
+                          const now = new Date();
+                          if (d.toDateString() === now.toDateString()) {
+                            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          }
+                          if (d.getFullYear() === now.getFullYear()) {
+                            return `${d.getDate()}/${d.getMonth() + 1}`;
+                          }
+                          return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+                        } catch {
+                          return "";
+                        }
+                      };
+
+                      return groupKeys.map(({ key, label }) => {
+                        const items = groups[key];
+                        if (!items || items.length === 0) return null;
+
+                        return (
+                          <div key={key} className="space-y-1.5">
+                            <h3 className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider px-2">
+                              {label}
+                            </h3>
+                            <div className="space-y-1">
+                              {items.map((conv: any) => {
+                                const isSelected = activeConversationId === conv.id;
+                                const isEditing = editingConvId === conv.id;
+
+                                if (isEditing) {
+                                  return (
+                                    <div
+                                      key={conv.id}
+                                      className="flex items-center gap-1.5 w-full p-2 bg-[var(--surface-inset)] rounded-xl border border-blue-500"
+                                    >
+                                      <input
+                                        type="text"
+                                        value={editTitleVal}
+                                        onChange={(e) => setEditTitleVal(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') handleRenameSubmit(conv.id);
+                                          if (e.key === 'Escape') setEditingConvId(null);
+                                        }}
+                                        className="flex-1 text-xs bg-transparent border-none focus:outline-none text-[var(--text)] p-0"
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={() => handleRenameSubmit(conv.id)}
+                                        className="text-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
+                                        title="Lưu"
+                                      >
+                                        <CheckCircle2 size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingConvId(null)}
+                                        className="text-red-500 hover:text-red-600 transition-colors cursor-pointer"
+                                        title="Hủy"
+                                      >
+                                        <Trash2 size={14} className="rotate-45" />
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div
+                                    key={conv.id}
+                                    className={`group relative flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                                      isSelected
+                                        ? 'border-blue-500/30 bg-blue-500/5 text-blue-600 dark:text-blue-400'
+                                        : 'border-[var(--border)] hover:bg-[var(--surface-muted)] text-[var(--text-secondary)]'
+                                    }`}
+                                    onClick={() => {
+                                      if (!chatLoading) {
+                                        setActiveConversationId(conv.id);
+                                      }
+                                    }}
+                                  >
+                                    <div className="flex flex-col min-w-0 pr-12">
+                                      <p className={`text-xs font-semibold truncate ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-[var(--text)]'}`}>
+                                        {conv.title}
+                                      </p>
+                                      <p className="text-[9px] text-[var(--text-faint)] mt-0.5">
+                                        Cập nhật: {formatUpdateTime(conv.updated_at)}
+                                      </p>
+                                    </div>
+                                    
+                                    {/* Hover Action Buttons */}
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1.5 bg-gradient-to-l from-[var(--surface-elevated)] via-[var(--surface-elevated)] to-transparent pl-4 py-1.5">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleStartRename(conv.id, conv.title);
+                                        }}
+                                        className="p-1 rounded hover:bg-[var(--surface-inset)] text-[var(--text-muted)] hover:text-blue-500 transition-colors cursor-pointer"
+                                        title="Đổi tên"
+                                      >
+                                        <Edit2 size={13} />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeleteTargetId(conv.id);
+                                          setDeleteTargetTitle(conv.title);
+                                        }}
+                                        className="p-1 rounded hover:bg-[var(--surface-inset)] text-[var(--text-muted)] hover:text-red-500 transition-colors cursor-pointer"
+                                        title="Xóa"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          </label>
-                          <button
-                            onClick={() => handleDeleteDoc(doc.id, doc.filename)}
-                            className="text-[var(--text-faint)] hover:text-red-500 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors ml-1 cursor-pointer"
-                            title="Xóa tài liệu"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </motion.div>
-                      );
-                    })}
-                  </motion.div>
-                )}
+                          </div>
+                        );
+                      });
+                    })()
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              /* DOCUMENTS TAB CONTENT */
+              <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                {/* Upload Form */}
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                    Nạp tài liệu mới
+                  </h3>
+                  <form onSubmit={handleUpload} className="space-y-3">
+                    {/* Drag/Drop Box */}
+                    <motion.div
+                      onDragEnter={handleDrag}
+                      onDragOver={handleDrag}
+                      onDragLeave={handleDrag}
+                      onDrop={handleDrop}
+                      animate={{
+                        boxShadow: dragActive ? "0 0 15px rgba(37, 99, 235, 0.4)" : "0 0 0px rgba(0,0,0,0)",
+                        scale: dragActive ? 1.02 : 1
+                      }}
+                      className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                        dragActive
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : uploadFile
+                          ? 'border-emerald-400 bg-emerald-400/5'
+                          : 'border-[var(--border)] hover:border-blue-400 hover:bg-[var(--surface-muted)]'
+                      }`}
+                      onClick={() => document.getElementById('file-upload-input')?.click()}
+                    >
+                      <input
+                        id="file-upload-input"
+                        type="file"
+                        accept=".pdf,.docx,.txt,.md"
+                        className="hidden"
+                        onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                      />
+                      
+                      {uploadFile ? (
+                        <div className="space-y-1">
+                          <FileText className="w-8 h-8 text-emerald-500 mx-auto" />
+                          <p className="text-xs font-semibold text-[var(--text)] truncate px-2">{uploadFile.name}</p>
+                          <p className="text-[10px] text-[var(--text-muted)]">{(uploadFile.size / 1024).toFixed(1)} KB</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <UploadCloud className="w-8 h-8 text-blue-500 mx-auto" />
+                          <p className="text-xs font-semibold text-[var(--text)]">Kéo thả hoặc nhấp để chọn file</p>
+                          <p className="text-[10px] text-[var(--text-faint)]">PDF, DOCX, TXT, MD</p>
+                        </div>
+                      )}
+                    </motion.div>
+
+                    <button
+                      type="submit"
+                      disabled={!uploadFile || uploading}
+                      className="ui-btn-primary w-full text-xs py-2 gap-1.5 cursor-pointer"
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Đang nhúng & lưu...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={14} />
+                          Nạp tài liệu & Index
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="h-px bg-[var(--border)]" />
+
+                {/* Documents Selection Checklist */}
+                <div className="space-y-2 flex-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-[var(--text-faint)] uppercase tracking-wider">
+                      Chọn tài liệu trò chuyện
+                    </h3>
+                    <button
+                      onClick={toggleSelectAllDocs}
+                      className="text-[10px] text-blue-500 font-bold hover:underline cursor-pointer"
+                    >
+                      {selectedDocIds.length === documents.length ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                    </button>
+                  </div>
+
+                  {documents.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-[var(--text-faint)]">
+                      Chưa có tài liệu nào được nạp. Hãy tải file lên trước.
+                    </div>
+                  ) : (
+                    <motion.div
+                      variants={containerVariants}
+                      initial="hidden"
+                      animate="show"
+                      className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1"
+                    >
+                      {documents.map((doc) => {
+                        const isChecked = selectedDocIds.includes(doc.id);
+                        return (
+                          <motion.div
+                            variants={itemVariants}
+                            key={doc.id}
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                              isChecked
+                                ? 'border-blue-500/30 bg-blue-500/5'
+                                : 'border-[var(--border)] hover:bg-[var(--surface-muted)]'
+                            }`}
+                          >
+                            <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleSelectDoc(doc.id)}
+                                className="rounded border-[var(--border)] text-blue-500 focus:ring-blue-500 cursor-pointer"
+                              />
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-[var(--text)] truncate">{doc.filename}</p>
+                                <p className="text-[9px] text-[var(--text-faint)] flex items-center gap-1 mt-0.5">
+                                  <span className="uppercase font-mono">{doc.source_type}</span> ·
+                                  <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                                </p>
+                              </div>
+                            </label>
+                            <button
+                              onClick={() => handleDeleteDoc(doc.id, doc.filename)}
+                              className="text-[var(--text-faint)] hover:text-red-500 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors ml-1 cursor-pointer"
+                              title="Xóa tài liệu"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            )}
           </motion.section>
         )}
       </AnimatePresence>
@@ -644,21 +980,12 @@ export default function Chat() {
               {showLeftPanel ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
             </button>
 
-            {/* Conversation Selector / History Toggle */}
-            <select
-              value={activeConversationId || ''}
-              onChange={(e) => {
-                if (chatLoading) return;
-                const val = e.target.value;
-                setActiveConversationId(val ? val : null);
-              }}
-              className="ui-input py-1 text-xs max-w-[200px] h-8 font-semibold shadow-none border-[var(--border)] cursor-pointer"
-            >
-              <option value="">+ Cuộc trò chuyện mới</option>
-              {conversations.map((c) => (
-                <option key={c.id} value={c.id}>{c.title}</option>
-              ))}
-            </select>
+            {/* Active Conversation Title */}
+            <h1 className="text-sm font-bold text-[var(--text)] truncate max-w-[150px] md:max-w-[280px]">
+              {activeConversationId
+                ? conversationsData.find((c: any) => c.id === activeConversationId)?.title || "Cuộc trò chuyện"
+                : "Cuộc trò chuyện mới"}
+            </h1>
 
             <span className="text-xs text-[var(--text-muted)] hidden md:inline-flex items-center gap-1.5 bg-[var(--surface-inset)] px-2.5 py-1 rounded-lg">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -1061,6 +1388,53 @@ export default function Chat() {
           >
             <PanelRightOpen size={18} />
           </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteTargetId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[var(--surface-elevated)] border border-[var(--border)] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center gap-3 text-red-500">
+                <AlertTriangle size={24} />
+                <h3 className="text-base font-bold text-[var(--text)]">Xóa cuộc trò chuyện?</h3>
+              </div>
+              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+                Bạn có chắc muốn xóa cuộc trò chuyện <span className="font-semibold text-[var(--text)]">"{deleteTargetTitle}"</span>? Toàn bộ lịch sử tin nhắn liên quan sẽ bị xóa vĩnh viễn và không thể khôi phục.
+              </p>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setDeleteTargetId(null);
+                    setDeleteTargetTitle('');
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-[var(--surface-inset)] hover:bg-[var(--surface-muted)] text-[var(--text)] border border-[var(--border)] transition-colors cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={() => {
+                    if (deleteTargetId) {
+                      deleteConversationMutation.mutate(deleteTargetId);
+                      setDeleteTargetId(null);
+                      setDeleteTargetTitle('');
+                    }
+                  }}
+                  disabled={deleteConversationMutation.isPending}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/10 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {deleteConversationMutation.isPending && <Loader2 size={13} className="animate-spin" />}
+                  Xóa
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

@@ -143,6 +143,7 @@ class HybridRetriever:
                 "combined_score": round(rrf_score * 100, 6),  # Nhân 100 để scale trực quan
                 "dense_rank": dense_rank,
                 "bm25_rank": bm25_rank,
+                "metadata": chunk.get("metadata", {}),
             })
 
         # Sắp xếp các ứng viên theo RRF Score giảm dần

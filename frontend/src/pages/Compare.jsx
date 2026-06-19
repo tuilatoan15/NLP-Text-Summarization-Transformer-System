@@ -54,7 +54,7 @@ const Compare = () => {
   const reportQuery = useResearchReportQuery(true);
   const samplesQuery = useResearchBenchmarkSamplesQuery(
     samplePage,
-    100, // Fetch 100 samples per page
+    1000, // Fetch 1000 samples per page to display all samples
     sampleCategory,
     sampleSearch,
     activeTab === 'samples',
@@ -90,7 +90,7 @@ const Compare = () => {
       setActiveSampleIndex(prev => prev - 1);
     } else if (samplePage > 1) {
       setSamplePage(prev => prev - 1);
-      setActiveSampleIndex(99); // last sample of previous page
+      setActiveSampleIndex(999); // last sample of previous page
     }
   }, [activeSampleIndex, samplePage]);
 
@@ -106,7 +106,7 @@ const Compare = () => {
   const handleRandom = useCallback(() => {
     const randPage = Math.floor(Math.random() * sampleTotalPages) + 1;
     setSamplePage(randPage);
-    const randIndex = Math.floor(Math.random() * (samples.length || 100));
+    const randIndex = Math.floor(Math.random() * (samples.length || 1000));
     setActiveSampleIndex(randIndex);
   }, [sampleTotalPages, samples.length]);
 

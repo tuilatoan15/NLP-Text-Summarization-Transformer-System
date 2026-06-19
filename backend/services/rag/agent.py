@@ -101,7 +101,10 @@ def classify_intent(query: str, document_ids: list[str] | None = None) -> str:
         r"^(chào|hello|hi|xin chào|chào bạn|chào trợ lý|chào bot|greetings)\b",
         r"^(bạn là ai|tên bạn là gì|who are you|what is your name)\b",
         r"^(cảm ơn|cám ơn|thank|thanks|thank you)\b",
-        r"^(tạm biệt|bye|goodbye)\b"
+        r"^(tạm biệt|bye|goodbye)\b",
+        r"^(bạn khỏe không|bạn có khỏe|bạn thế nào|how are you)\b",
+        r"^(bạn có thể làm gì|bạn giúp gì được|help me|giúp tôi)\b",
+        r"^(ok|okay|được rồi|vâng|đồng ý|tốt lắm|hay quá)\b",
     ]
     is_general = any(re.search(pat, query_clean.lower()) for pat in general_patterns)
     if is_general and not (document_ids and len(document_ids) > 0):
@@ -166,3 +169,71 @@ Các câu hỏi mở rộng:"""
 
     # 2. Heuristic fallback: Tách cụm từ khóa hoặc trả về rỗng nếu không gọi được LLM
     return []
+
+
+def rewrite_query(original_query: str, missing_info_feedback: str) -> str:
+    """
+    Gọi LLM viết lại câu hỏi gốc tập trung vào phần thông tin còn thiếu
+    dựa trên đánh giá phản hồi từ LLM Judge.
+    """
+    prompt = (
+        "Bạn là trợ lý ảo tối ưu hóa tìm kiếm câu hỏi. Dưới đây là câu hỏi gốc và phản hồi về phần thông tin bị thiếu trong kết quả tìm kiếm hiện tại.\n"
+        "Hãy viết lại câu hỏi gốc thành một câu hỏi mới chi tiết, tập trung tìm kiếm chính xác phần thông tin bị thiếu đó để cải thiện kết quả truy xuất tiếp theo.\n\n"
+        f"Câu hỏi gốc: \"{original_query}\"\n"
+        f"Thông tin bị thiếu: \"{missing_info_feedback}\"\n\n"
+        "Chỉ trả về duy nhất câu hỏi mới bằng tiếng Việt, không thêm lời dẫn giải giải thích.\n"
+        "Câu hỏi mới:"
+    )
+    res = _call_llm(prompt)
+    return res.strip() if res else original_query
+
+
+def evaluate_answer(query: str, context: str, answer: str) -> dict[str, Any]:
+    """
+    Gọi LLM Judge đánh giá tính chân thực (faithfulness), tính liên quan (relevance)
+    và tính đầy đủ (sufficiency) của câu trả lời dựa trên ngữ cảnh.
+    """
+    import json
+    prompt = f"""Bạn là một Thẩm phán AI (LLM Judge) đánh giá chất lượng hệ thống Hỏi đáp.
+Nhiệm vụ của bạn là phân tích ba yếu tố sau và trả về kết quả đánh giá dưới dạng JSON:
+1. "faithfulness": Câu trả lời có hoàn toàn bám sát vào ngữ cảnh được cung cấp không? (Trả về "yes" nếu đúng, "no" nếu câu trả lời chứa thông tin tự suy diễn/bịa đặt không có trong ngữ cảnh).
+2. "relevance": Câu trả lời có tập trung trả lời đúng trọng tâm câu hỏi gốc không? (Trả về "yes" nếu đúng, "no" nếu trả lời lạc đề hoặc tránh né).
+3. "sufficiency": Ngữ cảnh được cung cấp có đủ thông tin để trả lời câu hỏi gốc một cách trọn vẹn không? (Trả về "yes" nếu đủ, "no" nếu thông tin trong ngữ cảnh quá sơ sài hoặc không đề cập đến nội dung câu hỏi).
+4. "feedback": Giải thích ngắn gọn lý do đánh giá, đặc biệt là nếu có tiêu chí nào bị đánh giá là "no".
+
+Yêu cầu định dạng đầu ra: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo cấu trúc sau, không giải thích gì thêm ngoài JSON:
+{{
+  "faithfulness": "yes" hoặc "no",
+  "relevance": "yes" hoặc "no",
+  "sufficiency": "yes" hoặc "no",
+  "feedback": "lý do..."
+}}
+
+---
+CÂU HỎI: "{query}"
+NGỮ CẢNH: "{context}"
+CÂU TRẢ LỜI: "{answer}"
+---
+KẾT QUẢ ĐÁNH GIÁ (JSON):"""
+
+    res = _call_llm(prompt)
+    try:
+        # Tìm cụm JSON trong text
+        match = re.search(r"\{.*\}", res, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            return {
+                "faithfulness": data.get("faithfulness", "yes").lower(),
+                "relevance": data.get("relevance", "yes").lower(),
+                "sufficiency": data.get("sufficiency", "yes").lower(),
+                "feedback": data.get("feedback", "")
+            }
+    except Exception as e:
+        logger.warning("Failed to parse LLM Judge evaluation JSON: %s. Raw response: %s", e, res)
+        
+    return {
+        "faithfulness": "yes",
+        "relevance": "yes",
+        "sufficiency": "yes",
+        "feedback": "Default pass due to parsing error"
+    }

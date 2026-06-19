@@ -7,22 +7,22 @@ import unittest
 import numpy as np
 from pathlib import Path
 
-from backend.services.rag.raptor import cluster_chunks, RaptorIndexer
+from backend.services.rag.raptor import gmm_cluster, RaptorIndexer
 from backend.services.rag.retriever import HybridRetriever
 from backend.services.rag.vector_store import VectorStoreManager
 
 
 class TestRaptorClustering(unittest.TestCase):
-    def test_cluster_chunks_basic(self):
+    def test_gmm_cluster_basic(self):
         # 10 vectors of dimension 4
         # Create 2 distinct groups
         group_a = [np.array([1.0, 0.0, 0.0, 0.0]) + np.random.normal(0, 0.05, 4) for _ in range(5)]
         group_b = [np.array([0.0, 1.0, 0.0, 0.0]) + np.random.normal(0, 0.05, 4) for _ in range(5)]
         
-        vectors = [v.tolist() for v in (group_a + group_b)]
+        X = np.array(group_a + group_b, dtype=np.float32)
         
         # We expect 2 clusters
-        clusters = cluster_chunks(vectors, num_clusters=2)
+        clusters = gmm_cluster(X, k=2)
         
         self.assertEqual(len(clusters), 2)
         # Check that indices are clustered correctly

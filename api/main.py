@@ -42,6 +42,7 @@ from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algo
 from src.preprocess import clean_text
 from src.utils import get_device_info, log_device_info, logger
 from api.document_chat import router as document_chat_router
+from api.chat import router as chat_router
 from api.document_intelligence import router as document_intelligence_router
 from api.research import router as research_router
 from celery.result import AsyncResult
@@ -174,6 +175,7 @@ app.add_middleware(
 
 app.include_router(document_intelligence_router)
 app.include_router(document_chat_router)
+app.include_router(chat_router)
 app.include_router(research_router)
 
 

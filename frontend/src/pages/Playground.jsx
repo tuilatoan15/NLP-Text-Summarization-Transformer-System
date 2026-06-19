@@ -264,6 +264,7 @@ const ComparisonTable = ({ rows }) => {
               <th className="px-4 py-3">{t('colRouge2')}</th>
               <th className="px-4 py-3">{t('colRougeL')}</th>
               <th className="px-4 py-3">{t('colBert')}</th>
+              <th className="px-4 py-3 text-blue-600 dark:text-blue-400 font-bold bg-blue-50/20 dark:bg-blue-950/10">{t('colCombined')}</th>
               <th className="px-4 py-3">{t('colLength')}</th>
               <th className="px-4 py-3">{t('colTime')}</th>
             </tr>
@@ -281,6 +282,7 @@ const ComparisonTable = ({ rows }) => {
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rouge2'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rougeL'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'bertscore_f1'))}</td>
+                <td className="px-4 py-3 text-center text-blue-700 dark:text-blue-300 font-mono font-bold bg-blue-50/20 dark:bg-blue-950/10">{pct(metric(row, 'combined_score'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">
                   {row.length_ratio_percent != null ? `${row.length_ratio_percent}%` : '—'}
                 </td>

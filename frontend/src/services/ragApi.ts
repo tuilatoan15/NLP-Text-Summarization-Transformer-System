@@ -37,18 +37,55 @@ export async function deleteRagDocument(documentId: string): Promise<void> {
   }
 }
 
-export async function listRagConversations(): Promise<Array<{ id: string; title: string }>> {
-  const response = await fetch(`${API}/rag/conversations`);
-  const payload = await parseJson<{ items: Array<{ id: string; title: string }> }>(
+export async function listRagConversations(): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
+  const response = await fetch(`${API}/api/chat/conversations`);
+  const payload = await parseJson<{ items: Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }> }>(
     response,
-    'RAG conversations',
+    'List conversations',
   );
   return payload.items;
 }
 
 export async function listConversationMessages(conversationId: string): Promise<RAGMessage[]> {
-  const response = await fetch(`${API}/rag/conversations/${conversationId}/messages`);
-  const payload = await parseJson<{ items: RAGMessage[] }>(response, 'RAG messages');
+  const response = await fetch(`${API}/api/chat/conversations/${conversationId}`);
+  const payload = await parseJson<{ messages: RAGMessage[] }>(response, 'Conversation details');
+  return payload.messages || [];
+}
+
+export async function createConversation(title?: string, userId?: string): Promise<{ id: string; title: string }> {
+  const response = await fetch(`${API}/api/chat/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, user_id: userId }),
+  });
+  return parseJson<{ id: string; title: string }>(response, 'Create conversation');
+}
+
+export async function renameConversation(conversationId: string, title: string): Promise<{ ok: boolean; title: string }> {
+  const response = await fetch(`${API}/api/chat/conversations/${conversationId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  return parseJson<{ ok: boolean; title: string }>(response, 'Rename conversation');
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const response = await fetch(`${API}/api/chat/conversations/${conversationId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Delete conversation failed: ${response.status} ${detail}`);
+  }
+}
+
+export async function searchConversations(q: string): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
+  const response = await fetch(`${API}/api/chat/search?q=${encodeURIComponent(q)}`);
+  const payload = await parseJson<{ items: Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }> }>(
+    response,
+    'Search conversations',
+  );
   return payload.items;
 }
 
