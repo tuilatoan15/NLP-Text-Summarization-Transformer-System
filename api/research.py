@@ -536,6 +536,7 @@ from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REAL_BENCHMARK_PATH = PROJECT_ROOT / "storage" / "results" / "benchmark_1000_real.json"
+REAL_LEADERBOARD_ONLY_PATH = PROJECT_ROOT / "storage" / "results" / "benchmark_leaderboard_only.json"
 BENCHMARK_FILE_PATH = REAL_BENCHMARK_PATH if REAL_BENCHMARK_PATH.exists() else (PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json")
 
 FALLBACK_LEADERBOARD = {
@@ -743,6 +744,52 @@ def _get_fallback_samples() -> list[dict]:
 _cached_benchmark_data = None
 _cached_benchmark_mtime = 0.0
 
+_cached_leaderboard_only = None
+_cached_leaderboard_only_mtime = 0.0
+
+def _load_leaderboard_only() -> dict:
+    """Tải dữ liệu bảng xếp hạng từ benchmark_leaderboard_only.json siêu nhẹ."""
+    global _cached_leaderboard_only, _cached_leaderboard_only_mtime
+    
+    path = REAL_LEADERBOARD_ONLY_PATH
+    if not path.exists():
+        full_data = _load_benchmark_data()
+        return {
+            "metadata": full_data.get("metadata", {}),
+            "leaderboard": full_data.get("leaderboard", {}),
+            "leaderboard_by_category": {}
+        }
+        
+    current_mtime = path.stat().st_mtime
+    if _cached_leaderboard_only is not None and current_mtime == _cached_leaderboard_only_mtime:
+        return _cached_leaderboard_only
+        
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            _cached_leaderboard_only = data
+            _cached_leaderboard_only_mtime = current_mtime
+            
+            # Recalculate composite scores to match active config dynamically
+            if "leaderboard" in _cached_leaderboard_only:
+                for key, model_data in _cached_leaderboard_only["leaderboard"].items():
+                    model_data["composite"] = _calculate_leaderboard_composite(model_data)
+            
+            if "leaderboard_by_category" in _cached_leaderboard_only:
+                for cat, items in _cached_leaderboard_only["leaderboard_by_category"].items():
+                    for model_data in items:
+                        model_data["composite"] = _calculate_leaderboard_composite(model_data)
+                        
+            return _cached_leaderboard_only
+    except Exception as e:
+        logger.error(f"Error reading benchmark_leaderboard_only.json: {e}")
+        full_data = _load_benchmark_data()
+        return {
+            "metadata": full_data.get("metadata", {}),
+            "leaderboard": full_data.get("leaderboard", {}),
+            "leaderboard_by_category": {}
+        }
+
 def _load_benchmark_data() -> dict:
     """Tải dữ liệu từ file leaderboard_benchmark.json, nếu không tồn tại hoặc lỗi thì dùng fallback data."""
     global _cached_benchmark_data, _cached_benchmark_mtime
@@ -789,7 +836,7 @@ def _load_benchmark_data() -> dict:
 @router.get("/benchmark/data")
 async def get_benchmark_data() -> dict:
     """Endpoint kế thừa tương thích ngược. Trả về thống kê tóm tắt so sánh."""
-    data = _load_benchmark_data()
+    data = _load_leaderboard_only()
     leaderboard = data["leaderboard"]
     
     # Convert sang cấu trúc cũ
@@ -818,7 +865,7 @@ async def get_benchmark_data() -> dict:
 @router.get("/leaderboard")
 async def get_leaderboard() -> dict:
     """Trả về bảng xếp hạng (Leaderboard) được tổng hợp đầy đủ từ dữ liệu thực tế."""
-    data = _load_benchmark_data()
+    data = _load_leaderboard_only()
     return {
         "metadata": data["metadata"],
         "leaderboard": list(data["leaderboard"].values())
@@ -827,8 +874,27 @@ async def get_leaderboard() -> dict:
 @router.get("/leaderboard/by-category")
 async def get_leaderboard_by_category(category: str) -> dict:
     """Returns model leaderboard aggregated specifically for a category (Short, Medium, Long, Very Long)."""
-    data = _load_benchmark_data()
-    samples = data.get("samples", [])
+    # Try lightweight pre-calculated stats first
+    data = _load_leaderboard_only()
+    cat_normalized = category.lower().strip()
+    cat_map = {"short": "Short", "medium": "Medium", "long": "Long", "very long": "Very Long"}
+    mapped_cat = cat_map.get(cat_normalized)
+    
+    if mapped_cat and "leaderboard_by_category" in data and mapped_cat in data["leaderboard_by_category"]:
+        cat_leaderboard = data["leaderboard_by_category"][mapped_cat]
+        if cat_leaderboard:
+            # Recalculate composite scores just in case
+            for model_data in cat_leaderboard:
+                model_data["composite"] = _calculate_leaderboard_composite(model_data)
+            return {
+                "category": mapped_cat,
+                "total_samples": data["metadata"]["categories"].get(mapped_cat, 0),
+                "leaderboard": cat_leaderboard
+            }
+            
+    # Fallback to loading full benchmark data and calculating on the fly
+    full_data = _load_benchmark_data()
+    samples = full_data.get("samples", [])
     
     if not samples:
         samples = _get_fallback_samples()
@@ -944,7 +1010,7 @@ async def get_benchmark_samples(
 @router.get("/hybrid-study")
 async def get_hybrid_study() -> dict:
     """Phân tích so sánh 3 nhóm mô hình (Trích xuất, Sinh, Lai) trên bộ dữ liệu kiểm thử."""
-    data = _load_benchmark_data()
+    data = _load_leaderboard_only()
     leaderboard = data["leaderboard"]
     
     extractive_keys = ["textrank", "lexrank", "lsa"]
@@ -988,7 +1054,7 @@ async def get_hybrid_study() -> dict:
 @router.get("/report")
 async def get_report() -> dict:
     """Trả về báo cáo khoa học trình bày đầy đủ kết luận thực nghiệm dựa trên số liệu của 1000 mẫu test."""
-    data = _load_benchmark_data()
+    data = _load_leaderboard_only()
     leaderboard = data["leaderboard"]
     
     # Thu thập số liệu để chèn trực tiếp vào báo cáo

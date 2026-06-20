@@ -38,7 +38,7 @@ function useLoggedQuery<T>(
       return fetchWithLog(label, queryFn);
     },
     enabled,
-    placeholderData: cached,
+    placeholderData: cached as any,
   });
 }
 

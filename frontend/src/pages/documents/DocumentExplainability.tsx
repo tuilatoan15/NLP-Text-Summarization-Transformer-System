@@ -159,7 +159,7 @@ function DocumentExplainability() {
                 <YAxis type="category" dataKey="term" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} width={80} />
                 <Tooltip
                   contentStyle={{ background: 'var(--surface-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [`${(v * 100).toFixed(1)}%`]}
+                  formatter={(v: any) => [`${(v * 100).toFixed(1)}%`]}
                 />
                 <Bar dataKey="score" name="Importance" radius={[0, 3, 3, 0]} fill={current.color} fillOpacity={0.85} />
               </BarChart>

@@ -48,6 +48,7 @@ VERY_LONG_RANGE = (10000, 100000)
 MODEL_KEYS = ["textrank", "lexrank", "lsa", "vit5", "mt5", "bartpho"]
 HYBRID_KEYS = [
     "textrank_vit5", "lexrank_vit5", "lsa_vit5",
+    "textrank_mt5", "lexrank_mt5", "lsa_mt5",
     "textrank_bartpho", "lexrank_bartpho", "lsa_bartpho"
 ]
 ALL_CONFIGS = MODEL_KEYS + HYBRID_KEYS
@@ -211,7 +212,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
         unload_abstractive_model("vit5")
 
     # 3. mT5 configuration
-    mt5_configs = ["mt5"]
+    mt5_configs = ["mt5", "textrank_mt5", "lexrank_mt5", "lsa_mt5"]
     needs_mt5 = any(s["id"] not in summaries_db or any(cfg not in summaries_db[s["id"]] or not summaries_db[s["id"]][cfg].get("summary") for cfg in mt5_configs) for s in samples)
     if needs_mt5:
         logger.info("Preloading mT5 base model for inference window...")
@@ -238,7 +239,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 }
                 
                 if (idx + 1) % 50 == 0:
-                    logger.info(f"mT5: completed {idx+1}/{len(samples)}")
+                    logger.info(f"mT5 {cfg}: completed {idx+1}/{len(samples)}")
                     save_checkpoint(checkpoint_path, summaries_db)
             save_checkpoint(checkpoint_path, summaries_db)
         unload_abstractive_model("mt5")
@@ -779,6 +780,56 @@ def main():
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(output_payload, f, ensure_ascii=False, indent=2)
     logger.info(f"Saved real benchmark JSON to {json_path}")
+    
+    # Save lightweight leaderboard-only JSON for instant UI load
+    categories_list = ["Short", "Medium", "Long", "Very Long"]
+    leaderboard_by_category = {}
+    for cat in categories_list:
+        cat_samples = [s for s in samples if s.get("category", "") == cat]
+        cat_stats = {}
+        if cat_samples:
+            for config_key in ALL_CONFIGS:
+                model_runs = []
+                for s in cat_samples:
+                    s_id = s["id"]
+                    if s_id in summaries_db and config_key in summaries_db[s_id]:
+                        metrics_run = summaries_db[s_id][config_key].get("metrics")
+                        if metrics_run:
+                            model_runs.append(metrics_run)
+                if not model_runs:
+                    continue
+                cat_stats[config_key] = {
+                    "key": config_key,
+                    "name": config_key.upper().replace("_", " ➔ "),
+                    "group": "extractive" if config_key in ["textrank", "lexrank", "lsa"] else ("abstractive" if config_key in ["vit5", "mt5", "bartpho"] else "hybrid"),
+                    "rouge1": round(mean([r["rouge1"] for r in model_runs]), 4),
+                    "rouge2": round(mean([r["rouge2"] for r in model_runs]), 4),
+                    "rougeL": round(mean([r["rougeL"] for r in model_runs]), 4),
+                    "bleu": round(mean([r["bleu"] for r in model_runs]), 4),
+                    "bertscore": round(mean([r["bertscore"] for r in model_runs]), 4),
+                    "semantic": round(mean([r["semantic"] for r in model_runs]), 4),
+                    "latency": round(mean([r["latency"] for r in model_runs]), 4),
+                    "throughput": round(mean([r["throughput"] for r in model_runs]), 2),
+                    "compression": round(mean([r["compression"] for r in model_runs]), 4),
+                    "faithfulness": round(mean([r["faithfulness"] for r in model_runs]), 4),
+                    "fluency": round(mean([r["fluency"] for r in model_runs]), 4),
+                    "hallucination_pct": round(sum(1 for r in model_runs if r.get("hallucination_risk") != "low") / len(model_runs) * 100, 2),
+                    "info_retention": round(mean([r["info_retention"] for r in model_runs]), 4),
+                    "coverage": round(mean([r["coverage"] for r in model_runs]), 4),
+                    "composite": round(mean([r["composite"] for r in model_runs]), 4)
+                }
+        leaderboard_by_category[cat] = list(cat_stats.values())
+        
+    output_payload_only = {
+        "metadata": output_payload["metadata"],
+        "leaderboard": aggregated_stats,
+        "leaderboard_by_category": leaderboard_by_category
+    }
+    
+    leaderboard_only_path = out_dir / "benchmark_leaderboard_only.json"
+    with open(leaderboard_only_path, "w", encoding="utf-8") as f:
+        json.dump(output_payload_only, f, ensure_ascii=False, indent=2)
+    logger.info(f"Saved lightweight leaderboard JSON to {leaderboard_only_path}")
     
     # Save final CSV
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

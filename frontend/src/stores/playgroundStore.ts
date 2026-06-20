@@ -29,10 +29,10 @@ type PlaygroundState = {
   setText: (text: string) => void;
   setReference: (reference: string) => void;
   setFileMetas: (metas: PlaygroundFileMeta[]) => void;
-  setSelected: (selected: string[]) => void;
+  setSelected: (selected: string[] | ((prev: string[]) => string[])) => void;
   setSummaryLength: (length: string) => void;
-  setResult: (result: Record<string, unknown> | null) => void;
-  setRunState: (runState: PlaygroundRunState) => void;
+  setResult: (result: (Record<string, unknown> | null) | ((prev: Record<string, unknown> | null) => Record<string, unknown> | null)) => void;
+  setRunState: (runState: PlaygroundRunState | ((prev: PlaygroundRunState) => PlaygroundRunState)) => void;
   setCompletedCount: (count: number) => void;
   setLastExtractFingerprint: (fp: string | null) => void;
   clearUploadCache: () => void;

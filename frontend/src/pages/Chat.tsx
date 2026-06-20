@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import * as ragApi from '../services/ragApi';
 import { useApp } from '../context/AppContext';
+import { RAGDocument, RAGMessage, RAGCitation } from '../types/rag';
 const formatModelName = (name: string | null | undefined) => {
   if (!name) return "";
   const n = name.toLowerCase();
@@ -25,7 +26,7 @@ const formatModelName = (name: string | null | undefined) => {
 
 export default function Chat() {
   // --- Context & Hooks ---
-  const { t } = useApp();
+  const { t } = useApp() as any;
 
   // --- Refs ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -527,7 +528,7 @@ export default function Chat() {
     return (
       <div className="space-y-3">
         <p className="whitespace-pre-wrap leading-relaxed">
-          {parts.map((part, i) => {
+          {parts.map((part: string, i: number) => {
             const match = part.match(/^\[(\d+)\]$/);
             if (match) {
               const num = parseInt(match[1], 10);
@@ -563,7 +564,7 @@ export default function Chat() {
             <ShieldCheck size={11} className="text-emerald-500" /> Nguồn tham chiếu tài liệu:
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {msg.citations.map((cite, i) => (
+            {msg.citations.map((cite: RAGCitation, i: number) => (
               <motion.button
                 key={cite.chunk_id}
                 whileHover={{ scale: 1.03 }}

@@ -166,7 +166,7 @@ TextRank là thuật toán xếp hạng văn bản dựa trên lý thuyết đ�
    $$\text{Similarity}(S_i, S_j) = \frac{| \{w \in S_i\} \cap \{w \in S_j\} |}{\log(|S_i|) + \log(|S_j|)}$$
 4. Xây dựng ma trận kề đại diện cho đồ thị tương đồng.
 5. Chạy thuật toán lặp PageRank để tính điểm hội tụ trọng số của từng đỉnh cho đến khi sai số nhỏ hơn ngưỡng $\epsilon$ ($10^{-4}$):
-   $$PR(V_i) = (1 - d) + d \times \sum_{V_j \in In(V_i)} \frac{W(V_j, V_i)}{\sum_{V_k \in Out(V_j)} W(V_j, V_k)}$$
+   $$PR(V_i) = (1 - d) + d \times \sum_{V_j \in \text{In}(V_i)} \frac{W(V_j, V_i)}{\sum_{V_k \in \text{Out}(V_j)} W(V_j, V_k)}$$
    (Với hệ số suy giảm $d = 0.85$).
 6. Sắp xếp các câu theo điểm trọng số giảm dần và trích xuất top $k$ câu làm bản tóm tắt.
 
@@ -341,6 +341,19 @@ mT5 (Multilingual T5) là phiên bản đa ngôn ngữ của mô hình T5 do Goo
 
 ##### Độ phức tạp
 * Tương đương kiến trúc T5 tiêu chuẩn.
+
+##### Thông số huấn luyện & Tinh chỉnh mô hình (Fine-tuning & Training Specifications)
+
+Cả ba mô hình tóm tắt sinh (Abstractive: ViT5, mT5, BARTPho) đều được huấn luyện tinh chỉnh (fine-tuned) trên môi trường Google Colab phục vụ báo cáo tốt nghiệp khoa học:
+* **Phần cứng huấn luyện**: Google Colab với GPU NVIDIA T4 (16GB VRAM) và CPU Intel Xeon.
+* **Thời gian huấn luyện (Training Duration)**: **Hơn 6 giờ** cho mỗi mô hình (chạy 3 epochs đầy đủ trên tập dữ liệu tinh chỉnh).
+* **Tập dữ liệu sử dụng**: 30,000 mẫu bài viết tiếng Việt từ tập dữ liệu `nam194/vietnews` (tỷ lệ phân chia 90% train / 10% validation).
+* **Siêu tham số (Hyperparameters)**:
+  - Batch size: 2 per device (tích lũy gradient accumulation steps = 4, tương đương batch size thực tế = 8).
+  - Tốc độ học (Learning Rate): $5 \times 10^{-5}$ với thuật toán tối ưu AdamW.
+  - Weight Decay: $0.01$ và Warmup Steps: 100.
+  - Chế độ huấn luyện: Mixed Precision (FP16) để tăng tốc và tiết kiệm VRAM.
+  - Các script huấn luyện tương ứng: [train.py](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/scripts/train.py) và các file notebook Colab: [Colab_ViT5_VietNews_30k_3Epochs.ipynb](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/Colab_ViT5_VietNews_30k_3Epochs.ipynb), [Colab_BARTPho_VietNews_30k_3Epochs.ipynb](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/Colab_BARTPho_VietNews_30k_3Epochs.ipynb), [Colab_mT5_VietNews_30k_3Epochs.ipynb](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/Colab_mT5_VietNews_30k_3Epochs.ipynb).
 
 ---
 
@@ -572,16 +585,70 @@ Sử dụng mô hình SentenceTransformer để nhúng cả đoạn văn bản t
 
 ## 🧮 5. Điểm Số Tổng Hợp Xếp Hạng pgBestModel (Composite Score)
 
-Để đánh giá và chọn lựa mô hình tối ưu nhất một cách tự động, hệ thống sử dụng điểm số kết hợp **Composite Score** được khai báo tại [src/config.py](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/src/config.py). Điểm số này phân phối trọng số cho cả khía cạnh lexical, ngữ nghĩa sâu và độ trung thực sự thật:
+Để đánh giá và chọn lựa mô hình tối ưu nhất một cách tự động, hệ thống sử dụng điểm số kết hợp **Composite Score** được khai báo tại [src/config.py](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/src/config.py). Điểm số này phân phối trọng số cho cả khía cạnh trùng lặp từ vựng (lexical overlap), ngữ nghĩa mềm (token semantic), sự tương đồng ý tưởng toàn văn (sentence embedding semantic), độ phủ thông tin (coverage), độ trung thực (faithfulness), và sự trôi chảy mạch lạc (readability fluency):
 
-$$\mathcal{S}_{\text{composite}} = 0.30 \cdot \text{ROUGE-L} + 0.25 \cdot \text{SemanticSimilarity} + 0.20 \cdot \text{Faithfulness} + 0.15 \cdot \text{BERTScore} + 0.10 \cdot \text{Coverage}$$
+$$\mathcal{S}_{\text{composite}} = 0.25 \cdot \text{ROUGE-L} + 0.25 \cdot \text{BERTScore} + 0.20 \cdot \text{SemanticSimilarity} + 0.15 \cdot \text{Faithfulness} + 0.10 \cdot \text{Coverage} + 0.05 \cdot \text{Fluency}$$
 
-### Giải thích trọng số khoa học
-*   **0.30 ROUGE-L:** Đảm bảo bản tóm tắt giữ được cấu trúc ngữ pháp và mạch câu tương đồng với mẫu tóm tắt chuẩn của con người.
-*   **0.25 Semantic Similarity:** Đo lường sự tương đồng ý tưởng vĩ mô toàn văn thông qua Sentence Embeddings, tránh phạt oan các mô hình dùng từ đồng nghĩa.
-*   **0.20 Faithfulness:** Trọng số cực kỳ quan trọng đối với môi trường doanh nghiệp và nghiên cứu khoa học nhằm phạt nặng các mô hình sinh ảo giác thông tin.
-*   **0.15 BERTScore:** Đánh giá sự tương đồng ngữ nghĩa mềm ở mức độ token.
-*   **0.10 Coverage:** Khuyến khích giữ lại các thực thể và từ khóa thông tin chính từ văn bản gốc.
+### Giải thích ý nghĩa trọng số khoa học
+*   **0.25 ROUGE-L (Longest Common Subsequence)**: Đánh giá độ trùng khớp cấu trúc ngữ pháp tuần tự ở mức độ câu, đo lường khả năng giữ nguyên cấu trúc hành văn chuẩn mực.
+*   **0.25 BERTScore (Token Contextual Similarity)**: Đánh giá sự tương đồng ngữ nghĩa mềm ở mức độ token ngữ cảnh bằng mô hình RoBERTa, tránh phạt oan các mô hình Abstractive khi sử dụng từ đồng nghĩa hoặc diễn đạt lại (paraphrasing).
+*   **0.20 Semantic Similarity (Sentence Embeddings Cosine)**: Đo lường sự tương đồng ý tưởng vĩ mô toàn văn thông qua SBERT, đảm bảo văn bản tóm tắt giữ đúng nội dung cốt lõi của bản gốc.
+*   **0.15 Faithfulness (Factual Consistency)**: Đánh giá tính chính xác sự thật của các câu tự sinh đối chiếu với tài liệu gốc nhằm hạn chế tối đa hiện tượng bịa đặt thông tin (ảo giác - hallucination).
+*   **0.10 Coverage (Information Coverage)**: Đo lường tỷ lệ các thực thể, danh từ riêng và từ khóa nội dung gốc được giữ lại trong bản tóm tắt.
+*   **0.05 Fluency (Language Model Fluency)**: Đánh giá độ tự nhiên, trôi chảy ngữ pháp của văn bản tóm tắt thông qua điểm số perplexity (PPL) từ mô hình GPT-2 tiếng Việt.
+
+---
+
+### Chứng minh toán học cho công thức Điểm số tổng hợp (Mathematical Proof & Properties)
+
+Để đảm bảo tính chuyên nghiệp của đồ án tốt nghiệp và tính nghiêm ngặt về mặt khoa học, dưới đây là các chứng minh tính chất toán học của chỉ số $\mathcal{S}_{\text{composite}}$:
+
+#### 1. Định nghĩa chuẩn tắc (Convex Combination & Boundedness)
+Đặt $M = (M_1, M_2, M_3, M_4, M_5, M_6)$ là vector chứa 6 chỉ số đánh giá thành phần được định nghĩa trên miền $[0, 1]^6$:
+$$M_1 = \text{ROUGE-L}, \quad M_2 = \text{BERTScore}, \quad M_3 = \text{SemanticSimilarity}$$
+$$M_4 = \text{Faithfulness}, \quad M_5 = \text{Coverage}, \quad M_6 = \text{Fluency}$$
+Đặt $W = (w_1, w_2, w_3, w_4, w_5, w_6) = (0.25, 0.25, 0.20, 0.15, 0.10, 0.05)$ là vector trọng số.
+Ta có:
+$$w_i \ge 0, \quad \forall i \in \{1..6\} \quad \text{và} \quad \sum_{i=1}^{6} w_i = 1.0$$
+Do đó, hàm số $\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x)$ là một **tổ hợp lồi (Convex Combination)** của các chỉ số thành phần.
+
+**Hệ quả (Tính bị chặn - Boundedness):**
+$$\forall x, \quad \mathcal{S}_{\text{composite}}(x) \in [0.0, 1.0]$$
+*Chứng minh:*
+Vì $M_i(x) \in [0, 1], \forall i \in \{1..6\}$:
+$$\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \le \sum_{i=1}^{6} w_i \cdot 1.0 = 1.0 \cdot \sum_{i=1}^{6} w_i = 1.0$$
+$$\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \ge \sum_{i=1}^{6} w_i \cdot 0.0 = 0.0$$
+Điều này chứng minh điểm số Composite Score luôn chuẩn hóa trong khoảng $[0\%, 100\%]$, thích hợp hiển thị trực quan mà không bị bão hòa.
+
+#### 2. Tính đơn điệu nghiêm ngặt và Tối ưu Pareto (Strict Monotonicity & Pareto Efficiency)
+Giả sử có hai bản tóm tắt $x$ và $y$ được sinh ra:
+$$\text{Nếu } M_i(x) \ge M_i(y), \forall i \in \{1..6\} \quad \text{và} \quad \exists j \text{ sao cho } M_j(x) > M_j(y)$$
+Thì:
+$$\mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)$$
+*Chứng minh:*
+$$\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) = \sum_{i=1}^{6} w_i \left(M_i(x) - M_i(y)\right)$$
+Vì $M_i(x) - M_i(y) \ge 0, \forall i \ne j$ và $w_i > 0$:
+$$\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) \ge w_j \left(M_j(x) - M_j(y)\right) > 0$$
+$$\Rightarrow \mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)$$
+Điều này chứng minh bất kỳ sự cải thiện nào ở một trong các chiều đánh giá mà không làm giảm các chiều khác đều làm tăng điểm tổng hợp, bảo đảm tính tối ưu Pareto (Pareto-optimal) cho bảng xếp hạng mô hình.
+
+#### 3. Cơ chế Triệt tiêu Ảo giác (Hallucination Mitigation Barrier)
+Một vấn đề nghiêm trọng của các mô hình sinh (Abstractive) là hiện tượng bịa đặt thông tin không có trong văn bản gốc nhưng câu văn vẫn rất trôi chảy và trùng lặp nhiều từ khóa (ROUGE-L và Fluency cao). Công thức Composite Score ngăn chặn điều này bằng cách gán trọng số Faithfulness ($w_4 = 0.15$).
+
+**Định lý (Giới hạn trên cho mô hình ảo giác):**
+Nếu một bản tóm tắt bị mất tính trung thực hoàn toàn ($M_4(x) \to 0$):
+$$\mathcal{S}_{\text{composite}}(x) \le 1.0 - w_4 = 0.85$$
+Nói cách khác, một mô hình bịa đặt thông tin sẽ bị chặn trên ở mức điểm **0.85** kể cả khi đạt điểm tuyệt đối 1.0 ở cả 5 tiêu chí còn lại. Điều này thiết lập một "rào cản an toàn" (safety barrier) bảo vệ hệ thống RAG và tóm tắt luôn ưu tiên các mô hình có độ trung thực cao.
+
+---
+
+### Trích dẫn Tài liệu Khoa học liên quan (Scientific References)
+
+Ý tưởng kết hợp đa chỉ số đánh giá bằng tổ hợp lồi để tăng tính tương đồng với đánh giá của con người (human alignment) dựa trên các nghiên cứu khoa học uy tín:
+1.  **G-Eval / HEval Framework (Liu et al., 2023)**: Xác nhận việc đánh giá chất lượng văn bản sinh cần phân rã thành nhiều chiều (fluency, consistency, coherence, relevance) thay vì chỉ sử dụng ROUGE.
+2.  **BERTScore (Zhang et al., 2020)**: Chứng minh tính hiệu quả của việc so sánh cosine vector nhúng token context của BERT để đánh giá ngữ nghĩa mềm (paraphrasing).
+3.  **Sentence-BERT (Reimers & Gurevych, 2019)**: Ứng dụng cosine similarity trên vector nhúng toàn câu để so sánh ý nghĩa vĩ mô.
+4.  **FactCC / Factuality Evaluation (Kryscinski et al., 2020)**: Đề xuất kiểm tra thực tế (factual consistency) độc lập để ngăn chặn hiện tượng sinh ảo giác ở các mô hình seq2seq.
 
 ---
 
