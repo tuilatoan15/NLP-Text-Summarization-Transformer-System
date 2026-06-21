@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, Cell, Legend, LineChart, Line,
 } from 'recharts';
 import { BarChart3, Clock, Zap, GitCompare, TrendingUp, FileText } from 'lucide-react';
-import { useDocumentContext } from '../../context/DocumentContext';
+import { useDocumentWorkspaceStore } from '../../stores/documentWorkspaceStore';
 
 const ALGO_COLORS: Record<string, string> = {
   textrank: '#14b8a6', lexrank: '#38bdf8', lsa: '#84cc16', tfidf: '#a78bfa',
@@ -45,7 +45,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function DocumentEvaluation() {
-  const { compareResult } = useDocumentContext();
+  const { compareResult } = useDocumentWorkspaceStore();
   const rows = (compareResult?.results as Array<Record<string, any>>) ?? [];
 
   const metricsData = useMemo(() =>

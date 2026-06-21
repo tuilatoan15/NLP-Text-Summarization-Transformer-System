@@ -95,6 +95,22 @@ export async function listEmbeddingModels(): Promise<string[]> {
   return Object.keys(payload.models || {});
 }
 
+export async function deleteAllConversations(): Promise<void> {
+  const response = await fetch(`${API}/api/chat/conversations/all`, { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Delete all conversations failed: ${response.status} ${detail}`);
+  }
+}
+
+export async function deleteAllDocuments(): Promise<void> {
+  const response = await fetch(`${API}/rag/documents/all`, { method: 'DELETE' });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Delete all documents failed: ${response.status} ${detail}`);
+  }
+}
+
 export async function streamRagChat(
   request: RAGChatRequest,
   onToken: (text: string, conversationId: string) => void,

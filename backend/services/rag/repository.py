@@ -348,6 +348,18 @@ class RAGRepository:
         with self._connect() as conn:
             conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 
+    def delete_all_conversations(self) -> None:
+        """Xóa toàn bộ cuộc trò chuyện và messages (cascade)."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM conversations")
+
+    def delete_all_documents(self) -> None:
+        """Xóa toàn bộ RAG documents, chunks, và embeddings."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM rag_embeddings")
+            conn.execute("DELETE FROM rag_chunks")
+            conn.execute("DELETE FROM rag_documents")
+
     def search_conversations(self, query: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         like_query = f"%{query}%"
         with self._connect() as conn:

@@ -62,49 +62,43 @@ const Header = () => {
 
   return (
     <header
-      className="h-14 flex items-center justify-between px-5 sticky top-0 z-20 w-full border-b transition-colors duration-150"
+      className="h-16 flex items-center justify-between px-6 sticky top-0 z-20 w-full border-b transition-colors duration-150 backdrop-blur-md bg-[var(--bg-elevated)]/80"
       style={{
-        backgroundColor: 'var(--bg-elevated)',
         borderColor: 'var(--border)',
       }}
     >
-      {/* Left: Breadcrumb + Search trigger */}
+      {/* Left: Breadcrumb */}
       <div className="flex items-center gap-3 min-w-0">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-sm min-w-0">
-          <span className="text-[var(--text-faint)] hidden sm:inline">AI Document Hub</span>
+        <nav className="flex items-center gap-2 text-sm min-w-0">
+          <span className="text-[var(--text-faint)] font-medium hidden sm:inline">Workspace</span>
           <span className="text-[var(--text-faint)] hidden sm:inline">/</span>
-          <span className="font-semibold text-[var(--text-primary)] truncate">{pageLabel}</span>
+          <span className="font-semibold text-sky-600 dark:text-sky-400 truncate">{pageLabel}</span>
         </nav>
       </div>
 
-      {/* Right: Actions */}
-      <div className="flex items-center gap-1">
-        {/* Command Palette Trigger */}
+      {/* Center: Global Search Bar */}
+      <div className="flex-1 max-w-md mx-6 hidden md:block">
         <button
           type="button"
           onClick={() => setCommandPaletteOpen(true)}
-          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors duration-150 cursor-pointer"
-          style={{
-            backgroundColor: 'var(--bg-muted)',
-            color: 'var(--text-faint)',
-            border: '1px solid var(--border)',
-          }}
+          className="w-full flex items-center justify-between px-4 py-2 rounded-xl text-xs transition-all duration-150 cursor-pointer bg-[var(--bg-muted)] border border-[var(--border)] text-[var(--text-muted)] hover:border-sky-500 hover:bg-[var(--bg-elevated)] shadow-sm"
         >
-          <Search className="w-3.5 h-3.5" />
-          <span>{t('searchPlaceholder')}</span>
-          <div className="flex items-center gap-0.5 ml-2">
+          <div className="flex items-center gap-2">
+            <Search className="w-3.5 h-3.5 text-sky-500" />
+            <span className="font-medium">{t('searchPlaceholder')}</span>
+          </div>
+          <div className="flex items-center gap-0.5">
             <kbd className="ui-kbd">⌘</kbd>
             <kbd className="ui-kbd">K</kbd>
           </div>
         </button>
+      </div>
 
-        {/* Spacer */}
-        <div className="w-px h-5 mx-1 hidden sm:block" style={{ backgroundColor: 'var(--border)' }} />
-
+      {/* Right: Actions */}
+      <div className="flex items-center gap-2">
         {/* Language */}
         <div
-          className="flex items-center gap-0.5 p-0.5 rounded-lg"
+          className="flex items-center gap-0.5 p-0.5 rounded-lg border border-[var(--border)]"
           style={{ backgroundColor: 'var(--bg-muted)' }}
           role="group"
           aria-label="Language"
@@ -112,9 +106,9 @@ const Header = () => {
           <button
             type="button"
             onClick={() => setLanguage('vie')}
-            className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
               locale === 'vie'
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm'
+                ? 'bg-[var(--bg-elevated)] text-sky-600 dark:text-sky-400 shadow-sm'
                 : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]'
             }`}
           >
@@ -123,9 +117,9 @@ const Header = () => {
           <button
             type="button"
             onClick={() => setLanguage('eng')}
-            className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
               locale === 'eng'
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm'
+                ? 'bg-[var(--bg-elevated)] text-sky-600 dark:text-sky-400 shadow-sm'
                 : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]'
             }`}
           >

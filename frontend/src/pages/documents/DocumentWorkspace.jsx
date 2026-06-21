@@ -6,12 +6,14 @@ import {
 } from 'recharts';
 import {
   UploadCloud, Search, Network, FileText, Brain, GitBranch, Loader2, ShieldCheck, Quote,
-  Presentation, Radio, HelpCircle, Layers3, ChartColumn, GitCompare, Map,
+  Presentation, Radio, HelpCircle, Layers3, ChartColumn, GitCompare, Map, Info,
 } from 'lucide-react';
 import {
   compareDocumentSummaries, ingestDocument, searchDocument,
 } from '../../services/apiService';
 import { useDocumentWorkspaceStore } from '../../stores/documentWorkspaceStore';
+import DocumentEvaluation from './DocumentEvaluation';
+import DocumentExplainability from './DocumentExplainability';
 import { invalidateAfterDocumentUpload, invalidateAfterSummarization } from '../../lib/cacheInvalidation';
 import { queryKeys } from '../../lib/queryKeys';
 import { cacheLog } from '../../lib/cacheLogger';
@@ -29,6 +31,7 @@ const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadCloud },
   { id: 'analysis', label: 'Analysis', icon: Brain },
   { id: 'compare', label: 'Compare', icon: GitCompare },
+  { id: 'explainability', label: 'Explainability', icon: Info },
   { id: 'evaluation', label: 'Evaluation', icon: ChartColumn },
   { id: 'search', label: 'Semantic Search', icon: Search },
   { id: 'citations', label: 'Citations', icon: ShieldCheck },
@@ -191,7 +194,7 @@ export default function DocumentWorkspace() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                   tab === item.id
                     ? 'bg-[var(--accent)] text-white border-transparent'
-                    : 'bg-[var(--surface-elevated)] text-[var(--text-muted)] border-[var(--border)]'
+                    : 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border-[var(--border)]'
                 } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -210,7 +213,7 @@ export default function DocumentWorkspace() {
 
       {tab === 'upload' && (
         <Panel title="Upload tài liệu" icon={UploadCloud}>
-          <label className="block border border-dashed border-[var(--border)] rounded-xl p-6 bg-[var(--surface-inset)] cursor-pointer">
+          <label className="block border border-dashed border-[var(--border)] rounded-xl p-6 bg-[var(--bg-inset)] cursor-pointer">
             <input
               type="file"
               accept=".pdf,.docx,.txt"
@@ -278,7 +281,7 @@ export default function DocumentWorkspace() {
           {compareRows.length > 0 && (
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               {compareRows.map(row => (
-                <div key={row.key} className="ui-card-muted p-4">
+                <div key={row.key} className="rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/30 p-4">
                   <p className="text-xs font-bold mb-2">{row.algorithm} · {row.group}</p>
                   <p className="text-sm text-[var(--text-secondary)] line-clamp-6">{row.summary}</p>
                 </div>
@@ -288,29 +291,12 @@ export default function DocumentWorkspace() {
         </Panel>
       )}
 
-      {tab === 'evaluation' && compareResult && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <Panel title="ROUGE / BERTScore / Semantic" icon={ChartColumn}>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={metricsData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                  <XAxis dataKey="model" tick={{ fontSize: 10 }} />
-                  <YAxis tick={{ fontSize: 10 }} />
-                  <Tooltip />
-                  <Bar dataKey="rougeL" fill="#2563eb" />
-                  <Bar dataKey="bertscore" fill="#059669" />
-                  <Bar dataKey="semantic" fill="#d97706" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-          <Panel title="Research matrix" icon={ChartColumn}>
-            <pre className="text-xs overflow-auto max-h-72 text-[var(--text-muted)]">
-              {JSON.stringify(compareResult.research_matrix?.aggregate || {}, null, 2)}
-            </pre>
-          </Panel>
-        </div>
+      {tab === 'explainability' && (
+        <DocumentExplainability />
+      )}
+
+      {tab === 'evaluation' && (
+        <DocumentEvaluation />
       )}
 
       {tab === 'search' && documentState && (
@@ -323,7 +309,7 @@ export default function DocumentWorkspace() {
           </div>
           <div className="mt-4 space-y-3">
             {(searchResult?.results || []).map(item => (
-              <div key={item.chunk.chunk_id} className="ui-card-muted p-3">
+              <div key={item.chunk.chunk_id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/30 p-3">
                 <p className="text-xs font-bold">#{item.rank} · {scorePercent(item.score)} · {searchResult?.retrieval_backend}</p>
                 <p className="text-xs mt-2 line-clamp-4">{item.highlight || item.chunk.text}</p>
               </div>
@@ -335,7 +321,7 @@ export default function DocumentWorkspace() {
       {tab === 'citations' && compareResult && (
         <Panel title="Citation viewer" icon={ShieldCheck}>
           {compareRows.map(row => (
-            <div key={row.key} className="mb-4 ui-card-muted p-3">
+            <div key={row.key} className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--bg-muted)]/30 p-3">
               <p className="text-xs font-bold mb-2">{row.algorithm}</p>
               {(row.citations || []).map(c => (
                 <div key={c.sentence_index} className="border-t border-[var(--border)] py-2 text-xs">

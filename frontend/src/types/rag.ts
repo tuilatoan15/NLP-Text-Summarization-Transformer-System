@@ -5,6 +5,8 @@ export interface RAGDocument {
   status: string;
   created_at: string;
   metadata: Record<string, unknown>;
+  file_size?: number;
+  chunks_count?: number;
 }
 
 export interface RAGCitation {

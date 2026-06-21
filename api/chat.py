@@ -85,6 +85,15 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
         raise HTTPException(status_code=500, detail=f"Không thể đổi tên cuộc trò chuyện: {e}")
 
 
+@router.delete("/conversations/all")
+async def delete_all_conversations():
+    try:
+        service.repository.delete_all_conversations()
+        return {"ok": True, "message": "Đã xóa toàn bộ cuộc trò chuyện"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không thể xóa tất cả cuộc trò chuyện: {e}")
+
+
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     try:

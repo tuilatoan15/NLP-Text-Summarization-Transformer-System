@@ -17,6 +17,13 @@ const PageLoader = () => (
 const DashboardLayout = () => {
   const location = useLocation();
   const { sidebarCollapsed } = useApp();
+  const [isMobile, setIsMobile] = React.useState(typeof window !== 'undefined' ? window.innerWidth < 1024 : false);
+
+  React.useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <div
@@ -33,7 +40,7 @@ const DashboardLayout = () => {
       {/* Main content wrapper */}
       <motion.div
         className="flex-1 flex flex-col min-w-0"
-        animate={{ marginLeft: sidebarCollapsed ? 64 : 256 }}
+        animate={{ marginLeft: isMobile ? 0 : (sidebarCollapsed ? 68 : 260) }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
       >
         <Header />

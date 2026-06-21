@@ -65,6 +65,16 @@ async def list_documents():
     return {"items": service.list_documents()}
 
 
+@router.delete("/documents/all")
+async def delete_all_documents():
+    try:
+        service.delete_all_documents()
+        return {"ok": True, "message": "Đã xóa toàn bộ tài liệu RAG"}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Không thể xóa tất cả tài liệu: {e}")
+
+
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
     await _to_thread(service.delete_document, document_id)

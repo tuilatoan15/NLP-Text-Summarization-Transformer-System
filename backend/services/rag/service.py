@@ -215,6 +215,15 @@ class RAGChatService:
         self.vector_store.delete_document(document_id)
         self.repository.delete_document(document_id)
 
+    def delete_all_documents(self) -> None:
+        """Xóa toàn bộ RAG documents, chunks, embeddings và vectors."""
+        self.vector_store.delete_all_documents()
+        self.repository.delete_all_documents()
+
+    def delete_all_conversations(self) -> None:
+        """Xóa toàn bộ cuộc trò chuyện và messages."""
+        self.repository.delete_all_conversations()
+
     # ─────────────────────────────────────────────────────────────────────────
     # Chat Q&A — hardcode retrieval params
     # ─────────────────────────────────────────────────────────────────────────

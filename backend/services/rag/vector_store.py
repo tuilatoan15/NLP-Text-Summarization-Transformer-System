@@ -322,3 +322,24 @@ class VectorStoreManager:
         self._in_memory = {
             k: v for k, v in self._in_memory.items() if v.get("document_id") != document_id
         }
+
+    def delete_all_documents(self) -> None:
+        """Xóa toàn bộ vectors khỏi tất cả backends."""
+        # --- A. QDRANT BACKEND ---
+        if self.active_backend == "qdrant" and self.qdrant_client_inst is not None:
+            try:
+                self.qdrant_client_inst.delete_collection("rag_chunks")
+                logger.info("Qdrant: Deleted entire rag_chunks collection")
+            except Exception as exc:
+                logger.error(f"Qdrant delete_all failed: {exc}")
+
+        # --- B. CHROMADB BACKEND ---
+        if self.active_backend == "chroma" and self.chroma_collection is not None:
+            try:
+                self.chroma_collection.delete()
+                logger.info("Chroma: Deleted all chunks")
+            except Exception as exc:
+                logger.error(f"Chroma delete_all failed: {exc}")
+
+        # --- C. IN-MEMORY FALLBACK ---
+        self._in_memory.clear()

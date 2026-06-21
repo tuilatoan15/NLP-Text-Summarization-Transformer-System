@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts';
-import { useDocumentContext } from '../../context/DocumentContext';
+import { useDocumentWorkspaceStore } from '../../stores/documentWorkspaceStore';
 import { useExplainabilityQuery } from '../../hooks/useApiQueries';
 import { useCacheHitLogger } from '../../hooks/useCacheHitLogger';
 
@@ -31,7 +31,7 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: React.Ele
 }
 
 function DocumentExplainability() {
-  const { document } = useDocumentContext();
+  const { document } = useDocumentWorkspaceStore();
   const [algorithm, setAlgorithm] = React.useState('textrank');
   const docId = document?.document_id as string | undefined;
 

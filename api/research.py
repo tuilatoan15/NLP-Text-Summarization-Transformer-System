@@ -816,7 +816,7 @@ def _load_benchmark_data() -> dict:
                 "timestamp": "2026-06-12T01:21:15",
                 "dataset_name": "nam194/vietnews (Baseline Dự phòng)",
                 "total_samples": 1000,
-                "categories": {"Short": 4000, "Medium": 3500, "Long": 1800, "Very Long": 700}
+                "categories": {"Short": 231, "Medium": 467, "Long": 215, "Very Long": 87}
             },
             "leaderboard": json.loads(json.dumps(FALLBACK_LEADERBOARD)),
             "samples": []

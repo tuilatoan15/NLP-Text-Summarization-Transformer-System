@@ -12,9 +12,7 @@ const Chat = lazy(() => import('./pages/Chat'));
 const Compare = lazy(() => import('./pages/Compare'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Benchmark = lazy(() => import('./pages/Benchmark'));
-const DocumentLayout = lazy(() => import('./pages/documents/DocumentLayout'));
-const DocumentEvaluation = lazy(() => import('./pages/documents/DocumentEvaluation'));
-const DocumentExplainability = lazy(() => import('./pages/documents/DocumentExplainability'));
+const DocumentWorkspace = lazy(() => import('./pages/documents/DocumentWorkspace'));
 
 const App = () => {
   return (
@@ -36,11 +34,7 @@ const App = () => {
             <Route path="/search" element={<Chat />} />
 
             {/* Document routes */}
-            <Route path="/documents" element={<DocumentLayout />}>
-              <Route index element={<Navigate to="evaluation" replace />} />
-              <Route path="evaluation" element={<DocumentEvaluation />} />
-              <Route path="explainability" element={<DocumentExplainability />} />
-            </Route>
+            <Route path="/documents" element={<DocumentWorkspace />} />
 
             {/* Settings page */}
             <Route path="/settings" element={<Settings />} />
