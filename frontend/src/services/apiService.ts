@@ -38,7 +38,7 @@ export async function summarizeCompare(
   algorithms: string[],
   extractiveSentences: number,
   maxAbstractiveLength: number,
-  targetLengthRatio = 50,
+  targetLengthRatio = 20,
 ): Promise<any> {
   const response = await fetch(`${API}/summarize/compare`, {
     method: 'POST',
@@ -110,7 +110,7 @@ export async function compareDocumentSummaries(
   {
     reference = null,
     algorithms = ['textrank', 'lexrank', 'lsa', 'tfidf'],
-    targetLengthRatio = 35,
+    targetLengthRatio = 20,
     extractiveSentences = 4,
     maxAbstractiveLength = 160,
   }: {

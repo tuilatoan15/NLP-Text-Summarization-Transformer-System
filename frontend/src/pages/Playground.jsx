@@ -2,7 +2,7 @@ import React, { useMemo, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Sliders
+  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { usePlaygroundStore, filesFingerprint } from '../stores/playgroundStore';
@@ -310,8 +310,8 @@ const Playground = () => {
   const { t, addNotification } = useApp();
   const queryClient = useQueryClient();
   const {
-    text, reference, fileMetas, selected, summaryLength, result, runState, completedCount,
-    setText, setReference, setFileMetas, setSelected, setSummaryLength,
+    text, reference, fileMetas, selected, result, runState, completedCount,
+    setText, setReference, setFileMetas, setSelected,
     setResult, setRunState, setCompletedCount, setLastExtractFingerprint,
   } = usePlaygroundStore();
 
@@ -347,21 +347,7 @@ const Playground = () => {
     return sourceWordCount || '—';
   }, [files, sourceWordCount, result, text]);
 
-  const displayTargetWords = useMemo(() => {
-    if (files.length > 0 && !text.trim()) {
-      return result?.meta?.target_words || '—';
-    }
-    let mode = summaryLength;
-    if (mode === 'auto') {
-      if (sourceWordCount < 500) mode = 'short';
-      else if (sourceWordCount <= 3000) mode = 'standard';
-      else mode = 'detailed';
-    }
-    if (mode === 'short') return '50 - 80';
-    if (mode === 'standard') return '100 - 150';
-    if (mode === 'detailed') return '200 - 300';
-    return '—';
-  }, [files, summaryLength, sourceWordCount, result, text]);
+
 
   const handleFileChange = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -447,7 +433,6 @@ const Playground = () => {
         text: textToUse,
         reference: reference || null,
         algorithms: selected,
-        summaryLength,
         saveResult: true,
       },
       (evt) => {
@@ -684,7 +669,7 @@ const Playground = () => {
 
             {/* Left Column (Reference, Length Ratio slider & Advanced Settings) */}
             <div className="space-y-4 bg-[var(--surface-inset)] p-4 rounded-2xl border border-[var(--border-subtle)] flex flex-col justify-between">
-              <section className="space-y-2 flex flex-col">
+              <section className="space-y-2 flex flex-col flex-1">
                 <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
                   <BookOpen size={12} className="text-blue-500" />
                   {t('pgReference')}
@@ -693,47 +678,12 @@ const Playground = () => {
                   value={reference}
                   disabled={loading}
                   onChange={(e) => setReference(e.target.value)}
-                  className="ui-textarea text-xs min-h-[90px] resize-none focus:ring-2 focus:ring-blue-500/20 w-full"
+                  className="ui-textarea text-xs min-h-[90px] flex-1 resize-none focus:ring-2 focus:ring-blue-500/20 w-full"
                   placeholder={t('pgReferencePlaceholder')}
                 />
               </section>
 
-              <section className="space-y-3">
-                <label className="ui-label text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
-                  <Sliders size={12} className="text-blue-500" />
-                  Độ dài tóm tắt
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {[
-                    { key: 'auto', label: 'Tự động', desc: 'Đề xuất bởi AI' },
-                    { key: 'short', label: 'Ngắn', desc: '~50-80 từ' },
-                    { key: 'standard', label: 'Tiêu chuẩn', desc: '~100-150 từ' },
-                    { key: 'detailed', label: 'Chi tiết', desc: '~200-300 từ' },
-                  ].map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      disabled={loading}
-                      onClick={() => setSummaryLength(option.key)}
-                      className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer select-none ${summaryLength === option.key
-                        ? 'border-blue-500 bg-blue-50/10 shadow-sm ring-1 ring-blue-500/20'
-                        : 'border-[var(--border)] bg-[var(--surface-elevated)] hover:border-[var(--border-strong)]'
-                        }`}
-                    >
-                      <span className="text-xs font-bold text-[var(--text)]">{option.label}</span>
-                      <span className="text-[9px] text-[var(--text-muted)] mt-0.5">{option.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-[var(--text-muted)] font-medium leading-relaxed mt-1">
-                  Mục tiêu đầu ra: <span className="font-bold text-[var(--text)]">{displayTargetWords} từ</span>.
-                  {summaryLength === 'auto' && (
-                    <span className="text-blue-500 dark:text-blue-400 font-semibold ml-1">
-                      (Tự động điều chỉnh theo kích thước văn bản đầu vào)
-                    </span>
-                  )}
-                </p>
-              </section>
+
             </div>
 
             {/* Right Column (Algorithm Selection & Large Submit button) */}

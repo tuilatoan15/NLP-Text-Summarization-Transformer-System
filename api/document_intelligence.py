@@ -26,7 +26,7 @@ router = APIRouter(prefix="/documents", tags=["Document Intelligence"])
 class DocumentCompareRequest(BaseModel):
     reference: Optional[str] = None
     algorithms: list[str] = Field(default_factory=lambda: DEFAULT_ANALYSIS_ALGORITHMS.copy())
-    target_length_ratio: int = Field(default=30, ge=10, le=100)
+    target_length_ratio: int = Field(default=20, ge=10, le=100)
     extractive_sentences: int = Field(default=5, ge=1, le=20)
     max_abstractive_length: int = Field(default=180, ge=24, le=512)
 

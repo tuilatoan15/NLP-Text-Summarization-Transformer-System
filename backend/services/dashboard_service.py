@@ -445,7 +445,7 @@ def _prepare_compare(
 
     length_meta = compute_length_targets(
         cleaned,
-        target_length_ratio if target_length_ratio is not None else 100,
+        target_length_ratio if target_length_ratio is not None else 20,
         sentence_count=resolved_sentence_count,
         max_output_length=resolved_max_output,
     )
@@ -490,7 +490,7 @@ def _assemble_compare_result(
     max_output_length: int,
     total_wall: float,
     reference_text: str,
-    target_length_ratio: int = 100,
+    target_length_ratio: int = 20,
     length_controls: dict | None = None,
 ) -> dict:
     input_words = count_words(cleaned)
@@ -588,7 +588,7 @@ def summarize_all(
     algorithms: list[str] | None = None,
     sentence_count: int = 5,
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
-    target_length_ratio: int = 50,
+    target_length_ratio: int = 20,
     use_length_ratio: bool = True,
     use_cache: bool = False,
     summary_length: str = "auto",
@@ -666,7 +666,7 @@ def stream_compare(
     algorithms: list[str] | None = None,
     sentence_count: int = 5,
     max_output_length: int = config.MAX_OUTPUT_LENGTH,
-    target_length_ratio: int = 50,
+    target_length_ratio: int = 20,
     use_length_ratio: bool = True,
     save_result: bool = True,
     summary_length: str = "auto",

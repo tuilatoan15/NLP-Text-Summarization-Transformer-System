@@ -100,7 +100,7 @@ def main() -> None:
     parser.add_argument("--val-data", default="data/processed/vnexpress/validation.jsonl", help="Path to validation data file (.jsonl)")
     parser.add_argument("--limit", type=int, default=3, help="Number of samples to evaluate on.")
     parser.add_argument("--algorithms", nargs="+", default=["textrank", "lexrank", "lsa", "tfidf"], help="List of algorithms to benchmark.")
-    parser.add_argument("--target-ratio", type=int, default=40, help="Target summary ratio in %.")
+    parser.add_argument("--target-ratio", type=int, default=20, help="Target summary ratio in %.")
     parser.add_argument("--output-dir", default="storage/results", help="Directory to save benchmark run outputs.")
     args = parser.parse_args()
 

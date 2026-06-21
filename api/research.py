@@ -86,7 +86,7 @@ class ResearchCompareRequest(BaseModel):
     reference: Optional[str] = None
     extractive_sentences: int = Field(default=5, ge=1, le=20)
     max_abstractive_length: int = Field(default=150, ge=24, le=512)
-    target_length_ratio: int = Field(default=50, ge=10, le=100)
+    target_length_ratio: int = Field(default=20, ge=10, le=100)
     use_length_ratio: bool = Field(default=True)
     include_visualization: bool = Field(default=True)
     save_result: bool = Field(default=False)

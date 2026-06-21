@@ -48,27 +48,18 @@ class SummaryLengthManager:
             "is_extremely_long": is_extremely_long,
         }
 
+    # Target ratio: all algorithms aim for ~20% of source content
+    TARGET_RATIO = 0.20
+
     @classmethod
     def get_extractive_sentences(cls, length_mode: str, analysis: dict[str, Any]) -> int:
         """
-        Returns the number of sentences to extract based on the length mode.
-        Scales with source sentence count so short news articles are not over-compressed.
+        Returns the number of sentences to extract — always ~20% of source sentences.
         """
-        mode = length_mode.lower().strip() if length_mode else "auto"
-        if mode == "auto":
-            mode = analysis.get("suggested_mode", "standard")
-
-        if mode == "short":
-            floor, cap = 3, 6
-        elif mode == "detailed" or mode == "extremely_long":
-            floor, cap = 8, 15
-        else:
-            floor, cap = 5, 10
-
-        source_sentences = max(1, int(analysis.get("sentence_count", floor)))
-        # ~two-thirds of source sentences, bounded by mode floor/cap
-        proportional = max(floor, (source_sentences * 2 + 2) // 3)
-        return min(source_sentences, cap, proportional)
+        source_sentences = max(1, int(analysis.get("sentence_count", 5)))
+        target = max(1, round(source_sentences * cls.TARGET_RATIO))
+        # Floor of 2 sentences, cap at source count
+        return max(2, min(target, source_sentences))
 
     @classmethod
     def get_abstractive_limits(
@@ -76,19 +67,15 @@ class SummaryLengthManager:
     ) -> Tuple[int, int]:
         """
         Returns (min_new_tokens, max_new_tokens) for abstractive generation.
+        Always targets ~20% of source word count.
         """
-        del model_key
-        mode = length_mode.lower().strip() if length_mode else "auto"
-        if mode == "auto":
-            mode = analysis.get("suggested_mode", "standard")
-
-        if mode == "short":
-            return 30, 100
-        elif mode == "standard":
-            return 60, 200
-        elif mode == "detailed" or mode == "extremely_long":
-            return 120, 400
-        return 60, 200
+        del model_key, length_mode
+        word_count = max(1, int(analysis.get("word_count", 100)))
+        target_words = max(20, round(word_count * cls.TARGET_RATIO))
+        # min = ~40% of target, max = target
+        min_tokens = max(10, round(target_words * 0.4))
+        max_tokens = max(24, target_words)
+        return min_tokens, max_tokens
 
     @classmethod
     def hierarchical_summarize_pipeline(

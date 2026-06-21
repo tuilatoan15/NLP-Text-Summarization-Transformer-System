@@ -26,7 +26,6 @@ export async function streamCompareSummaries(
     text: string;
     reference: string | null;
     algorithms: string[];
-    summaryLength: string;
     saveResult?: boolean;
   },
   onEvent: (event: CompareStreamEvent) => void,
@@ -39,7 +38,6 @@ export async function streamCompareSummaries(
       text: payload.text,
       reference: payload.reference,
       algorithms: payload.algorithms,
-      summary_length: payload.summaryLength,
       save_result: payload.saveResult ?? true,
     }),
   });

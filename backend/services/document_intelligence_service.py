@@ -149,7 +149,7 @@ class DocumentIntelligenceService:
         *,
         reference: str | None = None,
         algorithms: list[str] | None = None,
-        target_length_ratio: int = 30,
+        target_length_ratio: int = 20,
         extractive_sentences: int = 5,
         max_abstractive_length: int = 180,
     ) -> dict[str, Any]:

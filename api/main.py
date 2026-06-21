@@ -76,7 +76,7 @@ class CompareRequest(BaseModel):
     extractive_sentences: int = Field(default=5, ge=1, le=20)
     max_abstractive_length: int = Field(default=config.MAX_OUTPUT_LENGTH, ge=24, le=512)
     target_length_ratio: int = Field(
-        default=50,
+        default=20,
         ge=10,
         le=100,
         description="Target summary length as % of source word count (10–100).",
@@ -221,7 +221,7 @@ def _compare_or_400(
     algorithms: list[str],
     extractive_sentences: int,
     max_abstractive_length: int,
-    target_length_ratio: int = 50,
+    target_length_ratio: int = 20,
     use_length_ratio: bool = True,
     save_result: bool = True,
     summary_length: str = "auto",
@@ -254,7 +254,7 @@ async def _compare_or_400_async(
     algorithms: list[str],
     extractive_sentences: int,
     max_abstractive_length: int,
-    target_length_ratio: int = 50,
+    target_length_ratio: int = 20,
     use_length_ratio: bool = True,
     save_result: bool = True,
     summary_length: str = "auto",

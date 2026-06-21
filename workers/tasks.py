@@ -52,7 +52,7 @@ def summarize_task(self, text: str, model_type: str, settings: Dict[str, Any]) -
             algorithms=unique_algos,
             sentence_count=settings.get("extractiveSentences", 5),
             max_output_length=settings.get("maxLength", 200),
-            target_length_ratio=settings.get("target_length_ratio", 50),
+            target_length_ratio=settings.get("target_length_ratio", 20),
             use_length_ratio=settings.get("use_length_ratio", False)
         )
         
@@ -90,7 +90,7 @@ def compare_task(self, text: str, models: List[str], settings: Dict[str, Any]) -
             algorithms=models,
             sentence_count=settings.get("extractiveSentences", 5),
             max_output_length=settings.get("maxLength", 200),
-            target_length_ratio=settings.get("target_length_ratio", 50),
+            target_length_ratio=settings.get("target_length_ratio", 20),
             use_length_ratio=settings.get("use_length_ratio", True)
         )
         

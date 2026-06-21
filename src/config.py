@@ -63,8 +63,6 @@ GENERATION_CONFIGS: dict[str, dict] = {
     # ViT5: T5 tiếng Việt fine-tuned.
     # Su dung repetition_penalty=1.2 va no_repeat_ngram_size=3 de dam bao cau logic tu nhien.
     "vit5": dict(
-        max_new_tokens=120,
-        min_new_tokens=20,
         num_beams=4,
         no_repeat_ngram_size=3,
         repetition_penalty=1.35,
@@ -74,8 +72,6 @@ GENERATION_CONFIGS: dict[str, dict] = {
     ),
     # mT5: da ngon ngu. Ha repetition_penalty de tranh lam meo mo tu vung sinh ra rac.
     "mt5": dict(
-        max_new_tokens=80,
-        min_new_tokens=10,
         num_beams=4,
         no_repeat_ngram_size=3,
         repetition_penalty=1.15,
@@ -85,8 +81,6 @@ GENERATION_CONFIGS: dict[str, dict] = {
     ),
     # BARTPho: BART syllable-level. Su dung repetition_penalty va length_penalty hop ly.
     "bartpho": dict(
-        max_new_tokens=160,
-        min_new_tokens=25,
         num_beams=4,
         no_repeat_ngram_size=3,
         repetition_penalty=1.35,

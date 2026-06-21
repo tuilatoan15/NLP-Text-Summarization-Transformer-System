@@ -8,7 +8,7 @@ from src.utils import count_words
 
 def compute_length_targets(
     source_text: str,
-    target_length_ratio: int = 50,
+    target_length_ratio: int = 20,
     *,
     sentence_count: int | None = None,
     max_output_length: int | None = None,
