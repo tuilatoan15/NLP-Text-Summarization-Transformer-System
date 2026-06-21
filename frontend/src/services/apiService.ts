@@ -178,13 +178,17 @@ export async function getResearchBenchmarkSamples(
   return parseJson(response, 'Research benchmark samples');
 }
 
-export async function getResearchHybridStudy(): Promise<any> {
-  const response = await fetch(`${API}/research/hybrid-study`);
+export async function getResearchHybridStudy(locale?: string): Promise<any> {
+  const url = new URL(`${API}/research/hybrid-study`);
+  if (locale) url.searchParams.append('locale', locale);
+  const response = await fetch(url.toString());
   return parseJson(response, 'Research hybrid study');
 }
 
-export async function getResearchReport(): Promise<any> {
-  const response = await fetch(`${API}/research/report`);
+export async function getResearchReport(locale?: string): Promise<any> {
+  const url = new URL(`${API}/research/report`);
+  if (locale) url.searchParams.append('locale', locale);
+  const response = await fetch(url.toString());
   return parseJson(response, 'Research report');
 }
 

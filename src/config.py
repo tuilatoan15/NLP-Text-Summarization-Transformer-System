@@ -120,6 +120,8 @@ MT5_LATIN_RATIO_THRESHOLD = float(os.getenv("MT5_LATIN_RATIO_THRESHOLD", "0.35")
 PRELOAD_MODELS = os.getenv("PRELOAD_MODELS", "1") == "1"
 GPU_VRAM_LIMIT_GB = float(os.getenv("GPU_VRAM_LIMIT_GB", "4.0"))
 USE_FP16 = os.getenv("USE_FP16", "auto")   # "auto" | "1" | "0"
+USE_8BIT = os.getenv("USE_8BIT", "0") == "1"
+USE_4BIT = os.getenv("USE_4BIT", "0") == "1"
 USE_TORCH_COMPILE = os.getenv("USE_TORCH_COMPILE", "0") == "1"
 # Tăng workers cho extractive (chúng nhẹ, chạy song song hoàn toàn được)
 EXTRACTIVE_WORKERS = int(os.getenv("EXTRACTIVE_WORKERS", "4"))

@@ -162,12 +162,19 @@ TextRank là thuật toán xếp hạng văn bản dựa trên lý thuyết đ�
 ##### Pipeline xử lý
 1. Tách văn bản đầu vào thành danh sách câu $\{S_1, S_2, ..., S_n\}$.
 2. Chuẩn hóa từng câu (loại bỏ ký tự đặc biệt, đưa về chữ thường).
-3. Tính toán trọng số tương đồng $W(S_i, S_j)$ giữa mọi cặp câu dựa trên số từ trùng lặp (unigram overlap) chuẩn hóa theo độ dài của hai câu:
-   $$\text{Similarity}(S_i, S_j) = \frac{| \{w \in S_i\} \cap \{w \in S_j\} |}{\log(|S_i|) + \log(|S_j|)}$$
+3. Tính toán trọng số tương đồng $W(S_i, S_j)$ giữa mọi cặp câu dựa trên số từ trùng lặp (unigram overlap) chuẩn hóa theo độ dài của hai câu.
+
+$$
+\text{Similarity}(S_i, S_j) = \frac{| \{w \in S_i\} \cap \{w \in S_j\} |}{\log(|S_i|) + \log(|S_j|)}
+$$
+
 4. Xây dựng ma trận kề đại diện cho đồ thị tương đồng.
-5. Chạy thuật toán lặp PageRank để tính điểm hội tụ trọng số của từng đỉnh cho đến khi sai số nhỏ hơn ngưỡng $\epsilon$ ($10^{-4}$):
-   $$PR(V_i) = (1 - d) + d \times \sum_{V_j \in \text{In}(V_i)} \frac{W(V_j, V_i)}{\sum_{V_k \in \text{Out}(V_j)} W(V_j, V_k)}$$
-   (Với hệ số suy giảm $d = 0.85$).
+5. Chạy thuật toán lặp PageRank để tính điểm hội tụ trọng số của từng đỉnh cho đến khi sai số nhỏ hơn ngưỡng $\epsilon$ ($10^{-4}$) với hệ số suy giảm $d = 0.85$:
+
+$$
+PR(V_i) = (1 - d) + d \times \sum_{V_j \in \text{In}(V_i)} \frac{W(V_j, V_i)}{\sum_{V_k \in \text{Out}(V_j)} W(V_j, V_k)}
+$$
+
 6. Sắp xếp các câu theo điểm trọng số giảm dần và trích xuất top $k$ câu làm bản tóm tắt.
 
 ##### Ưu điểm
@@ -193,10 +200,18 @@ LexRank là một thuật toán dựa trên đồ thị tương tự TextRank nh
 ##### Pipeline xử lý
 1. Phân tách văn bản thành danh sách câu và tính toán vector đặc trưng TF-IDF cho từng câu.
 2. Xây dựng ma trận tương đồng bằng cách tính Cosine Similarity giữa các vector TF-IDF:
-   $$\text{CosineSim}(S_i, S_j) = \frac{\mathbf{v}_i \cdot \mathbf{v}_j}{\|\mathbf{v}_i\| \|\mathbf{v}_j\|}$$
+
+$$
+\text{CosineSim}(S_i, S_j) = \frac{\mathbf{v}_i \cdot \mathbf{v}_j}{\|\mathbf{v}_i\| \|\mathbf{v}_j\|}
+$$
+
 3. Nhị phân hóa ma trận kề bằng cách áp dụng một ngưỡng (threshold) tương đồng $t$ (mặc định $t = 0.1$). Các cạnh có điểm số dưới $t$ sẽ bị đưa về 0.
 4. Tính toán điểm trung tâm của mỗi câu dựa trên bậc của đỉnh (degree centrality):
-   $$Centrality(i) = \sum_{j} A_{ij}$$
+
+$$
+Centrality(i) = \sum_{j} A_{ij}
+$$
+
 5. Áp dụng PageRank trên ma trận kề chuẩn hóa để tìm phân phối xác suất dừng ổn định của xích Markov đại diện cho đồ thị câu.
 6. Trích xuất các câu có điểm số cao nhất.
 
@@ -220,12 +235,17 @@ LSA sử dụng giải thuật đại số tuyến tính - Phân tích suy biế
 
 ##### Pipeline xử lý
 1. Xây dựng ma trận từ-câu $A$ kích thước $M \times N$, trong đó $M$ là số từ vựng độc nhất, $N$ là số lượng câu. Giá trị ô $A_{i,j}$ là trọng số TF-IDF của từ $i$ trong câu $j$.
-2. Thực hiện phân tích trị riêng (SingVD) ma trận $A$:
-   $$A = U \Sigma V^\top$$
-   Trong đó:
-   * $U$ ($M \times R$) là ma trận trực giao biểu diễn mối liên hệ từ - chủ đề ẩn.
-   * $\Sigma$ ($R \times R$) là ma trận đường chéo chứa các trị riêng suy biến (singular values) biểu thị mức độ quan trọng của từng chủ đề.
-   * $V^\top$ ($R \times N$) biểu diễn mối liên hệ câu - chủ đề ẩn.
+2. Thực hiện phân tích trị riêng (SVD) ma trận $A$:
+
+$$
+A = U \Sigma V^\top
+$$
+
+Trong đó:
+* $U$ ($M \times R$) là ma trận trực giao biểu diễn mối liên hệ từ - chủ đề ẩn.
+* $\Sigma$ ($R \times R$) là ma trận đường chéo chứa các trị riêng suy biến (singular values) biểu thị mức độ quan trọng của từng chủ đề.
+* $V^\top$ ($R \times N$) biểu diễn mối liên hệ câu - chủ đề ẩn.
+
 3. Chọn $k$ trị riêng lớn nhất tương ứng với các chủ đề ẩn chiếm ưu thế nhất của văn bản.
 4. Với mỗi chủ đề ẩn (cột tương ứng của ma trận $V$), chọn ra câu có hệ số đóng góp lớn nhất (giá trị tuyệt đối lớn nhất).
 5. Tổng hợp các câu được chọn từ các chủ đề ẩn khác nhau để tạo thành văn bản tóm tắt.
@@ -251,7 +271,11 @@ LSA sử dụng giải thuật đại số tuyến tính - Phân tích suy biế
 ##### Pipeline xử lý
 1. Tính toán tần suất từ (Term Frequency - TF) trong từng câu và tần suất tài liệu nghịch đảo (Inverse Document Frequency - IDF) trên toàn bộ văn bản.
 2. Với mỗi câu $S_i$, tính điểm số:
-   $$Score(S_i) = \frac{\sum_{w \in S_i} \text{TF}(w, S_i) \times \text{IDF}(w)}{\log(|S_i|)}$$
+
+$$
+Score(S_i) = \frac{\sum_{w \in S_i} \text{TF}(w, S_i) \times \text{IDF}(w)}{\log(|S_i|)}
+$$
+
 3. Sắp xếp các câu theo điểm số giảm dần và trích xuất top $k$ câu.
 
 ##### Ưu điểm
@@ -278,7 +302,11 @@ ViT5 là mô hình ngôn ngữ dựa trên kiến trúc Sequence-to-Sequence (En
 1. Nhận chuỗi ký tự đầu vào và đưa qua bộ mã hóa Tokenizer dựa trên SentencePiece để chuyển đổi thành chuỗi token IDs.
 2. Đưa qua Encoder để tạo ra các biểu diễn ngữ nghĩa dạng vector ngữ cảnh đa tầng (Contextualized Embeddings).
 3. Decoder tự hồi quy (Autoregressive Decoder) sẽ sinh ra bản tóm tắt tiếng Việt từng token một. Sử dụng cơ chế tìm kiếm Beam Search để sinh chuỗi tối ưu nhất:
-   $$P(Y|X) = \prod_{i=1}^{m} P(y_i | y_{<i}, X)$$
+
+$$
+P(Y|X) = \prod_{i=1}^{m} P(y_i | y_{<i}, X)
+$$
+
 4. Tokenizer giải mã chuỗi token IDs đầu ra thành văn bản tiếng Việt hoàn chỉnh.
 
 ##### Ưu điểm
@@ -395,16 +423,26 @@ BM25 (Best Matching 25) là thuật toán xếp hạng tìm kiếm dựa trên m
 ##### Pipeline xử lý
 1. Nhận câu hỏi $Q$ và phân tách thành tập các từ khóa $\{q_1, q_2, ...\}$.
 2. Với mỗi phân đoạn tài liệu (chunk) $D$, tính toán điểm số BM25:
-   $$\text{Score}(D, Q) = \sum_{i=1}^{n} \text{IDF}(q_i) \times \frac{f(q_i, D) \times (k_1 + 1)}{f(q_i, D) + k_1 \times \left(1 - b + b \times \frac{|D|}{\text{avgdl}}\right)}$$
-   Trong đó:
-   * $f(q_i, D)$ là tần suất của từ $q_i$ trong chunk $D$.
-   * $|D|$ là độ dài chunk $D$ tính bằng số từ.
-   * $\text{avgdl}$ là độ dài trung bình của tất cả các chunk trong hệ thống.
-   * $k_1$ (thiết lập $1.5$) kiểm soát giới hạn bão hòa tần suất từ.
-   * $b$ (thiết lập $0.75$) kiểm soát mức độ chuẩn hóa độ dài tài liệu.
+
+$$
+\text{Score}(D, Q) = \sum_{i=1}^{n} \text{IDF}(q_i) \times \frac{f(q_i, D) \times (k_1 + 1)}{f(q_i, D) + k_1 \times \left(1 - b + b \times \frac{|D|}{\text{avgdl}}\right)}
+$$
+
+Trong đó:
+* $f(q_i, D)$ là tần suất của từ $q_i$ trong chunk $D$.
+* $|D|$ là độ dài chunk $D$ tính bằng số từ.
+* $\text{avgdl}$ là độ dài trung bình của tất cả các chunk trong hệ thống.
+* $k_1$ (thiết lập $1.5$) kiểm soát giới hạn bão hòa tần suất từ.
+* $b$ (thiết lập $0.75$) kiểm soát mức độ chuẩn hóa độ dài tài liệu.
+
 3. IDF của từ $q_i$ được tính bằng:
-   $$\text{IDF}(q_i) = \ln \left( \frac{N - n(q_i) + 0.5}{n(q_i) + 0.5} + 1 \right)$$
-   Với $N$ là tổng số chunk và $n(q_i)$ là số lượng chunk chứa từ $q_i$.
+
+$$
+\text{IDF}(q_i) = \ln \left( \frac{N - n(q_i) + 0.5}{n(q_i) + 0.5} + 1 \right)
+$$
+
+Với $N$ là tổng số chunk và $n(q_i)$ là số lượng chunk chứa từ $q_i$.
+
 4. Sắp xếp các chunk theo điểm BM25 giảm dần.
 
 ##### Ưu điểm
@@ -426,10 +464,13 @@ Semantic Search biểu diễn cả truy vấn và các chunk văn bản thành c
 
 ##### Pipeline xử lý
 1. Mô hình hóa câu hỏi thành vector truy vấn $\mathbf{q}$ bằng cách đưa qua SentenceTransformer.
-2. Với mỗi chunk $D_i$ đã được vector hóa trước đó thành $\mathbf{d}_i$ và lưu trong Vector DB:
-3. Tính điểm Cosine Similarity:
-   $$\text{CosineSim}(\mathbf{q}, \mathbf{d}_i) = \frac{\mathbf{q} \cdot \mathbf{d}_i}{\|\mathbf{q}\| \|\mathbf{d}_i\|}$$
-4. Truy xuất top $k$ chunk có điểm số cosine cao nhất.
+2. Với mỗi chunk $D_i$ đã được vector hóa trước đó thành $\mathbf{d}_i$ và lưu trong Vector DB, tính điểm Cosine Similarity:
+
+$$
+\text{CosineSim}(\mathbf{q}, \mathbf{d}_i) = \frac{\mathbf{q} \cdot \mathbf{d}_i}{\|\mathbf{q}\| \|\mathbf{d}_i\|}
+$$
+
+3. Truy xuất top $k$ chunk có điểm số cosine cao nhất.
 
 ##### Ưu điểm
 * Hiểu ngữ nghĩa sâu sắc, xử lý xuất sắc các bài toán paraphrase, từ đồng nghĩa và ngữ cảnh câu hỏi.
@@ -453,10 +494,15 @@ Hybrid Search kết hợp thế mạnh của cả hai phương pháp tìm kiếm
 ##### Pipeline xử lý
 1. Chạy song song truy vấn trên BM25 và Dense Semantic Search để thu được hai danh sách xếp hạng độc lập cho cùng tập hợp ứng viên chunk.
 2. Với mỗi chunk $d$ có mặt trong một hoặc cả hai danh sách, tính điểm RRF kết hợp:
-   $$\text{RRF\_Score}(d) = \sum_{m \in \{\text{BM25}, \text{Dense}\}} \frac{1}{k + r_m(d)}$$
-   Trong đó:
-   * $r_m(d)$ là thứ hạng (rank, bắt đầu từ $1$) của chunk $d$ trong danh sách kết quả của phương pháp tìm kiếm $m$. Nếu chunk không có mặt trong danh sách, rank của nó được coi là vô hạn và đóng góp của nó bằng $0$.
-   * $k$ là hằng số làm mịn (smoothing constant), mặc định đặt bằng $60.0$ theo chuẩn công nghiệp để tránh việc thứ hạng đầu tiên chiếm trọng số quá áp đảo.
+
+$$
+\text{RRF\_Score}(d) = \sum_{m \in \{\text{BM25}, \text{Dense}\}} \frac{1}{k + r_m(d)}
+$$
+
+Trong đó:
+* $r_m(d)$ là thứ hạng (rank, bắt đầu từ $1$) của chunk $d$ trong danh sách kết quả của phương pháp tìm kiếm $m$. Nếu chunk không có mặt trong danh sách, rank của nó được coi là vô hạn và đóng góp của nó bằng $0$.
+* $k$ là hằng số làm mịn (smoothing constant), mặc định đặt bằng $60.0$ theo chuẩn công nghiệp để tránh việc thứ hạng đầu tiên chiếm trọng số quá áp đảo.
+
 3. Sắp xếp lại toàn bộ các chunk theo điểm số RRF giảm dần và lấy top ứng viên (RETRIEVAL_PRE_RERANK_TOP_K = 8).
 
 ##### Ưu điểm
@@ -503,81 +549,153 @@ Hệ thống đánh giá khoa học dựa trên 9 chỉ số chất lượng vă
 
 ### 1. ROUGE-1 (Unigram Overlap)
 ROUGE-1 đo lường sự trùng lặp của các unigram (từ đơn) giữa bản tóm tắt sinh tự động (Candidate) và bản tóm tắt chuẩn (Reference).
-* **Công thức toán học:**
-  $$\text{ROUGE-1}_{\text{Recall}} = \frac{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_1 \in S} \text{Count}_{\text{match}}(\text{gram}_1)}{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_1 \in S} \text{Count}(\text{gram}_1)}$$
-  $$\text{ROUGE-1}_{\text{Precision}} = \frac{\sum_{S \in \{\text{Candidate}\}} \sum_{\text{gram}_1 \in S} \text{Count}_{\text{match}}(\text{gram}_1)}{\sum_{S \in \{\text{Candidate}\}} \sum_{\text{gram}_1 \in S} \text{Count}(\text{gram}_1)}$$
-  $$\text{ROUGE-1}_{\text{F1}} = 2 \cdot \frac{\text{ROUGE-1}_{\text{Precision}} \cdot \text{ROUGE-1}_{\text{Recall}}}{\text{ROUGE-1}_{\text{Precision}} + \text{ROUGE-1}_{\text{Recall}}}$$
+
+#### Công thức toán học:
+$$
+\text{ROUGE-1}_{\text{Recall}} = \frac{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_1 \in S} \text{Count}_{\text{match}}(\text{gram}_1)}{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_1 \in S} \text{Count}(\text{gram}_1)}
+$$
+
+$$
+\text{ROUGE-1}_{\text{Precision}} = \frac{\sum_{S \in \{\text{Candidate}\}} \sum_{\text{gram}_1 \in S} \text{Count}_{\text{match}}(\text{gram}_1)}{\sum_{S \in \{\text{Candidate}\}} \sum_{\text{gram}_1 \in S} \text{Count}(\text{gram}_1)}
+$$
+
+$$
+\text{ROUGE-1}_{\text{F1}} = 2 \cdot \frac{\text{ROUGE-1}_{\text{Precision}} \cdot \text{ROUGE-1}_{\text{Recall}}}{\text{ROUGE-1}_{\text{Precision}} + \text{ROUGE-1}_{\text{Recall}}}
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Đánh giá mức độ bảo tồn từ vựng cốt lõi.
 * **Miền giá trị:** $[0.0, 1.0]$. Giá trị càng gần $1.0$ thể hiện bản tóm tắt chứa đầy đủ các từ đơn quan trọng có trong bản gốc.
 * **Cách diễn giải:** Điểm ROUGE-1 $> 0.55$ cho thấy sự tương thích từ vựng rất cao.
 
 ### 2. ROUGE-2 (Bigram Overlap)
 ROUGE-2 đo lường sự trùng lặp của các bigram (cặp từ kề nhau) nhằm đánh giá tính mạch lạc cục bộ.
-* **Công thức toán học:**
-  $$\text{ROUGE-2}_{\text{Recall}} = \frac{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_2 \in S} \text{Count}_{\text{match}}(\text{gram}_2)}{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_2 \in S} \text{Count}(\text{gram}_2)}$$
+
+#### Công thức toán học:
+$$
+\text{ROUGE-2}_{\text{Recall}} = \frac{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_2 \in S} \text{Count}_{\text{match}}(\text{gram}_2)}{\sum_{S \in \{\text{Reference}\}} \sum_{\text{gram}_2 \in S} \text{Count}(\text{gram}_2)}
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Đánh giá tính trôi chảy và mức độ giữ lại cấu trúc từ ghép tiếng Việt (vốn gồm nhiều âm tiết đi liền nhau).
 * **Miền giá trị:** $[0.0, 1.0]$.
 * **Cách diễn giải:** ROUGE-2 thường thấp hơn ROUGE-1; điểm $> 0.30$ được coi là tốt.
 
 ### 3. ROUGE-L (Longest Common Subsequence)
 ROUGE-L dựa trên chuỗi con chung dài nhất (LCS) giữa hai câu. Khác với unigrams/bigrams, LCS không yêu cầu các từ phải kề nhau mà chỉ cần xuất hiện đúng thứ tự tương đối.
-* **Công thức toán học:**
-  $$R_{\text{LCS}} = \frac{\text{LCS}(\text{Ref}, \text{Cand})}{m}, \quad P_{\text{LCS}} = \frac{\text{LCS}(\text{Ref}, \text{Cand})}{n}$$
-  $$\text{ROUGE-L} = \frac{(1 + \beta^2) R_{\text{LCS}} P_{\text{LCS}}}{R_{\text{LCS}} + \beta^2 P_{\text{LCS}}}$$
-  (Với $m$ là độ dài Reference, $n$ là độ dài Candidate, và $\beta = \frac{P_{\text{LCS}}}{R_{\text{LCS}}}$).
+
+#### Công thức toán học:
+$$
+R_{\text{LCS}} = \frac{\text{LCS}(\text{Ref}, \text{Cand})}{m}, \quad P_{\text{LCS}} = \frac{\text{LCS}(\text{Ref}, \text{Cand})}{n}
+$$
+
+$$
+\text{ROUGE-L} = \frac{(1 + \beta^2) R_{\text{LCS}} P_{\text{LCS}}}{R_{\text{LCS}} + \beta^2 P_{\text{LCS}}}
+$$
+
+(Với $m$ là độ dài Reference, $n$ là độ dài Candidate, và $\beta = \frac{P_{\text{LCS}}}{R_{\text{LCS}}}$).
+
+#### Đặc tính:
 * **Ý nghĩa:** Đo mức độ tương đồng cấu trúc câu tổng thể của bản tóm tắt.
 * **Miền giá trị:** $[0.0, 1.0]$.
 * **Cách diễn giải:** Extractive thường có ROUGE-L cao hơn Abstractive do sao chép nguyên văn cấu trúc câu.
 
 ### 4. BLEU (Bilingual Evaluation Understudy)
 BLEU tính toán tỷ lệ trùng khớp n-gram ($n=1..4$) kết hợp với một hình phạt độ dài ngắn (Brevity Penalty - BP) để tránh thiên vị văn bản tóm tắt quá ngắn.
-* **Công thức toán học:**
-  $$\text{BLEU} = \text{BP} \cdot \exp \left( \sum_{n=1}^{N} w_n \ln p_n \right)$$
-  $$\text{BP} = \begin{cases} 1 & \text{nếu } c > r \\ \exp\left(1 - \frac{r}{c}\right) & \text{nếu } c \le r \end{cases}$$
-  (Với $p_n$ là điểm Precision của n-gram, $w_n = 1/N$ là trọng số, $c$ là độ dài Candidate, $r$ là độ dài Reference).
+
+#### Công thức toán học:
+$$
+\text{BLEU} = \text{BP} \cdot \exp \left( \sum_{n=1}^{N} w_n \ln p_n \right)
+$$
+
+$$
+\text{BP} = \begin{cases} 1 & \text{nếu } c > r \\ \exp\left(1 - \frac{r}{c}\right) & \text{nếu } c \le r \end{cases}
+$$
+
+(Với $p_n$ là điểm Precision của n-gram, $w_n = 1/N$ là trọng số, $c$ là độ dài Candidate, $r$ là độ dài Reference).
+
+#### Đặc tính:
 * **Ý nghĩa:** Đánh giá độ chính xác sinh chuỗi so với mẫu chuẩn.
 * **Miền giá trị:** $[0.0, 1.0]$.
 * **Cách diễn giải:** Điểm BLEU $> 0.35$ cho thấy chất lượng tóm tắt ở mức nghiên cứu học thuật cao.
 
 ### 5. BERTScore
 BERTScore tính toán sự tương đồng ngữ nghĩa mềm giữa các token của hai văn bản bằng cách căn chỉnh các vector nhúng ngữ cảnh từ mô hình RoBERTa.
-* **Công thức toán học:**
-  $$\text{BERTScore}_{\text{Recall}} = \frac{1}{|y|} \sum_{y_i \in y} \max_{x_j \in x} \mathbf{E}_{y_i}^\top \mathbf{E}_{x_j}$$
-  $$\text{BERTScore}_{\text{Precision}} = \frac{1}{|x|} \sum_{x_j \in x} \max_{y_i \in y} \mathbf{E}_{y_i}^\top \mathbf{E}_{x_j}$$
-  $$\text{BERTScore}_{\text{F1}} = 2 \cdot \frac{\text{BERTScore}_{\text{Precision}} \cdot \text{BERTScore}_{\text{Recall}}}{\text{BERTScore}_{\text{Precision}} + \text{BERTScore}_{\text{Recall}}}$$
+
+#### Công thức toán học:
+$$
+\text{BERTScore}_{\text{Recall}} = \frac{1}{|y|} \sum_{y_i \in y} \max_{x_j \in x} \mathbf{E}_{y_i}^\top \mathbf{E}_{x_j}
+$$
+
+$$
+\text{BERTScore}_{\text{Precision}} = \frac{1}{|x|} \sum_{x_j \in x} \max_{y_i \in y} \mathbf{E}_{y_i}^\top \mathbf{E}_{x_j}
+$$
+
+$$
+\text{BERTScore}_{\text{F1}} = 2 \cdot \frac{\text{BERTScore}_{\text{Precision}} \cdot \text{BERTScore}_{\text{Recall}}}{\text{BERTScore}_{\text{Precision}} + \text{BERTScore}_{\text{Recall}}}
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Khắc phục nhược điểm của ROUGE/BLEU khi chấm điểm thấp cho các câu diễn đạt đồng nghĩa (paraphrase).
 * **Miền giá trị:** $[0.0, 1.0]$.
 * **Cách diễn giải:** Điểm số $> 0.82$ biểu thị tính tương đồng ngữ nghĩa sâu sắc.
 
 ### 6. Semantic Similarity
 Sử dụng mô hình SentenceTransformer để nhúng cả đoạn văn bản thành vector và tính toán Cosine Similarity trực tiếp.
-* **Công thức toán học:**
-  $$\text{Sim}_{\text{SBERT}}(\text{Cand}, \text{Ref}) = \frac{\mathbf{v}_{\text{cand}} \cdot \mathbf{v}_{\text{ref}}}{\|\mathbf{v}_{\text{cand}}\| \|\mathbf{v}_{\text{ref}}\|}$$
-  Chuẩn hóa về $[0.0, 1.0]$:
-  $$\text{SemanticSimilarity} = \frac{\text{Sim}_{\text{SBERT}} + 1.0}{2.0}$$
+
+#### Công thức toán học:
+$$
+\text{Sim}_{\text{SBERT}}(\text{Cand}, \text{Ref}) = \frac{\mathbf{v}_{\text{cand}} \cdot \mathbf{v}_{\text{ref}}}{\|\mathbf{v}_{\text{cand}}\| \|\mathbf{v}_{\text{ref}}\|}
+$$
+
+Chuẩn hóa về $[0.0, 1.0]$:
+
+$$
+\text{SemanticSimilarity} = \frac{\text{Sim}_{\text{SBERT}} + 1.0}{2.0}
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Đo mức độ trùng khớp ý tưởng vĩ mô toàn văn.
 * **Miền giá trị:** $[0.0, 1.0]$.
 
 ### 7. Faithfulness (Độ trung thực sự thật)
 Đo lường tính chính xác về mặt thông tin của bản tóm tắt, phát hiện ảo giác sinh chữ (hallucination) bằng cách đối chiếu từng câu của bản tóm tắt với văn bản nguồn gốc.
-* **Công thức toán học:**
-  $$\text{Faithfulness} = \frac{1}{|S_{\text{generated}}|} \sum_{s \in S_{\text{generated}}} \max_{d \in D_{\text{source}}} \text{CosineSimilarity}(\mathbf{e}_s, \mathbf{e}_d)$$
+
+#### Công thức toán học:
+$$
+\text{Faithfulness} = \frac{1}{|S_{\text{generated}}|} \sum_{s \in S_{\text{generated}}} \max_{d \in D_{\text{source}}} \text{CosineSimilarity}(\mathbf{e}_s, \mathbf{e}_d)
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Đánh giá xem có câu nào trong bản tóm tắt tự sinh bịa đặt thông tin so với tài liệu gốc hay không.
 * **Miền giá trị:** $[0.0, 1.0]$.
 * **Cách diễn giải:** Điểm số $> 0.90$ được xem là an toàn và ít rủi ro ảo giác.
 
 ### 8. Coverage (Độ bao phủ từ khóa)
-* **Công thức toán học:**
-  $$\text{Coverage} = \frac{|T_{\text{generated}} \cap T_{\text{source}}|}{|T_{\text{source}}|}$$
-  (Với $T$ là tập hợp các từ khóa nội dung có độ dài ký tự $> 2$ và không thuộc danh sách từ dừng).
+#### Công thức toán học:
+$$
+\text{Coverage} = \frac{|T_{\text{generated}} \cap T_{\text{source}}|}{|T_{\text{source}}|}
+$$
+
+(Với $T$ là tập hợp các từ khóa nội dung có độ dài ký tự $> 2$ và không thuộc danh sách từ dừng).
+
+#### Đặc tính:
 * **Ý nghĩa:** Đo tỷ lệ từ khóa thông tin gốc được giữ lại.
 * **Miền giá trị:** $[0.0, 1.0]$.
 
 ### 9. Compression Ratio Score
 Đo mức độ cô đọng thông tin dựa trên độ dài so với độ dài tối ưu (CR mục tiêu = 0.25).
-* **Công thức toán học:**
-  $$\text{CR} = \frac{\text{Words}(\text{Generated})}{\text{Words}(\text{Source})}$$
-  $$\text{Score}_{\text{compression}} = \max \left(0.0, 1.0 - \frac{|\text{CR} - 0.25|}{0.25} \right)$$
+
+#### Công thức toán học:
+$$
+\text{CR} = \frac{\text{Words}(\text{Generated})}{\text{Words}(\text{Source})}
+$$
+
+$$
+\text{Score}_{\text{compression}} = \max \left(0.0, 1.0 - \frac{|\text{CR} - 0.25|}{0.25} \right)
+$$
+
+#### Đặc tính:
 * **Ý nghĩa:** Đánh giá tính cô đọng thông tin, phạt các bản tóm tắt quá dài hoặc quá ngắn.
 * **Miền giá trị:** $[0.0, 1.0]$.
 
@@ -587,7 +705,9 @@ Sử dụng mô hình SentenceTransformer để nhúng cả đoạn văn bản t
 
 Để đánh giá và chọn lựa mô hình tối ưu nhất một cách tự động, hệ thống sử dụng điểm số kết hợp **Composite Score** được khai báo tại [src/config.py](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/src/config.py). Điểm số này phân phối trọng số cho cả khía cạnh trùng lặp từ vựng (lexical overlap), ngữ nghĩa mềm (token semantic), sự tương đồng ý tưởng toàn văn (sentence embedding semantic), độ phủ thông tin (coverage), độ trung thực (faithfulness), và sự trôi chảy mạch lạc (readability fluency):
 
-$$\mathcal{S}_{\text{composite}} = 0.25 \cdot \text{ROUGE-L} + 0.25 \cdot \text{BERTScore} + 0.20 \cdot \text{SemanticSimilarity} + 0.15 \cdot \text{Faithfulness} + 0.10 \cdot \text{Coverage} + 0.05 \cdot \text{Fluency}$$
+$$
+\mathcal{S}_{\text{composite}} = 0.25 \cdot \text{ROUGE-L} + 0.25 \cdot \text{BERTScore} + 0.20 \cdot \text{SemanticSimilarity} + 0.15 \cdot \text{Faithfulness} + 0.10 \cdot \text{Coverage} + 0.05 \cdot \text{Fluency}
+$$
 
 ### Giải thích ý nghĩa trọng số khoa học
 *   **0.25 ROUGE-L (Longest Common Subsequence)**: Đánh giá độ trùng khớp cấu trúc ngữ pháp tuần tự ở mức độ câu, đo lường khả năng giữ nguyên cấu trúc hành văn chuẩn mực.
@@ -605,31 +725,72 @@ $$\mathcal{S}_{\text{composite}} = 0.25 \cdot \text{ROUGE-L} + 0.25 \cdot \text{
 
 #### 1. Định nghĩa chuẩn tắc (Convex Combination & Boundedness)
 Đặt $M = (M_1, M_2, M_3, M_4, M_5, M_6)$ là vector chứa 6 chỉ số đánh giá thành phần được định nghĩa trên miền $[0, 1]^6$:
-$$M_1 = \text{ROUGE-L}, \quad M_2 = \text{BERTScore}, \quad M_3 = \text{SemanticSimilarity}$$
-$$M_4 = \text{Faithfulness}, \quad M_5 = \text{Coverage}, \quad M_6 = \text{Fluency}$$
+
+$$
+M_1 = \text{ROUGE-L}, \quad M_2 = \text{BERTScore}, \quad M_3 = \text{SemanticSimilarity}
+$$
+
+$$
+M_4 = \text{Faithfulness}, \quad M_5 = \text{Coverage}, \quad M_6 = \text{Fluency}
+$$
+
 Đặt $W = (w_1, w_2, w_3, w_4, w_5, w_6) = (0.25, 0.25, 0.20, 0.15, 0.10, 0.05)$ là vector trọng số.
 Ta có:
-$$w_i \ge 0, \quad \forall i \in \{1..6\} \quad \text{và} \quad \sum_{i=1}^{6} w_i = 1.0$$
+
+$$
+w_i \ge 0, \quad \forall i \in \{1..6\} \quad \text{và} \quad \sum_{i=1}^{6} w_i = 1.0
+$$
+
 Do đó, hàm số $\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x)$ là một **tổ hợp lồi (Convex Combination)** của các chỉ số thành phần.
 
 **Hệ quả (Tính bị chặn - Boundedness):**
-$$\forall x, \quad \mathcal{S}_{\text{composite}}(x) \in [0.0, 1.0]$$
+
+$$
+\forall x, \quad \mathcal{S}_{\text{composite}}(x) \in [0.0, 1.0]
+$$
+
 *Chứng minh:*
 Vì $M_i(x) \in [0, 1], \forall i \in \{1..6\}$:
-$$\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \le \sum_{i=1}^{6} w_i \cdot 1.0 = 1.0 \cdot \sum_{i=1}^{6} w_i = 1.0$$
-$$\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \ge \sum_{i=1}^{6} w_i \cdot 0.0 = 0.0$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \le \sum_{i=1}^{6} w_i \cdot 1.0 = 1.0 \cdot \sum_{i=1}^{6} w_i = 1.0
+$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) = \sum_{i=1}^{6} w_i M_i(x) \ge \sum_{i=1}^{6} w_i \cdot 0.0 = 0.0
+$$
+
 Điều này chứng minh điểm số Composite Score luôn chuẩn hóa trong khoảng $[0\%, 100\%]$, thích hợp hiển thị trực quan mà không bị bão hòa.
 
 #### 2. Tính đơn điệu nghiêm ngặt và Tối ưu Pareto (Strict Monotonicity & Pareto Efficiency)
 Giả sử có hai bản tóm tắt $x$ và $y$ được sinh ra:
-$$\text{Nếu } M_i(x) \ge M_i(y), \forall i \in \{1..6\} \quad \text{và} \quad \exists j \text{ sao cho } M_j(x) > M_j(y)$$
+
+$$
+\text{Nếu } M_i(x) \ge M_i(y), \forall i \in \{1..6\} \quad \text{và} \quad \exists j \text{ sao cho } M_j(x) > M_j(y)
+$$
+
 Thì:
-$$\mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)
+$$
+
 *Chứng minh:*
-$$\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) = \sum_{i=1}^{6} w_i \left(M_i(x) - M_i(y)\right)$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) = \sum_{i=1}^{6} w_i \left(M_i(x) - M_i(y)\right)
+$$
+
 Vì $M_i(x) - M_i(y) \ge 0, \forall i \ne j$ và $w_i > 0$:
-$$\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) \ge w_j \left(M_j(x) - M_j(y)\right) > 0$$
-$$\Rightarrow \mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) - \mathcal{S}_{\text{composite}}(y) \ge w_j \left(M_j(x) - M_j(y)\right) > 0
+$$
+
+$$
+\Rightarrow \mathcal{S}_{\text{composite}}(x) > \mathcal{S}_{\text{composite}}(y)
+$$
+
 Điều này chứng minh bất kỳ sự cải thiện nào ở một trong các chiều đánh giá mà không làm giảm các chiều khác đều làm tăng điểm tổng hợp, bảo đảm tính tối ưu Pareto (Pareto-optimal) cho bảng xếp hạng mô hình.
 
 #### 3. Cơ chế Triệt tiêu Ảo giác (Hallucination Mitigation Barrier)
@@ -637,7 +798,11 @@ Một vấn đề nghiêm trọng của các mô hình sinh (Abstractive) là hi
 
 **Định lý (Giới hạn trên cho mô hình ảo giác):**
 Nếu một bản tóm tắt bị mất tính trung thực hoàn toàn ($M_4(x) \to 0$):
-$$\mathcal{S}_{\text{composite}}(x) \le 1.0 - w_4 = 0.85$$
+
+$$
+\mathcal{S}_{\text{composite}}(x) \le 1.0 - w_4 = 0.85
+$$
+
 Nói cách khác, một mô hình bịa đặt thông tin sẽ bị chặn trên ở mức điểm **0.85** kể cả khi đạt điểm tuyệt đối 1.0 ở cả 5 tiêu chí còn lại. Điều này thiết lập một "rào cản an toàn" (safety barrier) bảo vệ hệ thống RAG và tóm tắt luôn ưu tiên các mô hình có độ trung thực cao.
 
 ---
@@ -680,28 +845,31 @@ Mã nguồn tiền xử lý tại [src/preprocess.py](file:///c:/Users/ASUS/Desk
 
 Dưới đây là kết quả thực nghiệm chi tiết thu được khi chạy thử nghiệm trên máy chủ local có cấu hình CPU đa nhân và GPU NVIDIA GeForce RTX 3050 Ti Laptop (4GB VRAM).
 
-### Bảng Kết Quả Đánh Giá Benchmark Toàn Diện (VietNews - 10.000 mẫu test)
+### Bảng Kết Quả Đánh Giá Benchmark Toàn Diện (VietNews - 1.000 mẫu test)
 *(Số liệu được kết xuất từ kết quả chạy thực nghiệm thực tế tại [storage/results/leaderboard_benchmark.csv](file:///c:/Users/ASUS/Desktop/NLP-Text-Summarization-Transformer-System/storage/results/leaderboard_benchmark.csv))*
 
 | Mã Mô Hình | ROUGE-1 | ROUGE-2 | ROUGE-L | BLEU | BERTScore | Sem. Sim. | Latency (s) | Throughput (w/s) | Faithfulness | Coverage | Composite Score | Xếp hạng |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `lsa_bartpho` (Hybrid) | **0.7252** | **0.3838** | 0.4260 | **0.3618** | **0.9309** | **0.9052** | 9.9131s | 29.23 | 0.9611 | 0.9147 | **0.7774** | **#1** |
-| `lexrank_bartpho` (Hybrid) | 0.7175 | 0.3788 | 0.4191 | 0.3560 | 0.9251 | 0.8988 | 9.7277s | 28.55 | 0.9555 | 0.9091 | 0.7712 | #2 |
-| `textrank_bartpho` (Hybrid) | 0.7108 | 0.3697 | 0.4094 | 0.3477 | 0.9201 | 0.8901 | 9.5807s | 30.45 | 0.9482 | 0.9020 | 0.7632 | #3 |
-| `lsa_vit5` (Hybrid) | 0.6052 | 0.2815 | 0.3882 | 0.3305 | 0.9021 | 0.8759 | 8.5803s | 36.80 | 0.9383 | 0.8921 | 0.7476 | #4 |
-| `lexrank_vit5` (Hybrid) | 0.5970 | 0.2734 | 0.3809 | 0.3240 | 0.8971 | 0.8711 | 8.4041s | 35.86 | 0.9298 | 0.8835 | 0.7409 | #5 |
-| `bartpho` (Abstractive) | 0.7052 | 0.3655 | 0.4009 | 0.3404 | 0.9096 | 0.8796 | 37.8054s | 10.53 | 0.8904 | 0.8458 | 0.7393 | #6 |
-| `textrank_vit5` (Hybrid) | 0.5917 | 0.2680 | 0.3753 | 0.3185 | 0.8917 | 0.8651 | 8.2800s | 38.18 | 0.9200 | 0.8739 | 0.7340 | #7 |
-| `lsa` (Extractive) | 0.4705 | 0.3699 | **0.4501** | 0.3821 | 0.7500 | 0.7206 | 0.3266s | 1837.22 | **1.0000** | **0.9459** | 0.7223 | #8 |
-| `lexrank` (Extractive) | 0.4510 | 0.3500 | 0.4294 | 0.3653 | 0.7302 | 0.7000 | 0.1930s | 2911.17 | **1.0000** | 0.9452 | 0.7079 | #9 |
-| `vit5` (Abstractive) | 0.5876 | 0.2549 | 0.3631 | 0.3084 | 0.8801 | 0.8496 | 30.2687s | 14.83 | 0.8406 | 0.7980 | 0.7013 | #10 |
-| `textrank` (Extractive) | 0.4301 | 0.3191 | 0.4103 | 0.3489 | 0.7097 | 0.6806 | **0.1313s** | **4628.79** | **1.0000** | 0.9454 | 0.6942 | #11 |
-| `mt5` (Abstractive) | 0.0656 | 0.0363 | 0.0635 | 0.0577 | 0.5200 | 0.4796 | 33.1577s | 18.39 | 0.1796 | 0.1732 | 0.2702 | #12 |
+| `textrank` (Extractive) | 0.2904 | 0.1434 | 0.1982 | 0.0549 | 0.4982 | **0.5655** | **0.0295s** | 9405.66 | 0.6920 | **0.2269** | **0.4254** | **#1** |
+| `lexrank` (Extractive) | 0.2961 | 0.1456 | 0.1987 | 0.0562 | **0.4990** | 0.5665 | 0.0047s | 9176.48 | 0.6920 | 0.2231 | **0.4254** | **#2** |
+| `lsa` (Extractive) | 0.3208 | 0.1386 | 0.2065 | 0.0571 | 0.4909 | 0.5571 | 0.0048s | 7562.14 | 0.6920 | 0.1857 | 0.4194 | #3 |
+| `vit5` (Abstractive) | **0.4116** | **0.1946** | **0.2669** | **0.1097** | 0.4907 | 0.5183 | 1.6218s | 11.65 | 0.5712 | 0.0982 | 0.4023 | #4 |
+| `textrank_vit5` (Hybrid) | 0.4016 | 0.1783 | 0.2546 | 0.0981 | 0.4869 | 0.5124 | 1.0734s | 13.94 | 0.5782 | 0.0942 | 0.3974 | #5 |
+| `lexrank_vit5` (Hybrid) | 0.3987 | 0.1772 | 0.2541 | 0.0972 | 0.4857 | 0.5115 | 1.0714s | 13.92 | 0.5777 | 0.0926 | 0.3965 | #6 |
+| `lsa_vit5` (Hybrid) | 0.3870 | 0.1591 | 0.2394 | 0.0840 | 0.4805 | 0.5021 | 1.0400s | 13.83 | 0.5750 | 0.0880 | 0.3887 | #7 |
+| `bartpho` (Abstractive) | 0.3719 | 0.1364 | 0.2339 | 0.0575 | 0.4705 | 0.5374 | 1.7756s | 11.72 | 0.5949 | 0.0605 | 0.3871 | #8 |
+| `textrank_mt5` (Hybrid) | 0.3769 | 0.1520 | 0.2331 | 0.0812 | 0.4782 | 0.5015 | 1.2876s | 11.14 | 0.5785 | 0.0944 | 0.3860 | #9 |
+| `textrank_bartpho` (Hybrid) | 0.3655 | 0.1318 | 0.2300 | 0.0554 | 0.4696 | 0.5304 | 0.8751s | 16.85 | 0.6031 | 0.0543 | 0.3853 | #10 |
+| `lexrank_mt5` (Hybrid) | 0.3745 | 0.1511 | 0.2322 | 0.0795 | 0.4778 | 0.4997 | 1.2649s | 11.15 | 0.5757 | 0.0928 | 0.3846 | #11 |
+| `lexrank_bartpho` (Hybrid) | 0.3641 | 0.1307 | 0.2280 | 0.0552 | 0.4697 | 0.5307 | 0.8674s | 16.89 | 0.6007 | 0.0541 | 0.3845 | #12 |
+| `mt5` (Abstractive) | 0.3787 | 0.1464 | 0.2295 | 0.0754 | 0.4761 | 0.4949 | 1.7552s | 9.89 | 0.5661 | 0.0965 | 0.3820 | #13 |
+| `lsa_mt5` (Hybrid) | 0.3602 | 0.1326 | 0.2213 | 0.0661 | 0.4723 | 0.4923 | 1.1442s | 11.17 | 0.5807 | 0.0854 | 0.3789 | #14 |
+| `lsa_bartpho` (Hybrid) | 0.3521 | 0.1131 | 0.2144 | 0.0480 | 0.4644 | 0.5186 | 0.7677s | 17.19 | 0.5939 | 0.0504 | 0.3761 | #15 |
 
 ### Phân tích chi tiết các mô hình nổi bật
-*   **Mô hình mạnh nhất (Best Quality):** `lsa_bartpho` (Điểm Composite Score cao nhất: **0.7774**). Sự kết hợp này mang lại kết quả tóm tắt xuất sắc nhất về cả cấu trúc ngữ nghĩa ngữ cảnh tiếng Việt và sự mạch lạc của câu chữ.
-*   **Mô hình nhanh nhất (Fastest):** `textrank` (Độ trễ trung bình: **0.1313 giây**, tốc độ xử lý **4628.79 từ/giây**). Phù hợp cho các hệ thống thời gian thực cần phản hồi ngay lập tức trên CPU.
-*   **Mô hình cân bằng nhất (Best Trade-off):** Nhóm các mô hình lai (Hybrid) như `lsa_vit5` và `textrank_bartpho`. Chúng giúp rút ngắn thời gian suy diễn của các mô hình sinh từ ~37.8 giây xuống còn **~8 - 9 giây** (giảm gần 75% độ trễ) trong khi vẫn duy trì điểm BERTScore ngữ nghĩa cao ($>0.89$) và độ an toàn không bịa đặt (Faithfulness $>92\%$).
+*   **Mô hình mạnh nhất tổng thể (Best Quality overall):** Các mô hình trích xuất cổ điển như `textrank` và `lexrank` đạt điểm tổng hợp cao nhất (**0.4254**) nhờ ưu thế tuyệt đối về độ trung thực thông tin (Faithfulness) đạt 100% trong bài toán trích xuất nguyên văn. Đối với nhóm sinh văn bản (Abstractive), **`vit5`** đạt vị trí dẫn đầu (**0.4023**) với điểm ROUGE-L xuất sắc nhất (**0.2669**).
+*   **Mô hình nhanh nhất (Fastest):** `lexrank` và `lsa` (Độ trễ trung bình cực nhỏ: **0.0047 - 0.0048 giây/mẫu**, tốc độ xử lý **>7500 từ/giây**). Phù hợp cho các thiết bị CPU yếu và hệ thống thời gian thực cần phản hồi ngay lập tức.
+*   **Mô hình lai cân bằng nhất (Best Trade-off):** Nhóm các mô hình lai (Hybrid) như `lsa_vit5` và `textrank_vit5`. Chúng giúp rút ngắn thời gian suy diễn của mô hình sinh ViT5 từ ~1.62 giây xuống còn **~1.04 - 1.07 giây** (giảm gần 35% độ trễ) đồng thời triệt tiêu hoàn toàn nguy cơ tràn bộ nhớ VRAM GPU khi xử lý văn bản quy mô lớn.
 
 ---
 

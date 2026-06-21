@@ -188,6 +188,27 @@ class ModelRegistry:
             logger.warning("torch.compile() skipped: %s", exc)
         return model
 
+    def _offload_other_models(self, keep_key: str) -> None:
+        """Move all other loaded models to CPU and empty GPU cache to free up VRAM."""
+        # Quantized models cannot be moved to CPU via .to("cpu").
+        # If quantization is active, we don't offload since they are already small enough to fit.
+        if getattr(config, "USE_8BIT", False) or getattr(config, "USE_4BIT", False):
+            return
+
+        with self._lock:
+            for k, loaded in list(self._loaded.items()):
+                if k != keep_key:
+                    try:
+                        # Check if it is on GPU currently
+                        current_device = next(loaded.model.parameters()).device
+                        if current_device.type == "cuda":
+                            logger.info("⏳ Offloading [%s] to CPU to free up VRAM...", k)
+                            loaded.model = loaded.model.to("cpu")
+                            clear_gpu_cache()
+                            logger.info("✅ [%s] successfully offloaded to CPU.", k)
+                    except Exception as exc:
+                        logger.warning("Failed to offload [%s] to CPU: %s", k, exc)
+
     def _load_single(self, algorithm: AlgorithmConfig) -> LoadedModel:
         t0 = time.perf_counter()
         model_path = resolve_model_path(algorithm, prefer_local=True)
@@ -198,8 +219,44 @@ class ModelRegistry:
             tokenizer = self._load_tokenizer(algorithm, model_path)
 
             load_kwargs: dict[str, Any] = {}
-            if self.fp16:
-                load_kwargs["torch_dtype"] = torch.float16  # HuggingFace standard parameter is torch_dtype
+            use_8bit = getattr(config, "USE_8BIT", False)
+            use_4bit = getattr(config, "USE_4BIT", False)
+
+            if use_4bit:
+                try:
+                    from transformers import BitsAndBytesConfig
+                    load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.float16 if self.fp16 else torch.float32,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4"
+                    )
+                    # device_map is required for quantization
+                    device_idx = self.device.index if self.device.type == "cuda" else 0
+                    load_kwargs["device_map"] = {"": device_idx}
+                    logger.info("[%s] Configured for 4-bit quantization (nf4)", algorithm.key)
+                except Exception as exc:
+                    logger.warning("[%s] Failed to configure 4-bit quantization: %s. Falling back to default.", algorithm.key, exc)
+                    if self.fp16:
+                        load_kwargs["torch_dtype"] = torch.float16
+            elif use_8bit:
+                try:
+                    from transformers import BitsAndBytesConfig
+                    load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_8bit=True
+                    )
+                    # device_map is required for quantization
+                    device_idx = self.device.index if self.device.type == "cuda" else 0
+                    load_kwargs["device_map"] = {"": device_idx}
+                    logger.info("[%s] Configured for 8-bit quantization", algorithm.key)
+                except Exception as exc:
+                    logger.warning("[%s] Failed to configure 8-bit quantization: %s. Falling back to default.", algorithm.key, exc)
+                    if self.fp16:
+                        load_kwargs["torch_dtype"] = torch.float16
+            else:
+                if self.fp16:
+                    load_kwargs["torch_dtype"] = torch.float16
+
             from transformers import AutoModelForSeq2SeqLM
             
             is_peft = False
@@ -219,15 +276,17 @@ class ModelRegistry:
                 logger.info("[%s] Loading base model: %s", algorithm.key, base_model_name)
                 base_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_name, **load_kwargs)
                 model = PeftModel.from_pretrained(base_model, model_path)
-                model = model.merge_and_unload()
-                logger.info("[%s] PEFT adapter merged successfully into base model", algorithm.key)
+                if not (use_8bit or use_4bit):
+                    model = model.merge_and_unload()
+                    logger.info("[%s] PEFT adapter merged successfully into base model", algorithm.key)
             else:
                 model = AutoModelForSeq2SeqLM.from_pretrained(model_path, **load_kwargs)
 
             tokenizer = self._repair_vocab_mismatch(model, tokenizer, algorithm, model_path)
             self._patch_generation_config(model, tokenizer)
 
-            model = model.to(self.device)
+            if not (use_8bit or use_4bit):
+                model = model.to(self.device)
             model.eval()
 
             model = self._maybe_compile(model)
@@ -249,7 +308,19 @@ class ModelRegistry:
 
     def ensure_loaded(self, key: str) -> LoadedModel:
         if key in self._loaded:
-            return self._loaded[key]
+            loaded = self._loaded[key]
+            # If the model is currently offloaded to CPU, move it back to GPU!
+            try:
+                current_device = next(loaded.model.parameters()).device
+                if loaded.device.type == "cuda" and current_device.type == "cpu":
+                    logger.info("⏳ Moving [%s] back to GPU VRAM...", key)
+                    self._offload_other_models(key)
+                    loaded.model = loaded.model.to(self.device)
+                    clear_gpu_cache()
+                    logger.info("✅ [%s] is now active on GPU.", key)
+            except Exception as exc:
+                logger.warning("Failed to reactivate model on GPU: %s", exc)
+            return loaded
 
         lock = self._get_model_lock(key)
         with lock:
@@ -258,6 +329,10 @@ class ModelRegistry:
 
             if key not in ABSTRACTIVE_ALGORITHMS:
                 raise KeyError(f"Unknown abstractive algorithm: {key!r}")
+            
+            # Offload other models before loading the new one to prevent VRAM spikes
+            self._offload_other_models(key)
+            
             algorithm = ABSTRACTIVE_ALGORITHMS[key]
             loaded = self._load_single(algorithm)
             self._loaded[key] = loaded

@@ -113,8 +113,12 @@ export function AppProvider({ children }) {
     [notifications],
   );
 
-  const toggleTheme = useCallback(() => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  const toggleTheme = useCallback((targetTheme) => {
+    if (targetTheme === 'light' || targetTheme === 'dark') {
+      setTheme(targetTheme);
+    } else {
+      setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+    }
   }, []);
 
   const toggleSidebar = useCallback(() => {

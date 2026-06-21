@@ -1054,21 +1054,21 @@ export default function Chat() {
                 <MessageSquare className="w-8 h-8" />
               </motion.div>
               <div className="space-y-1 max-w-sm">
-                <h3 className="font-bold text-base text-[var(--text)]">Hỏi đáp tài liệu RAG</h3>
+                <h3 className="font-bold text-base text-[var(--text)]">{t('ragChatTitle')}</h3>
                 <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                  Nhập câu hỏi của bạn. AI sẽ tìm kiếm thông tin liên quan trong các tài liệu đã chọn và phản hồi có nguồn dẫn.
+                  {t('ragChatDesc')}
                 </p>
               </div>
 
               {/* Quick Prompts suggestions */}
               {documents.length > 0 && (
                 <div className="pt-4 space-y-2 w-full max-w-md">
-                  <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">Gợi ý truy vấn nhanh</p>
+                  <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider">{t('quickSuggestions')}</p>
                   <div className="grid grid-cols-1 gap-2">
                     {[
-                      "Tóm tắt ngắn gọn các nội dung cốt lõi của tài liệu.",
+                      t('summarizeDocumentCore'),
                       t('mainIssues'),
-                      "Tìm các thông tin quan trọng nhất trong văn bản."
+                      t('findImportantInfo')
                     ].map((promptText) => (
                       <motion.button
                         key={promptText}

@@ -42,6 +42,17 @@ def persist_compare_result(compare: dict[str, Any], *, input_preview: str | None
     return persist_result(payload)
 
 
+def invalidate_dashboard_cache() -> None:
+    try:
+        for p in RESULT_DIR.glob("cached_dashboard_*.json"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning(f"Failed to invalidate dashboard cache: {exc}")
+
+
 def persist_result(payload: dict[str, Any]) -> dict:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     result_id = payload.get("result_id") or uuid4().hex
@@ -52,6 +63,9 @@ def persist_result(payload: dict[str, Any]) -> dict:
     }
     path = RESULT_DIR / f"{result_id}.json"
     save_json(stored, str(path))
+
+    # Invalidate dashboard cache since new data has been added
+    invalidate_dashboard_cache()
 
     mongo_id = _save_to_mongo(stored)
     return {

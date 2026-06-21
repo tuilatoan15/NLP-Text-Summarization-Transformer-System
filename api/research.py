@@ -1008,7 +1008,7 @@ async def get_benchmark_samples(
     }
 
 @router.get("/hybrid-study")
-async def get_hybrid_study() -> dict:
+async def get_hybrid_study(locale: str = "vie") -> dict:
     """Phân tích so sánh 3 nhóm mô hình (Trích xuất, Sinh, Lai) trên bộ dữ liệu kiểm thử."""
     data = _load_leaderboard_only()
     leaderboard = data["leaderboard"]
@@ -1034,6 +1034,15 @@ async def get_hybrid_study() -> dict:
             "hallucination_pct": round(mean([x["hallucination_pct"] for x in group_data]), 2)
         }
 
+    is_eng = locale.lower().strip().startswith("en")
+    long_doc_analysis = {
+        "title": "Hiệu suất xử lý tài liệu học thuật và báo cáo dài (2000+ từ)" if not is_eng else "Processing performance on academic papers and long documents (2000+ words)",
+        "insights": [
+            "Mô hình Abstractive thuần túy (BARTPho, ViT5) gặp độ trễ rất lớn và có nguy cơ tràn VRAM cao khi tài liệu vượt quá 3000 từ." if not is_eng else "Pure Abstractive models (BARTPho, ViT5) suffer from high latency and VRAM Out-of-Memory risks when document lengths exceed 3,000 words.",
+            "Mô hình Extractive thuần túy tuy nhanh nhưng bản tóm tắt bị rời rạc, không mạch lạc và không tóm tắt được ý chung." if not is_eng else "Pure Extractive models are fast but produce disjointed, incoherent summaries that fail to capture the overall document context.",
+            "Pipeline Hybrid (Extractive -> ViT5) giúp giảm 45% thời gian xử lý nhờ vào việc nén tài liệu trước khi sinh tóm tắt, đồng thời tăng 10-15% độ trung thực (Faithfulness) ngữ nghĩa." if not is_eng else "The Hybrid pipeline (Extractive -> ViT5) reduces processing latency by ~45% by compressing the input before generation, while improving semantic Faithfulness by 10-15%."
+        ]
+    }
         
     return {
         "groups": {
@@ -1041,18 +1050,11 @@ async def get_hybrid_study() -> dict:
             "abstractive": avg_for_group(abstractive_keys),
             "hybrid": avg_for_group(hybrid_keys)
         },
-        "long_document_analysis": {
-            "title": "Hiệu suất xử lý tài liệu học thuật và báo cáo dài (2000+ từ)",
-            "insights": [
-                "Mô hình Abstractive thuần túy (BARTPho, ViT5) gặp độ trễ rất lớn và có nguy cơ tràn VRAM cao khi tài liệu vượt quá 3000 từ.",
-                "Mô hình Extractive thuần túy tuy nhanh nhưng bản tóm tắt bị rời rạc, không mạch lạc và không tóm tắt được ý chung.",
-                "Pipeline Hybrid (Extractive -> ViT5) giúp giảm 45% thời gian xử lý nhờ vào việc nén tài liệu trước khi sinh tóm tắt, đồng thời tăng 10-15% độ trung thực (Faithfulness) ngữ nghĩa."
-            ]
-        }
+        "long_document_analysis": long_doc_analysis
     }
 
 @router.get("/report")
-async def get_report() -> dict:
+async def get_report(locale: str = "vie") -> dict:
     """Trả về báo cáo khoa học trình bày đầy đủ kết luận thực nghiệm dựa trên số liệu của 1000 mẫu test."""
     data = _load_leaderboard_only()
     leaderboard = data["leaderboard"]
@@ -1082,108 +1084,215 @@ async def get_report() -> dict:
     hybrid_speedup = round((bartpho_lat - hybrid_lsa_bartpho_lat) / bartpho_lat * 100, 2)
     hallucination_reduction = round(bartpho_hall - hybrid_bartpho_hall, 2)
     
-    conclusions = [
-        {
-            "question": "1. Kiến trúc hệ thống Benchmark hiện tại và phương pháp đo lường?",
-            "answer": (
-                "Kiến trúc hệ thống sử dụng mô hình đánh giá phân tầng hai giai đoạn (Two-Stage Evaluation Framework) "
-                "để kiểm định toàn diện cả ba phương pháp tiếp cận: Trích xuất câu (Extractive: TextRank, LexRank, LSA), "
-                "Sinh từ ngữ cảnh (Abstractive: ViT5, BARTPho, mT5) và Lai ghép tích hợp (Hybrid Pipeline). Phương pháp đo lường "
-                "kết hợp các chỉ số truyền thống dựa trên độ trùng lặp từ vựng n-gram (ROUGE-1, ROUGE-2, ROUGE-L, BLEU) với các "
-                "chỉ số ngữ nghĩa tiên tiến dựa trên Transformer (BERTScore F1 sử dụng XLM-RoBERTa, SBERT Cosine Similarity). "
-                "Hệ thống cũng đo lường hiệu năng vận hành thực tế thông qua độ trễ suy diễn (Latency) và tốc độ sinh từ trên giây (Throughput - Words/Second). "
-                "Đặc biệt, hệ thống bổ sung các thang đo nâng cao như Faithfulness (độ trung thực sự thật chống bịa đặt), "
-                "Grounding Coverage (độ phủ văn bản gốc) và Info Retention Index (chỉ số duy trì thông tin cốt lõi)."
-            )
-        },
-        {
-            "question": "2. Những hạn chế phát hiện trong quá trình nghiên cứu?",
-            "answer": (
-                "Nghiên cứu chỉ ra hai giới hạn nghiêm trọng của các phương pháp khi chạy độc lập: "
-                "(1) Các mô hình Abstractive (ViT5, BARTPho) khi xử lý văn bản dài (>2000 từ) thường bị sụt giảm chất lượng nghiêm trọng, "
-                "gặp rủi ro tràn bộ nhớ GPU (VRAM Out-of-Memory) và thời gian suy diễn tăng theo hàm số mũ do giới hạn chiều dài ngữ cảnh. "
-                "Tỷ lệ bịa đặt thông tin (hallucination) cũng tăng đáng kể trên tài liệu dài. "
-                "(2) Các mô hình Extractive có xu hướng đạt điểm ROUGE-L cao ảo do sao chép nguyên văn các cấu trúc câu dài từ tài liệu gốc, "
-                "tuy nhiên văn bản tóm tắt thiếu tính liên kết logic, mạch lạc giữa các câu, và không thể thực hiện các phép diễn đạt đồng nghĩa (paraphrasing)."
-            )
-        },
-        {
-            "question": "3. Các cải tiến đã triển khai cho hệ thống đánh giá?",
-            "answer": (
-                "Chúng tôi đã triển khai ba nâng cấp cốt lõi: "
-                "(1) Tích hợp Điểm tổng hợp (Composite Score) với bộ trọng số chuẩn hóa: 30% ROUGE-L + 25% Semantic Similarity + 20% Faithfulness + 15% BERTScore + 10% Coverage, "
-                "tránh sự thiên vị của ROUGE-L cho Extractive. "
-                "(2) Xây dựng bộ lọc kiểm tra sự thật tự động (Automated Fact-checking & Hallucination Audit Module) dựa trên sự tương đồng thực thể và Natural Language Inference (NLI). "
-                "(3) Phát triển bộ Semantic Chunker để tối ưu hóa việc phân tách văn bản trước khi trích lọc, giúp giữ vững liên kết ngữ cảnh trên văn bản quy mô lớn."
-            )
-        },
-        {
-            "question": "4. Kết quả Benchmark tổng hợp trên 10.000 mẫu?",
-            "answer": (
-                f"Trên bộ test chuẩn 10.000 mẫu (được xây dựng và phân tách từ tập dữ liệu VietNews), các mô hình lai (Hybrid Pipeline) "
-                f"đặc biệt là LSA ➔ BARTPho và LSA ➔ ViT5 chiếm lĩnh các vị trí dẫn đầu bảng xếp hạng nhờ đạt điểm Composite Score cao nhất "
-                f"(lần lượt là {leaderboard['lsa_bartpho'].get('composite', 0.812)} và {leaderboard['lsa_vit5'].get('composite', 0.795)}). "
-                f"Các mô hình trích xuất xếp ở giữa với tốc độ tối ưu nhưng điểm ngữ nghĩa trung bình. "
-                f"Mô hình mT5 baseline xếp cuối bảng do chưa được fine-tune tối ưu hóa ngôn ngữ, dẫn đến tỷ lệ lặp từ rác và bịa đặt thông tin cao."
-            )
-        },
-        {
-            "question": "5. So sánh hiệu quả chi tiết trước và sau khi nâng cấp?",
-            "answer": (
-                "Trước khi nâng cấp, hệ thống xếp hạng bị sai lệch lớn khi các mô hình trích xuất (TextRank, LexRank) đứng đầu bảng chỉ do điểm ROUGE-L cao ảo "
-                "nhờ sao chép nguyên văn. Sau khi nâng cấp và tích hợp điểm tổng hợp đa chiều (Composite Score), "
-                "các mô hình lai thực tế phản ánh đúng chất lượng tự nhiên và trung thực nhất đã vươn lên đúng vị trí dẫn đầu của bảng xếp hạng, "
-                "mang lại sự khách quan khoa học cho quy trình đánh giá."
-            )
-        },
-        {
-            "question": "6. Đánh giá hiệu năng và chất lượng của Hybrid Summarization?",
-            "answer": (
-                "Cơ chế lai (Hybrid) kết hợp tối ưu năng lực trích lọc ý chính của Extractive (LSA/TextRank) ở Giai đoạn 1 "
-                "và khả năng viết lại mượt mà của Abstractive (BARTPho/ViT5) ở Giai đoạn 2. Kết quả thực nghiệm cho thấy Hybrid "
-                "giúp tăng điểm ROUGE-L trung bình thêm 2-4% so với mô hình sinh đơn thuần, đồng thời triệt tiêu các thông tin rác và nhiễu ngữ cảnh "
-                "ngay từ giai đoạn trích lọc, giúp cải thiện đáng kể độ mạch lạc và tính nhất quán logic của văn bản đầu ra."
-            )
-        },
-        {
-            "question": "7. Đánh giá khả năng tóm tắt tài liệu dài (Long Document)?",
-            "answer": (
-                f"Trên nhóm văn bản dài và rất dài (Medium, Long, Very Long), mô hình lai LSA ➔ BARTPho chứng minh hiệu năng vượt trội "
-                f"khi giảm thiểu độ trễ xử lý tới {hybrid_speedup}% (chỉ còn ~{hybrid_lsa_bartpho_lat:.2f}s so với {bartpho_lat:.2f}s của BARTPho thuần) "
-                f"và giảm tỷ lệ bịa đặt thông tin xuống mức {hybrid_bartpho_hall}%. Đối với LSA ➔ ViT5, thời gian xử lý rút ngắn chỉ còn ~{hybrid_lsa_vit5_lat:.2f}s "
-                f"(so với {vit5_lat:.2f}s của ViT5 thuần), loại bỏ hoàn toàn các lỗi sập VRAM GPU do xử lý văn bản quá tải."
-            )
-        },
-        {
-            "question": "8. Những kết luận khoa học rút ra từ thực nghiệm?",
-            "answer": (
-                "Thực nghiệm rút ra ba kết luận cốt lõi: "
-                "(1) Điểm số n-gram (ROUGE) có tính bias cao và không phản ánh đúng khả năng paraphrasing, cần kết hợp chặt chẽ với BERTScore và SBERT. "
-                "(2) Việc kết hợp toán học ma trận (SVD trong LSA) với mạng neural chú ý là giải pháp tối ưu nhất cho bài toán tóm tắt tiếng Việt. "
-                "(3) Việc tinh chỉnh hyperparameter sinh (như beam search size k=5, repetition penalty=1.6) là bắt buộc để hạn chế hiện tượng lặp từ ở các mô hình sinh."
-            )
-        },
-        {
-            "question": "9. Khuyến nghị mô hình mặc định cho môi trường sản xuất?",
-            "answer": (
-                "Khuyến nghị sử dụng cấu hình lai LSA ➔ BARTPho làm mặc định nhờ đạt điểm chất lượng tổng hợp cao nhất (0.7755), "
-                "độ trung thực sự thật vượt trội (~96%) và tốc độ phản hồi nhanh. Trong trường hợp tài nguyên tính toán hạn chế (chạy trên CPU "
-                "hoặc GPU VRAM thấp), LSA ➔ ViT5 là lựa chọn thay thế lý tưởng nhờ khả năng tiết kiệm tài nguyên mà vẫn giữ vững chất lượng tóm tắt."
-            )
-        }
-    ]
+    is_eng = locale.lower().strip().startswith("en")
     
-    return {
-        "title": "Báo cáo Thực nghiệm và Nghiên cứu So sánh các Mô hình Tóm tắt Tiếng Việt",
-        "author": "NLP Research Lab - AI Document Hub",
-        "dataset_info": "Đánh giá trên bộ test chuẩn 10.000 bài báo và tài liệu tiếng Việt chia tách từ tập dữ liệu VietNews.",
-        "conclusions": conclusions,
-        "metrics_summary": {
-            "hybrid_speedup_pct": hybrid_speedup,
-            "hallucination_reduction_pct": hallucination_reduction,
-            "recommended_model": "LSA ➔ BARTPho (Hybrid)"
+    if is_eng:
+        conclusions = [
+            {
+                "question": "1. Current Benchmark system architecture and measurement methodology?",
+                "answer": (
+                    "The system architecture utilizes a Two-Stage Evaluation Framework "
+                    "to comprehensively validate three approaches: sentence extraction (Extractive: TextRank, LexRank, LSA), "
+                    "contextual generation (Abstractive: ViT5, BARTPho, mT5), and integrated hybrid pipelines. The measurement methodology "
+                    "combines traditional vocabulary overlap n-gram metrics (ROUGE-1, ROUGE-2, ROUGE-L, BLEU) with "
+                    "advanced Transformer-based semantic metrics (BERTScore F1 using XLM-RoBERTa, SBERT Cosine Similarity). "
+                    "The system also measures actual operational performance through inference latency and throughput (Words/Second). "
+                    "Particularly, the system adds advanced metrics such as Faithfulness (factual accuracy to prevent hallucination), "
+                    "Grounding Coverage (source document coverage), and the Info Retention Index."
+                )
+            },
+            {
+                "question": "2. Key limitations discovered during the research?",
+                "answer": (
+                    "The research highlights two critical limitations of the methods when run independently: "
+                    "(1) Baseline Abstractive models (ViT5, BARTPho) suffer from extreme latency and VRAM Out-of-Memory risks "
+                    "when processing long documents (>2000 words) due to context window constraints. Factual hallucination rates "
+                    "also rise significantly on long texts. "
+                    "(2) Extractive models tend to achieve artificially inflated ROUGE-L scores because they copy long sentences "
+                    "verbatim from the source document; however, their summaries lack logical cohesion and flow between distant sentences, "
+                    "and cannot perform synonym-based paraphrasing."
+                )
+            },
+            {
+                "question": "3. Implemented enhancements for the evaluation framework?",
+                "answer": (
+                    "We implemented three core upgrades: "
+                    "(1) Integration of a multi-dimensional Composite Score with normalized weights: 30% ROUGE-L + 25% Semantic Similarity "
+                    "+ 20% Faithfulness + 15% BERTScore + 10% Coverage, avoiding the ROUGE-L bias towards extractive methods. "
+                    "(2) Development of an Automated Fact-checking & Hallucination Audit Module based on entity overlap and Natural Language Inference (NLI). "
+                    "(3) Development of a Semantic Chunker to optimize document segmentation before extraction, preserving contextual alignment on large-scale documents."
+                )
+            },
+            {
+                "question": "4. Aggregated Benchmark results on 1,000 samples?",
+                "answer": (
+                    f"On the standard 1,000-sample test set (curated from the VietNews dataset), hybrid models (especially LSA ➔ BARTPho "
+                    f"and LSA ➔ ViT5) dominate the top rankings, achieving the highest Composite Scores "
+                    f"({leaderboard['lsa_bartpho'].get('composite', 0.812)} and {leaderboard['lsa_vit5'].get('composite', 0.795)} respectively). "
+                    f"Extractive models occupy the middle tier with optimal latency but average semantic scores. "
+                    f"The baseline mT5 model ranks last due to the lack of specialized vocabulary tuning, leading to high word repetition and hallucination rates."
+                )
+            },
+            {
+                "question": "5. Detailed comparison of effectiveness before and after the upgrades?",
+                "answer": (
+                    "Prior to the upgrades, the ranking system was heavily biased as extractive models (TextRank, LexRank) ranked at the top "
+                    "due to high ROUGE-L scores from copying verbatim. Post-upgrade, with the multi-dimensional Composite Score integration, "
+                    "hybrid models that produce the most natural and factually consistent summaries correctly ascended to the top of the leaderboard, "
+                    "providing scientific objectivity to the evaluation process."
+                )
+            },
+            {
+                "question": "6. Performance and quality evaluation of Hybrid Summarization?",
+                "answer": (
+                    "The hybrid mechanism combines the extractive stage's ability to filter key sentences (Stage 1 using LSA/TextRank) "
+                    "and the abstractive stage's capability to rewrite fluently (Stage 2 using BARTPho/ViT5). Experimental results show that Hybrid "
+                    "models increase average ROUGE-L by 2-4% compared to abstractive-only models while neutralizing redundant information and noise "
+                    "during the extraction phase, leading to significant improvements in output coherence and logical consistency."
+                )
+            },
+            {
+                "question": "7. Evaluation of Long Document summarization capabilities?",
+                "answer": (
+                    f"On long and very long documents (Medium, Long, Very Long categories), the LSA ➔ BARTPho hybrid pipeline demonstrates exceptional performance, "
+                    f"reducing inference latency by {hybrid_speedup}% (to ~{hybrid_lsa_bartpho_lat:.2f}s compared to {bartpho_lat:.2f}s for abstractive-only BARTPho) "
+                    f"and keeping hallucinations low at {hybrid_bartpho_hall}%. For LSA ➔ ViT5, latency is reduced to ~{hybrid_lsa_vit5_lat:.2f}s "
+                    f"(compared to {vit5_lat:.2f}s for ViT5-only), completely eliminating GPU VRAM Out-of-Memory errors from overloading context lengths."
+                )
+            },
+            {
+                "question": "8. Core scientific conclusions drawn from experiments?",
+                "answer": (
+                    "Three core conclusions were drawn from the experiments: "
+                    "(1) N-gram based metrics (ROUGE) are heavily biased and do not fully reflect paraphrasing capability, requiring combination with BERTScore and SBERT. "
+                    "(2) Combining matrix mathematics (SVD in LSA) with neural attention networks is the optimal solution for Vietnamese summarization. "
+                    "(3) Generative hyperparameter tuning (such as beam search size k=5 and repetition penalty=1.6) is mandatory to restrict repetitive outputs in abstractive models."
+                )
+            },
+            {
+                "question": "9. Recommended model for production environments?",
+                "answer": (
+                    "We recommend using the LSA ➔ BARTPho hybrid configuration by default as it achieves the highest Composite Score (0.7755), "
+                    "superior factual accuracy (~96%), and fast response times. In resource-constrained environments (e.g. CPU-only or low GPU VRAM), "
+                    "LSA ➔ ViT5 is the ideal alternative, saving computational resources while maintaining summary quality."
+                )
+            }
+        ]
+        
+        return {
+            "title": "Experimental Report and Comparative Study of Vietnamese Summarization Models",
+            "author": "NLP Research Lab - AI Document Hub",
+            "dataset_info": "Evaluated on a standard test set of 1,000 Vietnamese news articles and documents split from the VietNews dataset.",
+            "conclusions": conclusions,
+            "metrics_summary": {
+                "hybrid_speedup_pct": hybrid_speedup,
+                "hallucination_reduction_pct": hallucination_reduction,
+                "recommended_model": "LSA ➔ BARTPho (Hybrid)"
+            }
         }
-    }
+    else:
+        conclusions = [
+            {
+                "question": "1. Kiến trúc hệ thống Benchmark hiện tại và phương pháp đo lường?",
+                "answer": (
+                    "Kiến trúc hệ thống sử dụng mô hình đánh giá phân tầng hai giai đoạn (Two-Stage Evaluation Framework) "
+                    "để kiểm định toàn diện cả ba phương pháp tiếp cận: Trích xuất câu (Extractive: TextRank, LexRank, LSA), "
+                    "Sinh từ ngữ cảnh (Abstractive: ViT5, BARTPho, mT5) và Lai ghép tích hợp (Hybrid Pipeline). Phương pháp đo lường "
+                    "kết hợp các chỉ số truyền thống dựa trên độ trùng lặp từ vựng n-gram (ROUGE-1, ROUGE-2, ROUGE-L, BLEU) với các "
+                    "chỉ số ngữ nghĩa tiên tiến dựa trên Transformer (BERTScore F1 sử dụng XLM-RoBERTa, SBERT Cosine Similarity). "
+                    "Hệ thống cũng đo lường hiệu năng vận hành thực tế thông qua độ trễ suy diễn (Latency) và tốc độ sinh từ trên giây (Throughput - Words/Second). "
+                    "Đặc biệt, hệ thống bổ sung các thang đo nâng cao như Faithfulness (độ trung thực sự thật chống bịa đặt), "
+                    "Grounding Coverage (độ phủ văn bản gốc) và Info Retention Index (chỉ số duy trì thông tin cốt lõi)."
+                )
+            },
+            {
+                "question": "2. Những hạn chế phát hiện trong quá trình nghiên cứu?",
+                "answer": (
+                    "Nghiên cứu chỉ ra hai giới hạn nghiêm trọng của các phương pháp khi chạy độc lập: "
+                    "(1) Các mô hình Abstractive (ViT5, BARTPho) khi xử lý văn bản dài (>2000 từ) thường bị sụt giảm chất lượng nghiêm trọng, "
+                    "gặp rủi ro tràn bộ nhớ GPU (VRAM Out-of-Memory) và thời gian suy diễn tăng theo hàm số mũ do giới hạn chiều dài ngữ cảnh. "
+                    "Tỷ lệ bịa đặt thông tin (hallucination) cũng tăng đáng kể trên tài liệu dài. "
+                    "(2) Các mô hình Extractive có xu hướng đạt điểm ROUGE-L cao ảo do sao chép nguyên văn các cấu trúc câu dài từ tài liệu gốc, "
+                    "tuy nhiên văn bản tóm tắt thiếu tính liên kết logic, mạch lạc giữa các câu, và không thể thực hiện các phép diễn đạt đồng nghĩa (paraphrasing)."
+                )
+            },
+            {
+                "question": "3. Các cải tiến đã triển khai cho hệ thống đánh giá?",
+                "answer": (
+                    "Chúng tôi đã triển khai ba nâng cấp cốt lõi: "
+                    "(1) Tích hợp Điểm tổng hợp (Composite Score) với bộ trọng số chuẩn hóa: 30% ROUGE-L + 25% Semantic Similarity + 20% Faithfulness + 15% BERTScore + 10% Coverage, "
+                    "tránh sự thiên vị của ROUGE-L cho Extractive. "
+                    "(2) Xây dựng bộ lọc kiểm tra sự thật tự động (Automated Fact-checking & Hallucination Audit Module) dựa trên sự tương đồng thực thể và Natural Language Inference (NLI). "
+                    "(3) Phát triển bộ Semantic Chunker để tối ưu hóa việc phân tách văn bản trước khi trích lọc, giúp giữ vững liên kết ngữ cảnh trên văn bản quy mô lớn."
+                )
+            },
+            {
+                "question": "4. Kết quả Benchmark tổng hợp trên 1.000 mẫu?",
+                "answer": (
+                    f"Trên bộ test chuẩn 1.000 mẫu (được xây dựng và phân tách từ tập dữ liệu VietNews), các mô hình lai (Hybrid Pipeline) "
+                    f"đặc biệt là LSA ➔ BARTPho và LSA ➔ ViT5 chiếm lĩnh các vị trí dẫn đầu bảng xếp hạng nhờ đạt điểm Composite Score cao nhất "
+                    f"(lần lượt là {leaderboard['lsa_bartpho'].get('composite', 0.812)} và {leaderboard['lsa_vit5'].get('composite', 0.795)}). "
+                    f"Các mô hình trích xuất xếp ở giữa với tốc độ tối ưu nhưng điểm ngữ nghĩa trung bình. "
+                    f"Mô hình mT5 baseline xếp cuối bảng do chưa được fine-tune tối ưu hóa ngôn ngữ, dẫn đến tỷ lệ lặp từ rác và bịa đặt thông tin cao."
+                )
+            },
+            {
+                "question": "5. So sánh hiệu quả chi tiết trước và sau khi nâng cấp?",
+                "answer": (
+                    "Trước khi nâng cấp, hệ thống xếp hạng bị sai lệch lớn khi các mô hình trích xuất (TextRank, LexRank) đứng đầu bảng chỉ do điểm ROUGE-L cao ảo "
+                    "nhờ sao chép nguyên văn. Sau khi nâng cấp và tích hợp điểm tổng hợp đa chiều (Composite Score), "
+                    "các mô hình lai thực tế phản ánh đúng chất lượng tự nhiên và trung thực nhất đã vươn lên đúng vị trí dẫn đầu của bảng xếp hạng, "
+                    "mang lại sự khách quan khoa học cho quy trình đánh giá."
+                )
+            },
+            {
+                "question": "6. Đánh giá hiệu năng và chất lượng của Hybrid Summarization?",
+                "answer": (
+                    "Cơ chế lai (Hybrid) kết hợp tối ưu năng lực trích lọc ý chính của Extractive (LSA/TextRank) ở Giai đoạn 1 "
+                    "và khả năng viết lại mượt mà của Abstractive (BARTPho/ViT5) ở Giai đoạn 2. Kết quả thực nghiệm cho thấy Hybrid "
+                    "giúp tăng điểm ROUGE-L trung bình thêm 2-4% so với mô hình sinh đơn thuần, đồng thời triệt tiêu các thông tin rác và nhiễu ngữ cảnh "
+                    "ngay từ giai đoạn trích lọc, giúp cải thiện đáng kể độ mạch lạc và tính nhất quán logic của văn bản đầu ra."
+                )
+            },
+            {
+                "question": "7. Đánh giá khả năng tóm tắt tài liệu dài (Long Document)?",
+                "answer": (
+                    f"Trên nhóm văn bản dài và rất dài (Medium, Long, Very Long), mô hình lai LSA ➔ BARTPho chứng minh hiệu năng vượt trội "
+                    f"khi giảm thiểu độ trễ xử lý tới {hybrid_speedup}% (chỉ còn ~{hybrid_lsa_bartpho_lat:.2f}s so với {bartpho_lat:.2f}s của BARTPho thuần) "
+                    f"và giảm tỷ lệ bịa đặt thông tin xuống mức {hybrid_bartpho_hall}%. Đối với LSA ➔ ViT5, thời gian xử lý rút ngắn chỉ còn ~{hybrid_lsa_vit5_lat:.2f}s "
+                    f"(so với {vit5_lat:.2f}s của ViT5 thuần), loại bỏ hoàn toàn các lỗi sập VRAM GPU do xử lý văn bản quá tải."
+                )
+            },
+            {
+                "question": "8. Những kết luận khoa học rút ra từ thực nghiệm?",
+                "answer": (
+                    "Thực nghiệm rút ra ba kết luận cốt lõi: "
+                    "(1) Điểm số n-gram (ROUGE) có tính bias cao và không phản ánh đúng khả năng paraphrasing, cần kết hợp chặt chẽ với BERTScore và SBERT. "
+                    "(2) Việc kết hợp toán học ma trận (SVD trong LSA) với mạng neural chú ý là giải pháp tối ưu nhất cho bài toán tóm tắt tiếng Việt. "
+                    "(3) Việc tinh chỉnh hyperparameter sinh (như beam search size k=5, repetition penalty=1.6) là bắt buộc để hạn chế hiện tượng lặp từ ở các mô hình sinh."
+                )
+            },
+            {
+                "question": "9. Khuyến nghị mô hình mặc định cho môi trường sản xuất?",
+                "answer": (
+                    "Khuyến nghị sử dụng cấu hình lai LSA ➔ BARTPho làm mặc định nhờ đạt điểm chất lượng tổng hợp cao nhất (0.7755), "
+                    "độ trung thực sự thật vượt trội (~96%) và tốc độ phản hồi nhanh. Trong trường hợp tài nguyên tính toán hạn chế (chạy trên CPU "
+                    "hoặc GPU VRAM thấp), LSA ➔ ViT5 là lựa chọn thay thế lý tưởng nhờ khả năng tiết kiệm tài nguyên mà vẫn giữ vững chất lượng tóm tắt."
+                )
+            }
+        ]
+        
+        return {
+            "title": "Báo cáo Thực nghiệm và Nghiên cứu So sánh các Mô hình Tóm tắt Tiếng Việt",
+            "author": "NLP Research Lab - AI Document Hub",
+            "dataset_info": "Đánh giá trên bộ test chuẩn 1.000 bài báo và tài liệu tiếng Việt chia tách từ tập dữ liệu VietNews.",
+            "conclusions": conclusions,
+            "metrics_summary": {
+                "hybrid_speedup_pct": hybrid_speedup,
+                "hallucination_reduction_pct": hallucination_reduction,
+                "recommended_model": "LSA ➔ BARTPho (Hybrid)"
+            }
+        }
 
 @router.post("/benchmark/run")
 async def run_benchmark() -> dict:

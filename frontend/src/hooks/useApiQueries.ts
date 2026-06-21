@@ -80,20 +80,20 @@ export function useResearchLeaderboardQuery(category = 'All', enabled = true) {
   );
 }
 
-export function useResearchHybridStudyQuery(enabled = true) {
+export function useResearchHybridStudyQuery(locale = 'vie', enabled = true) {
   return useLoggedQuery(
-    queryKeys.researchHybridStudy,
-    'GET /research/hybrid-study',
-    getResearchHybridStudy,
+    queryKeys.researchHybridStudy(locale),
+    `GET /research/hybrid-study?locale=${locale}`,
+    () => getResearchHybridStudy(locale),
     enabled,
   );
 }
 
-export function useResearchReportQuery(enabled = true) {
+export function useResearchReportQuery(locale = 'vie', enabled = true) {
   return useLoggedQuery(
-    queryKeys.researchReport,
-    'GET /research/report',
-    getResearchReport,
+    queryKeys.researchReport(locale),
+    `GET /research/report?locale=${locale}`,
+    () => getResearchReport(locale),
     enabled,
   );
 }

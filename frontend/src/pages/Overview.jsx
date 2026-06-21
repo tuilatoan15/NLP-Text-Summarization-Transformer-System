@@ -8,6 +8,7 @@ import {
   Bot, Cpu, Activity, Clock, CheckCircle2,
   Sparkles, MessageSquare, GitCompareArrows, ArrowRight,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../context/AppContext';
 import { useOverviewBundleQuery } from '../hooks/useApiQueries';
 import { useCacheHitLogger } from '../hooks/useCacheHitLogger';
@@ -70,6 +71,39 @@ const Overview = () => {
   const { t, locale, isDark } = useApp();
   const { data, isLoading, isFetching } = useOverviewBundleQuery();
   useCacheHitLogger('overview bundle', data, isFetching);
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    const prefetch = async () => {
+      try {
+        const { getResearchLeaderboard, getResearchHybridStudy, getResearchReport } = await import('../services/apiService');
+        const { queryKeys } = await import('../lib/queryKeys');
+
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchLeaderboard('All'),
+          queryFn: getResearchLeaderboard,
+          staleTime: 5 * 60 * 1000,
+        });
+
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchHybridStudy,
+          queryFn: getResearchHybridStudy,
+          staleTime: 5 * 60 * 1000,
+        });
+
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchReport,
+          queryFn: getResearchReport,
+          staleTime: 5 * 60 * 1000,
+        });
+      } catch (err) {
+        console.warn('Failed to prefetch background queries:', err);
+      }
+    };
+
+    const timer = setTimeout(prefetch, 800);
+    return () => clearTimeout(timer);
+  }, [queryClient]);
 
   const health = data?.health;
   const metrics = data?.metrics;

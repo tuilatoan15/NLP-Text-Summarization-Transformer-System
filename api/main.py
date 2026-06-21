@@ -139,6 +139,16 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ℹ️  PRELOAD_MODELS=0 — models will load lazily on first request")
 
+    # Pre-compute analytics dashboard cache for all time ranges
+    logger.info("📊 Pre-computing analytics dashboard cache...")
+    try:
+        from backend.services.analytics_service import get_dashboard_payload
+        for tr in ["7d", "30d", "90d", "all"]:
+            get_dashboard_payload(time_range=tr, history_limit=15)
+        logger.info("✅ Analytics dashboard cache warmed up successfully.")
+    except Exception as exc:
+        logger.warning("Failed to pre-compute analytics cache: %s", exc)
+
     logger.info("🚀 API ready — listening on %s:%s", config.API_HOST, config.API_PORT)
     yield
     # Graceful shutdown: release GPU memory

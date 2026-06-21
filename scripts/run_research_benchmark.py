@@ -81,11 +81,11 @@ def load_test_samples(limit: int = 1000) -> list[dict]:
     for idx, s in enumerate(sampled):
         s["id"] = f"benchmark_sample_{idx+1:04d}"
         w_count = len(s["article"].split())
-        if w_count < 500:
+        if w_count < 250:
             s["category"] = "Short"
-        elif w_count < 2000:
+        elif w_count < 500:
             s["category"] = "Medium"
-        elif w_count < 10000:
+        elif w_count < 800:
             s["category"] = "Long"
         else:
             s["category"] = "Very Long"

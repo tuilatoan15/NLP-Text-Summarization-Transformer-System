@@ -269,12 +269,34 @@ def get_visualization_data(time_range: str = "30d") -> dict:
 
 
 def get_dashboard_payload(time_range: str = "30d", history_limit: int = 15) -> dict:
-    return {
+    cache_path = RESULT_DIR / f"cached_dashboard_{time_range}.json"
+    if cache_path.exists():
+        try:
+            cached_data = json.loads(cache_path.read_text(encoding="utf-8"))
+            # Slice the pre-cached recent_runs to the requested history_limit dynamically
+            cached_data["recent_runs"] = cached_data["recent_runs"][:history_limit]
+            return cached_data
+        except Exception as exc:
+            pass
+
+    # Cache miss: compute full dashboard payload
+    payload = {
         "metrics": compute_dashboard_metrics(time_range),
         "visualization": get_visualization_data(time_range),
-        "recent_runs": list_recent_results(history_limit),
+        # Cache a larger history window (50 items) so we can slice dynamically on client requests
+        "recent_runs": list_recent_results(limit=50),
         "time_range": time_range,
     }
+
+    try:
+        RESULT_DIR.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        pass
+
+    # Slice recent_runs for current response
+    payload["recent_runs"] = payload["recent_runs"][:history_limit]
+    return payload
 
 
 def list_benchmark_results() -> list[dict]:

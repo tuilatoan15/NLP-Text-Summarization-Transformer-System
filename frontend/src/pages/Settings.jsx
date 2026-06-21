@@ -51,38 +51,76 @@ const ToggleButton = ({ active, onChange, label }) => (
   </button>
 );
 
+const DEFAULT_SETTINGS = {
+  profile: {
+    name: 'AI Document Hub User',
+    email: 'user@example.com',
+  },
+  api: {
+    model: 'openai-gpt-4',
+    temperature: 0.7,
+    maxTokens: 2048,
+  },
+  privacy: {
+    cacheEnabled: true,
+    analytics: true,
+    autoSave: true,
+  },
+  advanced: {
+    debugMode: false,
+    experimentalFeatures: false,
+  }
+};
+
 const Settings = () => {
   const { t, isDark, toggleTheme, locale, setLanguage } = useApp();
   const [saved, setSaved] = useState(false);
-  const [settings, setSettings] = useState({
-    profile: {
-      name: 'AI Document Hub User',
-      email: 'user@example.com',
-    },
-    api: {
-      model: 'openai-gpt-4',
-      temperature: 0.7,
-      maxTokens: 2048,
-    },
-    privacy: {
-      cacheEnabled: true,
-      analytics: true,
-      autoSave: true,
-    },
-    advanced: {
-      debugMode: false,
-      experimentalFeatures: false,
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem('modelSettings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Deep merge to prevent missing sections/fields from throwing undefined errors
+        const merged = {
+          profile: { ...DEFAULT_SETTINGS.profile, ...parsed.profile },
+          api: { ...DEFAULT_SETTINGS.api, ...parsed.api },
+          privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
+          advanced: { ...DEFAULT_SETTINGS.advanced, ...parsed.advanced },
+        };
+        setSettings(merged);
+      }
+    } catch (e) {
+      console.warn('Failed to load settings from localStorage:', e);
     }
-  });
+  }, []);
 
   const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-    // Save to localStorage or API
+    try {
+      localStorage.setItem('modelSettings', JSON.stringify(settings));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      console.error('Failed to save settings to localStorage:', e);
+    }
   };
 
   const handleReset = () => {
-    // Reset to defaults
+    try {
+      const defaultSettingsClone = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+      setSettings(defaultSettingsClone);
+      localStorage.setItem('modelSettings', JSON.stringify(defaultSettingsClone));
+
+      // Reset global theme to light and language to vie
+      toggleTheme('light');
+      setLanguage('vie');
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      console.error('Failed to reset settings in localStorage:', e);
+    }
   };
 
   return (
