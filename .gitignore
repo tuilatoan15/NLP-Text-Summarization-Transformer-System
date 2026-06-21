@@ -59,3 +59,8 @@ frontend/dist/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Docs artifacts & diagrams (not to be pushed)
+docs/*.md
+docs/*.xml
+

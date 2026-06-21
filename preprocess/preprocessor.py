@@ -183,15 +183,17 @@ def strip_editorial_chrome(text: str) -> str:
             continue
         if re.fullmatch(r"\d+\s*/\s*\d+", line):
             continue
-        if re.search(r"\bảnh\s*:", line, flags=re.IGNORECASE):
+        # Chỉ loại bỏ dòng chú thích ảnh nếu độ dài dòng ngắn (dưới 150 ký tự)
+        if re.search(r"\bảnh\s*:", line, flags=re.IGNORECASE) and len(line) < 150:
             continue
         if re.search(
             r"^[^.!?]{0,100},\s*tốt nghiệp ngành[^.!?]{0,120}\.\s*ảnh\s*:",
             line,
             flags=re.IGNORECASE,
-        ):
+        ) and len(line) < 250:
             continue
-        if re.search(r"^theo\s+(vne|vnexpress)", line, flags=re.IGNORECASE):
+        # Chỉ loại bỏ dòng nguồn tin nếu độ dài dòng ngắn (dưới 150 ký tự)
+        if re.search(r"^theo\s+(vne|vnexpress)", line, flags=re.IGNORECASE) and len(line) < 150:
             continue
 
         headline_key = re.sub(r"\s+", " ", line.lower())[:140]

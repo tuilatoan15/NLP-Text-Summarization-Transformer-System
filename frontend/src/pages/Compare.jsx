@@ -194,7 +194,13 @@ const Compare = () => {
   }, [leaderboardData]);
 
   const processedLeaderboard = useMemo(() => {
-    const ALLOWED_KEYS = ['textrank', 'lexrank', 'lsa', 'vit5', 'mt5', 'bartpho'];
+    const ALLOWED_KEYS = [
+      'textrank', 'lexrank', 'lsa',
+      'vit5', 'mt5', 'bartpho',
+      'textrank_vit5', 'lexrank_vit5', 'lsa_vit5',
+      'textrank_mt5', 'lexrank_mt5', 'lsa_mt5',
+      'textrank_bartpho', 'lexrank_bartpho', 'lsa_bartpho'
+    ];
     let result = leaderboardData.filter(item => ALLOWED_KEYS.includes(item.key));
     if (leaderboardFilter !== 'all') {
       result = result.filter(item => item.group === leaderboardFilter);
@@ -259,11 +265,68 @@ const Compare = () => {
       pros: ['Đạt độ tương đồng ngữ nghĩa cao nhất trên tập kiểm thử', 'Diễn đạt xuất sắc, không bao giờ gặp lỗi ngữ pháp tiếng Việt', 'Cực kỳ phù hợp cho phong cách viết tin tức, báo chí'],
       cons: ['Kích thước mô hình lớn, tốn tài nguyên lưu trữ', 'Thời gian khởi động và sinh văn bản lâu (~8 giây)']
     },
+    textrank_vit5: {
+      name: 'TextRank ➔ ViT5', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '220M (ViT5-base)',
+      framework: 'NetworkX + PyTorch Transformers', desc: 'Mô hình lai hai giai đoạn: trích xuất các câu quan trọng nhất bằng TextRank rồi sinh tóm tắt cô đọng bằng ViT5.',
+      pros: ['Độ trễ suy diễn giảm gần 40% so với ViT5 thuần túy', 'Tránh hoàn toàn nguy cơ tràn RAM/VRAM GPU trên tài liệu dài', 'Độ trung thực tăng nhẹ nhờ loại bỏ nhiễu từ giai đoạn trích xuất'],
+      cons: ['Phụ thuộc vào chất lượng trích lọc câu ở giai đoạn 1']
+    },
+    lexrank_vit5: {
+      name: 'LexRank ➔ ViT5', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '220M (ViT5-base)',
+      framework: 'NumPy + PyTorch Transformers', desc: 'Mô hình lai hai giai đoạn: dùng LexRank (TF-IDF đồ thị) lọc câu cốt lõi và dùng ViT5 để viết lại văn bản mượt mà.',
+      pros: ['Tốc độ nhanh, ổn định trên văn bản báo chí trung bình-dài', 'Tiết kiệm đáng kể tài nguyên tính toán GPU', 'Độ nén thông tin rất tốt, văn bản trôi chảy'],
+      cons: ['Nếu LexRank lọc sót ý chính, bản tóm tắt sẽ bị thiếu thông tin']
+    },
+    lsa_vit5: {
+      name: 'LSA ➔ ViT5', group: 'Hybrid', complexity: 'O(N·M·K) + O(L² · D)', params: '220M (ViT5-base)',
+      framework: 'SciPy + PyTorch Transformers', desc: 'Mô hình lai: dùng Phân tích ngữ nghĩa tiềm ẩn (LSA) trích lọc chủ đề chính và dùng ViT5 sinh tóm tắt ngữ cảnh.',
+      pros: ['Nhận diện chủ đề tiềm ẩn tốt giúp giảm thiểu thông tin dư thừa', 'Độ trễ tối ưu hóa mạnh (~1.5 giây)', 'Độ trung thực sự thật đạt mức cao (~83%)'],
+      cons: ['Có thể bỏ lỡ các chi tiết số liệu cụ thể nếu LSA không chọn câu đó']
+    },
+    textrank_mt5: {
+      name: 'TextRank ➔ mT5', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '300M (mT5-small)',
+      framework: 'NetworkX + PyTorch Transformers', desc: 'Mô hình lai: lọc câu chính bằng TextRank và sinh tóm tắt bằng mT5 đa ngôn ngữ.',
+      pros: ['Hỗ trợ đa ngôn ngữ, tốc độ suy diễn nhanh hơn mT5 thuần', 'Hạn chế được một phần hiện tượng sinh từ lặp rác của mT5'],
+      cons: ['Vẫn bị ảnh hưởng bởi chất lượng sinh từ chưa tối ưu của mô hình nền mT5']
+    },
+    lexrank_mt5: {
+      name: 'LexRank ➔ mT5', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '300M (mT5-small)',
+      framework: 'NumPy + PyTorch Transformers', desc: 'Mô hình lai: dùng LexRank lọc câu cốt lõi và dùng mT5 sinh tóm tắt đa ngôn ngữ.',
+      pros: ['Độ trễ suy diễn thấp, thích hợp cho tài liệu đa ngôn ngữ lớn', 'Chi phí tính toán GPU thấp'],
+      cons: ['Chất lượng tóm tắt ở mức trung bình, có thể gặp lỗi lặp từ']
+    },
+    lsa_mt5: {
+      name: 'LSA ➔ mT5', group: 'Hybrid', complexity: 'O(N·M·K) + O(L² · D)', params: '300M (mT5-small)',
+      framework: 'SciPy + PyTorch Transformers', desc: 'Mô hình lai: dùng LSA trích xuất chủ đề và dùng mT5 đa ngôn ngữ sinh bản tóm tắt.',
+      pros: ['Tốc độ xử lý nhanh, lọc nhiễu tốt trên tài liệu đa ngôn ngữ dài'],
+      cons: ['Chất lượng văn bản sinh ra chưa thực sự tự nhiên']
+    },
+    textrank_bartpho: {
+      name: 'TextRank ➔ BARTPho', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '340M (BARTPho-word)',
+      framework: 'NetworkX + PyTorch Transformers', desc: 'Mô hình lai: lọc câu chính bằng TextRank và dùng BARTPho của VinAI để sinh tóm tắt tiếng Việt tự nhiên.',
+      pros: ['Đoạt độ tự nhiên cao, trôi chảy và đúng ngữ pháp tiếng Việt', 'Giảm độ trễ suy diễn của BARTPho xuống gần 45%', 'Ngăn ngừa hiệu quả lỗi tràn bộ nhớ ngữ cảnh'],
+      cons: ['Yêu cầu tài nguyên lưu trữ mô hình khá lớn']
+    },
+    lexrank_bartpho: {
+      name: 'LexRank ➔ BARTPho', group: 'Hybrid', complexity: 'O(N²) + O(L² · D)', params: '340M (BARTPho-word)',
+      framework: 'NumPy + PyTorch Transformers', desc: 'Mô hình lai: lọc câu cốt lõi bằng LexRank và dùng BARTPho viết lại tóm tắt tự nhiên.',
+      pros: ['Cân bằng xuất sắc giữa thời gian đáp ứng và chất lượng học sâu', 'Rất phù hợp cho môi trường chạy thực tế thương mại'],
+      cons: ['Chất lượng phụ thuộc vào ngưỡng chọn câu của LexRank']
+    },
+    lsa_bartpho: {
+      name: 'LSA ➔ BARTPho', group: 'Hybrid', complexity: 'O(N·M·K) + O(L² · D)', params: '340M (BARTPho-word)',
+      framework: 'SciPy + PyTorch Transformers', desc: 'Mô hình lai tối ưu nhất: dùng LSA trích lọc chủ đề và dùng BARTPho sinh tóm tắt ngữ nghĩa.',
+      pros: ['Đạt điểm tổng hợp (Composite Score) cao nhất hệ thống', 'Độ trung thực sự thật vượt trội (~96%)', 'Độ trễ suy diễn cực thấp so với BARTPho thuần'],
+      cons: ['Kích thước mô hình lớn, tốn tài nguyên lưu trữ ban đầu']
+    }
   };
 
   const ALGORITHM_KEYS = [
     'textrank', 'lexrank', 'lsa',
-    'vit5', 'mt5', 'bartpho'
+    'vit5', 'mt5', 'bartpho',
+    'textrank_vit5', 'lexrank_vit5', 'lsa_vit5',
+    'textrank_mt5', 'lexrank_mt5', 'lsa_mt5',
+    'textrank_bartpho', 'lexrank_bartpho', 'lsa_bartpho'
   ];
 
   const getRankBadge = (idx) => {
@@ -360,7 +423,8 @@ const Compare = () => {
               {[
                 { key: 'all', label: 'Tất cả giải thuật' },
                 { key: 'extractive', label: 'Trích xuất (Extractive)' },
-                { key: 'abstractive', label: 'Mô hình sinh (Abstractive)' }
+                { key: 'abstractive', label: 'Mô hình sinh (Abstractive)' },
+                { key: 'hybrid', label: 'Lai ghép (Hybrid)' }
               ].map(f => (
                 <button
                   key={f.key}
@@ -480,10 +544,15 @@ const Compare = () => {
                   <YAxis type="number" dataKey="composite" name="Composite Score" domain={[0, 1.0]} tick={{ fill: chartTheme.axis, fontSize: 10 }} axisLine={false} tickLine={false} />
                   <ZAxis type="number" range={[100, 200]} />
                   <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={chartTheme.tooltipStyle} />
-                  <Scatter name="Algorithms" data={leaderboardData.filter(item => ['textrank', 'lexrank', 'lsa', 'vit5', 'mt5', 'bartpho'].includes(item.key))} fill={chartTheme.accent}>
-                    {leaderboardData.filter(item => ['textrank', 'lexrank', 'lsa', 'vit5', 'mt5', 'bartpho'].includes(item.key)).map((entry, index) => {
+                  <Scatter name="Algorithms" data={leaderboardData.filter(item => Object.keys(modelsSpecifications).includes(item.key))} fill={chartTheme.accent}>
+                    {leaderboardData.filter(item => Object.keys(modelsSpecifications).includes(item.key)).map((entry, index) => {
                       const meta = modelsSpecifications[entry.key] || { group: 'Extractive' };
-                      const color = meta.group === 'Extractive' ? '#10b981' : '#fb7185';
+                      let color = '#10b981'; // Extractive
+                      if (meta.group === 'Abstractive') {
+                        color = '#fb7185';
+                      } else if (meta.group === 'Hybrid') {
+                        color = '#0ea5e9'; // Hybrid (sky-500)
+                      }
                       return <Cell key={`cell-${index}`} fill={color} />;
                     })}
                   </Scatter>
@@ -494,6 +563,7 @@ const Compare = () => {
             <div className="flex justify-center gap-5 mt-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Extractive</span>
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#fb7185]" /> Abstractive</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#0ea5e9]" /> Hybrid</span>
             </div>
           </div>
         </div>
@@ -664,14 +734,42 @@ const Compare = () => {
 
               {/* AI Summaries Grid */}
               <div className="space-y-4">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-sky-500" />
-                  Bản tóm tắt sinh bởi 6 thuật toán AI (So sánh song song)
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-sky-500" />
+                    Bản tóm tắt sinh bởi các thuật toán AI (So sánh song song)
+                  </h3>
+                  
+                  {/* Bộ lọc nhóm mô hình */}
+                  <div className="flex gap-1 bg-[var(--bg-muted)]/45 p-0.5 rounded-xl border border-[var(--border)] w-fit shrink-0">
+                    {[
+                      { key: 'all', label: 'Tất cả (15)' },
+                      { key: 'extractive', label: 'Trích xuất (3)' },
+                      { key: 'abstractive', label: 'Mô hình sinh (3)' },
+                      { key: 'hybrid', label: 'Lai ghép (9)' }
+                    ].map(f => (
+                      <button
+                        key={f.key}
+                        onClick={() => setModelCompareFilter(f.key)}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-bold transition-all cursor-pointer ${
+                          modelCompareFilter === f.key
+                            ? 'bg-sky-600 text-white shadow-sm'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 {/* 15 Algorithms Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                  {ALGORITHM_KEYS.map(key => {
+                  {ALGORITHM_KEYS.filter(key => {
+                    if (modelCompareFilter === 'all') return true;
+                    const spec = modelsSpecifications[key];
+                    return spec && spec.group.toLowerCase() === modelCompareFilter.toLowerCase();
+                  }).map(key => {
                     const spec = modelsSpecifications[key] || { name: key.toUpperCase().replace('_', ' ➔ '), group: 'Unknown' };
                     const output = activeSample.outputs?.[key];
                     const metrics = activeSample.metrics?.[key];
