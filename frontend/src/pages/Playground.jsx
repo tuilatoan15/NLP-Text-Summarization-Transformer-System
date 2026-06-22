@@ -371,15 +371,14 @@ export default function Playground() {
     if (e.target.files?.length) processFiles(Array.from(e.target.files));
   }, [processFiles]);
 
-  const clearFiles = useCallback(async () => {
+  const clearFiles = useCallback(() => {
     if (files.length > 0) {
-      const fingerprint = filesFingerprint(files);
-      await invalidateFileExtractCache(fingerprint);
+      invalidateFileExtractCache(queryClient);
     }
     setFiles([]);
     setTextInput('');
     setRefInput('');
-  }, [files, setTextInput, setRefInput]);
+  }, [files, queryClient, setTextInput, setRefInput]);
 
   const handleRun = async () => {
     if (loading || selectedAlgorithms.length === 0 || !textInput.trim()) return;
