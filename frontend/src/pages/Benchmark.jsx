@@ -174,7 +174,9 @@ const Benchmark = () => {
   const lang = locale === 'vie' ? 'vie' : 'eng';
   const t = (key) => T[lang][key] ?? key;
 
-  const leaderboardQuery = useResearchLeaderboardQuery('All', true);
+  const [benchmarkSize, setBenchmarkSize] = useState(1000);
+
+  const leaderboardQuery = useResearchLeaderboardQuery('All', benchmarkSize, true);
   const { data, isLoading, isError, refetch } = leaderboardQuery;
 
   const chartTheme = {
@@ -273,14 +275,27 @@ const Benchmark = () => {
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
-      <div>
-        <h1 className="ui-heading-1 mb-1 flex items-center gap-2">
-          <Trophy className="w-8 h-8" style={{ color: '#fbbf24' }} />
-          {t('title')}
-        </h1>
-        <p className="ui-text text-[var(--text-muted)]">
-          {t('subtitle')} — {metadata.total_samples?.toLocaleString() || '?'} {t('totalSamples').toLowerCase()} ({metadata.dataset_name || ''})
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="ui-heading-1 mb-1 flex items-center gap-2">
+            <Trophy className="w-8 h-8" style={{ color: '#fbbf24' }} />
+            {t('title')}
+          </h1>
+          <p className="ui-text text-[var(--text-muted)]">
+            {t('subtitle')} — {metadata.total_samples?.toLocaleString() || '?'} {t('totalSamples').toLowerCase()} ({metadata.dataset_name || ''})
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-bold text-[var(--text-secondary)]">{lang === 'vie' ? 'Quy mô dữ liệu:' : 'Dataset size:'}</label>
+          <select
+            value={benchmarkSize}
+            onChange={(e) => setBenchmarkSize(Number(e.target.value))}
+            className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] focus:border-sky-500 outline-none transition-all cursor-pointer shadow-sm"
+          >
+            <option value={1000}>{lang === 'vie' ? '1.000 mẫu (Tiêu chuẩn)' : '1,000 samples (Standard)'}</option>
+            <option value={2500}>{lang === 'vie' ? '2.500 mẫu (Quy mô vừa - 2 ngày)' : '2,500 samples (Medium-scale)'}</option>
+          </select>
+        </div>
       </div>
 
       {/* Top Performer Card */}

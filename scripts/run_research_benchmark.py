@@ -151,6 +151,22 @@ def load_checkpoint(checkpoint_path: Path) -> dict:
             logger.error(f"Error loading checkpoint: {e}. Starting fresh.")
     return {}
 
+# GPU Cooldown Management
+LAST_REST_TIME = time.perf_counter()
+
+def check_gpu_cooldown(checkpoint_path: Path, summaries_db: dict):
+    global LAST_REST_TIME
+    current_time = time.perf_counter()
+    elapsed_since_rest = current_time - LAST_REST_TIME
+    # 2 giờ = 7200 giây
+    if elapsed_since_rest >= 7200:
+        logger.info("⏳ [GPU COOLDOWN] Đã chạy liên tục 2 giờ. Tạm dừng chương trình 30 phút để thiết bị hạ nhiệt...")
+        save_checkpoint(checkpoint_path, summaries_db)
+        time.sleep(1800)
+        logger.info("🚀 [GPU COOLDOWN] Đã nghỉ xong 30 phút. Tiếp tục chạy benchmark...")
+        # Reset mốc thời gian sau khi nghỉ
+        LAST_REST_TIME = time.perf_counter()
+
 def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_path: Path):
     """Run model inference model-by-model to avoid VRAM overload on 4GB GPU."""
     
@@ -177,6 +193,7 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
             if (idx + 1) % 100 == 0:
                 logger.info(f"Extractive {config_key}: completed {idx+1}/{len(samples)}")
         save_checkpoint(checkpoint_path, summaries_db)
+        check_gpu_cooldown(checkpoint_path, summaries_db)
 
     # 2. ViT5-based configurations
     vit5_configs = ["vit5", "textrank_vit5", "lexrank_vit5", "lsa_vit5"]
@@ -208,7 +225,9 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 if (idx + 1) % 50 == 0:
                     logger.info(f"ViT5 {cfg}: completed {idx+1}/{len(samples)}")
                     save_checkpoint(checkpoint_path, summaries_db)
+                    check_gpu_cooldown(checkpoint_path, summaries_db)
             save_checkpoint(checkpoint_path, summaries_db)
+            check_gpu_cooldown(checkpoint_path, summaries_db)
         unload_abstractive_model("vit5")
 
     # 3. mT5 configuration
@@ -241,7 +260,9 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 if (idx + 1) % 50 == 0:
                     logger.info(f"mT5 {cfg}: completed {idx+1}/{len(samples)}")
                     save_checkpoint(checkpoint_path, summaries_db)
+                    check_gpu_cooldown(checkpoint_path, summaries_db)
             save_checkpoint(checkpoint_path, summaries_db)
+            check_gpu_cooldown(checkpoint_path, summaries_db)
         unload_abstractive_model("mt5")
 
     # 4. BARTPho-based configurations
@@ -274,7 +295,9 @@ def run_all_model_summaries(samples: list[dict], summaries_db: dict, checkpoint_
                 if (idx + 1) % 50 == 0:
                     logger.info(f"BARTPho {cfg}: completed {idx+1}/{len(samples)}")
                     save_checkpoint(checkpoint_path, summaries_db)
+                    check_gpu_cooldown(checkpoint_path, summaries_db)
             save_checkpoint(checkpoint_path, summaries_db)
+            check_gpu_cooldown(checkpoint_path, summaries_db)
         unload_abstractive_model("bartpho")
 
 def compute_sbert_metrics_batch(samples: list[dict], summaries_db: dict, checkpoint_path: Path):
@@ -682,7 +705,7 @@ Báo cáo khoa học tự động được tạo sau khi hoàn tất đánh giá
    * **Hybrid (Lai ghép):** Đạt sự cân bằng tối ưu giữa độ chính xác thông tin, tính trôi chảy và tốc độ xử lý.
 """
     
-    report_path = output_dir / "benchmark_report.md"
+    report_path = output_dir / f"benchmark_report_{samples_count}.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
     logger.info(f"Saved benchmark report to {report_path}")
@@ -696,9 +719,9 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    checkpoint_path = out_dir / "benchmark_checkpoint.json"
-    json_path = out_dir / "benchmark_1000_real.json"
-    csv_path = out_dir / "benchmark_1000_real.csv"
+    checkpoint_path = out_dir / f"benchmark_checkpoint_{args.samples}.json"
+    json_path = out_dir / f"benchmark_{args.samples}_real.json"
+    csv_path = out_dir / f"benchmark_{args.samples}_real.csv"
 
     t_start = time.perf_counter()
 
@@ -826,7 +849,7 @@ def main():
         "leaderboard_by_category": leaderboard_by_category
     }
     
-    leaderboard_only_path = out_dir / "benchmark_leaderboard_only.json"
+    leaderboard_only_path = out_dir / f"benchmark_leaderboard_only_{args.samples}.json"
     with open(leaderboard_only_path, "w", encoding="utf-8") as f:
         json.dump(output_payload_only, f, ensure_ascii=False, indent=2)
     logger.info(f"Saved lightweight leaderboard JSON to {leaderboard_only_path}")

@@ -55,14 +55,17 @@ const Compare = () => {
 
   const SAMPLES_PER_PAGE = 10;
 
-  const leaderboardQuery = useResearchLeaderboardQuery(leaderboardCategory, true);
-  const hybridQuery = useResearchHybridStudyQuery(true);
-  const reportQuery = useResearchReportQuery(true);
+  const [benchmarkSize, setBenchmarkSize] = useState(1000);
+
+  const leaderboardQuery = useResearchLeaderboardQuery(leaderboardCategory, benchmarkSize, true);
+  const hybridQuery = useResearchHybridStudyQuery('vie', benchmarkSize, true);
+  const reportQuery = useResearchReportQuery('vie', benchmarkSize, true);
   const samplesQuery = useResearchBenchmarkSamplesQuery(
     samplePage,
     SAMPLES_PER_PAGE,
     sampleCategory,
     sampleSearch,
+    benchmarkSize,
     activeTab === 'samples',
   );
 
@@ -165,7 +168,7 @@ const Compare = () => {
     setRunningBenchmark(true);
     setBenchmarkStatusMsg('Đang kích hoạt tiến trình benchmark nền...');
     try {
-      const res = await runResearchBenchmark();
+      const res = await runResearchBenchmark(2500);
       await invalidateAfterBenchmark(queryClient);
       setBenchmarkStatusMsg(res.message || 'Benchmark đã được kích hoạt chạy nền.');
       setTimeout(() => setBenchmarkStatusMsg(''), 5000);
@@ -348,14 +351,28 @@ const Compare = () => {
           <p className="ui-page-subtitle">Đánh giá hiệu năng, kiểm định độ tương đồng ROUGE/BERTScore và tài nguyên tính toán của các mô hình.</p>
         </div>
         
-        <button
-          onClick={handleRunBenchmark}
-          disabled={runningBenchmark}
-          className="ui-btn-primary py-2 px-4 text-xs font-bold shrink-0 flex items-center gap-2 cursor-pointer"
-        >
-          {runningBenchmark ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
-          Kích hoạt Benchmark tự động
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold text-[var(--text-secondary)]">{locale === 'vie' ? 'Quy mô:' : 'Size:'}</label>
+            <select
+              value={benchmarkSize}
+              onChange={(e) => setBenchmarkSize(Number(e.target.value))}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] focus:border-sky-500 outline-none transition-all cursor-pointer shadow-sm"
+            >
+              <option value={1000}>{locale === 'vie' ? '1.000 mẫu' : '1,000 samples'}</option>
+              <option value={2500}>{locale === 'vie' ? '2.500 mẫu (2 ngày)' : '2,500 samples'}</option>
+            </select>
+          </div>
+          
+          <button
+            onClick={handleRunBenchmark}
+            disabled={runningBenchmark}
+            className="ui-btn-primary py-2 px-4 text-xs font-bold shrink-0 flex items-center gap-2 cursor-pointer"
+          >
+            {runningBenchmark ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
+            Kích hoạt Benchmark tự động
+          </button>
+        </div>
       </div>
 
       {benchmarkStatusMsg && (

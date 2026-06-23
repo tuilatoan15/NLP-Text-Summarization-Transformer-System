@@ -741,19 +741,32 @@ def _get_fallback_samples() -> list[dict]:
         })
     return samples
 
-_cached_benchmark_data = None
-_cached_benchmark_mtime = 0.0
+_cached_benchmark_data = {}  # {size: data}
+_cached_benchmark_mtime = {}  # {size: mtime}
 
-_cached_leaderboard_only = None
-_cached_leaderboard_only_mtime = 0.0
+_cached_leaderboard_only = {}  # {size: data}
+_cached_leaderboard_only_mtime = {}  # {size: mtime}
 
-def _load_leaderboard_only() -> dict:
-    """Tải dữ liệu bảng xếp hạng từ benchmark_leaderboard_only.json siêu nhẹ."""
+def get_benchmark_paths(size: int = 1000):
+    if size != 1000:
+        real_path = PROJECT_ROOT / "storage" / "results" / f"benchmark_{size}_real.json"
+        leaderboard_path = PROJECT_ROOT / "storage" / "results" / f"benchmark_leaderboard_only_{size}.json"
+    else:
+        real_path = PROJECT_ROOT / "storage" / "results" / "benchmark_1000_real.json"
+        leaderboard_path = PROJECT_ROOT / "storage" / "results" / "benchmark_leaderboard_only.json"
+        
+    benchmark_file_path = real_path if real_path.exists() else (PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json")
+    return real_path, leaderboard_path, benchmark_file_path
+
+def _load_leaderboard_only(size: int = 1000) -> dict:
+    """Tải dữ liệu bảng xếp hạng từ benchmark_leaderboard_only_{size}.json siêu nhẹ."""
     global _cached_leaderboard_only, _cached_leaderboard_only_mtime
     
-    path = REAL_LEADERBOARD_ONLY_PATH
+    real_path, leaderboard_path, benchmark_file_path = get_benchmark_paths(size)
+    path = leaderboard_path
+    
     if not path.exists():
-        full_data = _load_benchmark_data()
+        full_data = _load_benchmark_data(size)
         return {
             "metadata": full_data.get("metadata", {}),
             "leaderboard": full_data.get("leaderboard", {}),
@@ -761,62 +774,70 @@ def _load_leaderboard_only() -> dict:
         }
         
     current_mtime = path.stat().st_mtime
-    if _cached_leaderboard_only is not None and current_mtime == _cached_leaderboard_only_mtime:
-        return _cached_leaderboard_only
+    if size in _cached_leaderboard_only and current_mtime == _cached_leaderboard_only_mtime.get(size, 0.0):
+        return _cached_leaderboard_only[size]
         
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            _cached_leaderboard_only = data
-            _cached_leaderboard_only_mtime = current_mtime
+            _cached_leaderboard_only[size] = data
+            _cached_leaderboard_only_mtime[size] = current_mtime
             
             # Recalculate composite scores to match active config dynamically
-            if "leaderboard" in _cached_leaderboard_only:
-                for key, model_data in _cached_leaderboard_only["leaderboard"].items():
+            if "leaderboard" in _cached_leaderboard_only[size]:
+                for key, model_data in _cached_leaderboard_only[size]["leaderboard"].items():
                     model_data["composite"] = _calculate_leaderboard_composite(model_data)
             
-            if "leaderboard_by_category" in _cached_leaderboard_only:
-                for cat, items in _cached_leaderboard_only["leaderboard_by_category"].items():
+            if "leaderboard_by_category" in _cached_leaderboard_only[size]:
+                for cat, items in _cached_leaderboard_only[size]["leaderboard_by_category"].items():
                     for model_data in items:
                         model_data["composite"] = _calculate_leaderboard_composite(model_data)
                         
-            return _cached_leaderboard_only
+            return _cached_leaderboard_only[size]
     except Exception as e:
-        logger.error(f"Error reading benchmark_leaderboard_only.json: {e}")
-        full_data = _load_benchmark_data()
+        logger.error(f"Error reading {path.name}: {e}")
+        full_data = _load_benchmark_data(size)
         return {
             "metadata": full_data.get("metadata", {}),
             "leaderboard": full_data.get("leaderboard", {}),
             "leaderboard_by_category": {}
         }
 
-def _load_benchmark_data() -> dict:
-    """Tải dữ liệu từ file leaderboard_benchmark.json, nếu không tồn tại hoặc lỗi thì dùng fallback data."""
+def _load_benchmark_data(size: int = 1000) -> dict:
+    """Tải dữ liệu từ file benchmark_{size}_real.json, nếu không tồn tại hoặc lỗi thì dùng fallback data."""
     global _cached_benchmark_data, _cached_benchmark_mtime
     
+    real_path, leaderboard_path, benchmark_file_path = get_benchmark_paths(size)
+    path = benchmark_file_path
+    
     current_mtime = 0.0
-    if BENCHMARK_FILE_PATH.exists():
-        current_mtime = BENCHMARK_FILE_PATH.stat().st_mtime
+    if path.exists():
+        current_mtime = path.stat().st_mtime
         
-    if _cached_benchmark_data is not None and current_mtime == _cached_benchmark_mtime:
-        return _cached_benchmark_data
+    if size in _cached_benchmark_data and current_mtime == _cached_benchmark_mtime.get(size, 0.0):
+        return _cached_benchmark_data[size]
         
     data = None
-    if BENCHMARK_FILE_PATH.exists():
+    if path.exists():
         try:
-            with open(BENCHMARK_FILE_PATH, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                _cached_benchmark_mtime = current_mtime
+                _cached_benchmark_mtime[size] = current_mtime
         except Exception as e:
-            logger.error(f"Error reading leaderboard_benchmark.json: {e}")
+            logger.error(f"Error reading {path.name}: {e}")
             
     if data is None:
         data = {
             "metadata": {
                 "timestamp": "2026-06-12T01:21:15",
-                "dataset_name": "nam194/vietnews (Baseline Dự phòng)",
-                "total_samples": 1000,
-                "categories": {"Short": 231, "Medium": 467, "Long": 215, "Very Long": 87}
+                "dataset_name": f"nam194/vietnews (Baseline Dự phòng {size} mẫu)",
+                "total_samples": size,
+                "categories": {
+                    "Short": int(size * 0.231),
+                    "Medium": int(size * 0.467),
+                    "Long": int(size * 0.215),
+                    "Very Long": int(size * 0.087)
+                }
             },
             "leaderboard": json.loads(json.dumps(FALLBACK_LEADERBOARD)),
             "samples": []
@@ -830,13 +851,14 @@ def _load_benchmark_data() -> dict:
     for key, model_data in data["leaderboard"].items():
         model_data["composite"] = _calculate_leaderboard_composite(model_data)
         
+    _cached_benchmark_data[size] = data
     return data
 
 
 @router.get("/benchmark/data")
-async def get_benchmark_data() -> dict:
+async def get_benchmark_data(size: int = 1000) -> dict:
     """Endpoint kế thừa tương thích ngược. Trả về thống kê tóm tắt so sánh."""
-    data = _load_leaderboard_only()
+    data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]
     
     # Convert sang cấu trúc cũ
@@ -863,19 +885,19 @@ async def get_benchmark_data() -> dict:
     }
 
 @router.get("/leaderboard")
-async def get_leaderboard() -> dict:
+async def get_leaderboard(size: int = 1000) -> dict:
     """Trả về bảng xếp hạng (Leaderboard) được tổng hợp đầy đủ từ dữ liệu thực tế."""
-    data = _load_leaderboard_only()
+    data = _load_leaderboard_only(size)
     return {
         "metadata": data["metadata"],
         "leaderboard": list(data["leaderboard"].values())
     }
 
 @router.get("/leaderboard/by-category")
-async def get_leaderboard_by_category(category: str) -> dict:
+async def get_leaderboard_by_category(category: str, size: int = 1000) -> dict:
     """Returns model leaderboard aggregated specifically for a category (Short, Medium, Long, Very Long)."""
     # Try lightweight pre-calculated stats first
-    data = _load_leaderboard_only()
+    data = _load_leaderboard_only(size)
     cat_normalized = category.lower().strip()
     cat_map = {"short": "Short", "medium": "Medium", "long": "Long", "very long": "Very Long"}
     mapped_cat = cat_map.get(cat_normalized)
@@ -893,7 +915,7 @@ async def get_leaderboard_by_category(category: str) -> dict:
             }
             
     # Fallback to loading full benchmark data and calculating on the fly
-    full_data = _load_benchmark_data()
+    full_data = _load_benchmark_data(size)
     samples = full_data.get("samples", [])
     
     if not samples:
@@ -970,10 +992,11 @@ async def get_benchmark_samples(
     page: int = 1,
     limit: int = 10,
     category: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    size: int = 1000
 ) -> dict:
     """Trả về danh sách mẫu test phục vụ tính năng duyệt dữ liệu trực quan."""
-    data = _load_benchmark_data()
+    data = _load_benchmark_data(size)
     samples = data.get("samples", [])
     
     if not samples:
@@ -1008,9 +1031,9 @@ async def get_benchmark_samples(
     }
 
 @router.get("/hybrid-study")
-async def get_hybrid_study(locale: str = "vie") -> dict:
+async def get_hybrid_study(locale: str = "vie", size: int = 1000) -> dict:
     """Phân tích so sánh 3 nhóm mô hình (Trích xuất, Sinh, Lai) trên bộ dữ liệu kiểm thử."""
-    data = _load_leaderboard_only()
+    data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]
     
     extractive_keys = ["textrank", "lexrank", "lsa"]
@@ -1054,9 +1077,9 @@ async def get_hybrid_study(locale: str = "vie") -> dict:
     }
 
 @router.get("/report")
-async def get_report(locale: str = "vie") -> dict:
+async def get_report(locale: str = "vie", size: int = 1000) -> dict:
     """Trả về báo cáo khoa học trình bày đầy đủ kết luận thực nghiệm dựa trên số liệu của 1000 mẫu test."""
-    data = _load_leaderboard_only()
+    data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]
     
     # Thu thập số liệu để chèn trực tiếp vào báo cáo
@@ -1295,12 +1318,12 @@ async def get_report(locale: str = "vie") -> dict:
         }
 
 @router.post("/benchmark/run")
-async def run_benchmark() -> dict:
+async def run_benchmark(samples: int = 10000) -> dict:
     """Kích hoạt tiến trình chạy lại benchmark thu thập dữ liệu trong luồng nền."""
     try:
         def worker():
             try:
-                cmd = [sys.executable or "python", "scripts/run_research_benchmark.py", "--samples", "1000", "--eval-real-count", "2"]
+                cmd = [sys.executable or "python", "scripts/run_research_benchmark.py", "--samples", str(samples)]
                 logger.info(f"Subprocess running benchmark rerun: {' '.join(cmd)}")
                 subprocess.Popen(cmd, cwd=str(PROJECT_ROOT))
             except Exception as exc:

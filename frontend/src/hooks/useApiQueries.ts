@@ -69,31 +69,31 @@ export function useAnalyticsDashboardQuery(timeRange: string, limit = 20) {
   );
 }
 
-export function useResearchLeaderboardQuery(category = 'All', enabled = true) {
+export function useResearchLeaderboardQuery(category = 'All', size = 1000, enabled = true) {
   return useLoggedQuery(
-    queryKeys.researchLeaderboard(category),
-    `GET /research/leaderboard${category !== 'All' ? `?category=${category}` : ''}`,
+    queryKeys.researchLeaderboard(category, size),
+    `GET /research/leaderboard${category !== 'All' ? `?category=${category}&` : '?'}size=${size}`,
     () => (category === 'All'
-      ? getResearchLeaderboard()
-      : getLeaderboardByCategory(category)),
+      ? getResearchLeaderboard(size)
+      : getLeaderboardByCategory(category, size)),
     enabled,
   );
 }
 
-export function useResearchHybridStudyQuery(locale = 'vie', enabled = true) {
+export function useResearchHybridStudyQuery(locale = 'vie', size = 1000, enabled = true) {
   return useLoggedQuery(
-    queryKeys.researchHybridStudy(locale),
-    `GET /research/hybrid-study?locale=${locale}`,
-    () => getResearchHybridStudy(locale),
+    queryKeys.researchHybridStudy(locale, size),
+    `GET /research/hybrid-study?locale=${locale}&size=${size}`,
+    () => getResearchHybridStudy(locale, size),
     enabled,
   );
 }
 
-export function useResearchReportQuery(locale = 'vie', enabled = true) {
+export function useResearchReportQuery(locale = 'vie', size = 1000, enabled = true) {
   return useLoggedQuery(
-    queryKeys.researchReport(locale),
-    `GET /research/report?locale=${locale}`,
-    () => getResearchReport(locale),
+    queryKeys.researchReport(locale, size),
+    `GET /research/report?locale=${locale}&size=${size}`,
+    () => getResearchReport(locale, size),
     enabled,
   );
 }
@@ -103,12 +103,13 @@ export function useResearchBenchmarkSamplesQuery(
   limit: number,
   category: string,
   search: string,
+  size = 1000,
   enabled = true,
 ) {
   return useLoggedQuery(
-    queryKeys.researchBenchmarkSamples(page, limit, category, search),
-    `GET /research/benchmark/samples?page=${page}`,
-    () => getResearchBenchmarkSamples(page, limit, category, search),
+    queryKeys.researchBenchmarkSamples(page, limit, category, search, size),
+    `GET /research/benchmark/samples?page=${page}&size=${size}`,
+    () => getResearchBenchmarkSamples(page, limit, category, search, size),
     enabled,
   );
 }

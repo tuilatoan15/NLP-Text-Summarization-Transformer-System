@@ -154,8 +154,8 @@ export async function exportPodcastTts(documentId: string): Promise<any> {
   return parseJson(response, 'Podcast TTS');
 }
 
-export async function getResearchLeaderboard(): Promise<any> {
-  const response = await fetch(`${API}/research/leaderboard`);
+export async function getResearchLeaderboard(size = 1000): Promise<any> {
+  const response = await fetch(`${API}/research/leaderboard?size=${size}`);
   return parseJson(response, 'Research leaderboard');
 }
 
@@ -164,10 +164,12 @@ export async function getResearchBenchmarkSamples(
   limit = 10,
   category = 'All',
   search = '',
+  size = 1000,
 ): Promise<any> {
   const url = new URL(`${API}/research/benchmark/samples`);
   url.searchParams.append('page', String(page));
   url.searchParams.append('limit', String(limit));
+  url.searchParams.append('size', String(size));
   if (category && category !== 'All') {
     url.searchParams.append('category', category);
   }
@@ -178,27 +180,29 @@ export async function getResearchBenchmarkSamples(
   return parseJson(response, 'Research benchmark samples');
 }
 
-export async function getResearchHybridStudy(locale?: string): Promise<any> {
+export async function getResearchHybridStudy(locale?: string, size = 1000): Promise<any> {
   const url = new URL(`${API}/research/hybrid-study`);
+  url.searchParams.append('size', String(size));
   if (locale) url.searchParams.append('locale', locale);
   const response = await fetch(url.toString());
   return parseJson(response, 'Research hybrid study');
 }
 
-export async function getResearchReport(locale?: string): Promise<any> {
+export async function getResearchReport(locale?: string, size = 1000): Promise<any> {
   const url = new URL(`${API}/research/report`);
+  url.searchParams.append('size', String(size));
   if (locale) url.searchParams.append('locale', locale);
   const response = await fetch(url.toString());
   return parseJson(response, 'Research report');
 }
 
-export async function runResearchBenchmark(): Promise<any> {
-  const response = await fetch(`${API}/research/benchmark/run`, { method: 'POST' });
+export async function runResearchBenchmark(samples = 10000): Promise<any> {
+  const response = await fetch(`${API}/research/benchmark/run?samples=${samples}`, { method: 'POST' });
   return parseJson(response, 'Run research benchmark');
 }
 
-export async function getLeaderboardByCategory(category: string): Promise<any> {
-  const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}`);
+export async function getLeaderboardByCategory(category: string, size = 1000): Promise<any> {
+  const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}&size=${size}`);
   return parseJson(response, 'Leaderboard by category');
 }
 
