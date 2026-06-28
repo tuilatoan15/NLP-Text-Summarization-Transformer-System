@@ -94,9 +94,9 @@ const Overview = () => {
       try {
         const { getResearchLeaderboard, getResearchHybridStudy, getResearchReport } = await import('../services/apiService');
         const { queryKeys } = await import('../lib/queryKeys');
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchLeaderboard('All'), queryFn: getResearchLeaderboard, staleTime: 5 * 60 * 1000 });
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchHybridStudy(), queryFn: getResearchHybridStudy, staleTime: 5 * 60 * 1000 });
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchReport(), queryFn: getResearchReport, staleTime: 5 * 60 * 1000 });
+        queryClient.prefetchQuery({ queryKey: queryKeys.researchLeaderboard('All'), queryFn: () => getResearchLeaderboard(), staleTime: 5 * 60 * 1000 });
+        queryClient.prefetchQuery({ queryKey: queryKeys.researchHybridStudy(), queryFn: () => getResearchHybridStudy(), staleTime: 5 * 60 * 1000 });
+        queryClient.prefetchQuery({ queryKey: queryKeys.researchReport(), queryFn: () => getResearchReport(), staleTime: 5 * 60 * 1000 });
       } catch (err) { console.warn('Failed to prefetch background queries:', err); }
     };
     const timer = setTimeout(prefetch, 800);

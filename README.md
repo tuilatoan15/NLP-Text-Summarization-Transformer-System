@@ -13,6 +13,15 @@ Hệ thống tích hợp song song các thuật toán trích xuất (Extractive)
 
 ---
 
+## 📌 Mục Lục
+- [📌 Tính Năng Cốt Lõi](#-tính-năng-cốt-lõi)
+- [📊 Kết Quả Thực Nghiệm & So Sánh](#-kết-quả-thực-nghiệm--so-sánh-empirical-benchmark-results)
+- [📁 Cấu Trúc Thư Mục Dự Án](#-cấu-trúc-thư-mục-dự-án-project-structure)
+- [🛠️ Hướng Dẫn Cài Đặt](#%EF%B8%8F-hướng-dẫn-cài-đặt-installation-guide)
+- [🔌 Tài Liệu API Tóm Tắt Nhanh](#-tài-liệu-api-tóm-tắt-nhanh)
+
+---
+
 ## 📌 Tính Năng Cốt Lõi
 
 1. **Tóm tắt văn bản đa thuật toán:**
@@ -30,30 +39,30 @@ Hệ thống tích hợp song song các thuật toán trích xuất (Extractive)
 
 ## 📊 Kết Quả Thực Nghiệm & So Sánh (Empirical Benchmark Results)
 
-Dưới đây là kết quả thực nghiệm chi tiết thu được khi chạy thử nghiệm trên tập mẫu kiểm thử **1.000 tài liệu VietNews** (seed=42) trên cấu hình cục bộ (GPU NVIDIA GeForce RTX 3050 Ti Laptop 4GB VRAM, RAM 16GB):
+Dưới đây là kết quả thực nghiệm chi tiết thu được khi chạy thử nghiệm trên tập mẫu kiểm thử **5.000 tài liệu VietNews** (seed=42) trên cấu hình cục bộ (CPU Intel64 Family 6 Model 154 Stepping 3, RAM 15.63GB, GPU NVIDIA GeForce RTX 3050 Ti Laptop 4GB VRAM):
 
 | Hạng | Mô hình / Giải thuật | Nhóm | ROUGE-1 | ROUGE-2 | ROUGE-L | BLEU | BERTScore | Sem. Sim | Latency (s) | Composite Score |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 | **TEXTRANK** | Extractive | 0.4149 | 0.2056 | 0.2804 | 0.0758 | 0.7199 | 0.8172 | **0.0100s** | **0.6141** |
-| 2 | **LEXRANK** | Extractive | 0.4225 | 0.2085 | 0.2815 | 0.0777 | 0.7207 | 0.8178 | **0.0061s** | **0.6140** |
-| 3 | **LSA** | Extractive | 0.4584 | 0.1994 | 0.2913 | 0.0782 | 0.7099 | 0.8026 | **0.0064s** | **0.6051** |
-| 4 | **VIT5** | Abstractive | 0.5968 | 0.2822 | 0.3827 | 0.1588 | 0.7074 | 0.7473 | 2.4933s | **0.5800** |
-| 5 | **TEXTRANK ➔ VIT5** | Hybrid | 0.5839 | 0.2611 | 0.3678 | 0.1431 | 0.7025 | 0.7389 | 1.6442s | **0.5734** |
-| 6 | **LEXRANK ➔ VIT5** | Hybrid | 0.5811 | 0.2587 | 0.3665 | 0.1408 | 0.7014 | 0.7380 | 1.6140s | **0.5723** |
-| 7 | **LSA ➔ VIT5** | Hybrid | 0.5638 | 0.2303 | 0.3456 | 0.1217 | 0.6932 | 0.7252 | 1.5663s | **0.5613** |
-| 8 | **BARTPHO** | Abstractive | 0.5392 | 0.1964 | 0.3341 | 0.0808 | 0.6783 | 0.7746 | 3.3798s | **0.5582** |
-| 9 | **TEXTRANK ➔ MT5** | Hybrid | 0.5464 | 0.2193 | 0.3341 | 0.1141 | 0.6894 | 0.7232 | 1.9941s | **0.5559** |
-| 10 | **TEXTRANK ➔ BARTPHO**| Hybrid | 0.5302 | 0.1888 | 0.3278 | 0.0779 | 0.6771 | 0.7655 | 1.8637s | **0.5549** |
-| 11 | **LEXRANK ➔ BARTPHO** | Hybrid | 0.5287 | 0.1873 | 0.3260 | 0.0771 | 0.6771 | 0.7653 | 1.6847s | **0.5540** |
-| 12 | **LEXRANK ➔ MT5** | Hybrid | 0.5436 | 0.2173 | 0.3324 | 0.1118 | 0.6883 | 0.7200 | 1.8936s | **0.5538** |
-| 13 | **MT5** | Abstractive | 0.5484 | 0.2104 | 0.3295 | 0.1069 | 0.6862 | 0.7136 | 2.7282s | **0.5506** |
-| 14 | **LSA ➔ MT5** | Hybrid | 0.5242 | 0.1922 | 0.3177 | 0.0948 | 0.6805 | 0.7089 | 1.7027s | **0.5456** |
-| 15 | **LSA ➔ BARTPHO** | Hybrid | 0.5102 | 0.1621 | 0.3074 | 0.0677 | 0.6692 | 0.7500 | 1.4959s | **0.5422** |
+| 1 | **LEXRANK** | Extractive | 0.4258 | 0.2102 | 0.2835 | 0.0773 | 0.7210 | 0.8169 | **0.0093s** | **0.6143** |
+| 2 | **TEXTRANK** | Extractive | 0.4198 | 0.2076 | 0.2820 | 0.0758 | 0.7196 | 0.8165 | **0.0198s** | **0.6139** |
+| 3 | **LSA** | Extractive | 0.4604 | 0.2008 | 0.2931 | 0.0775 | 0.7101 | 0.8008 | **0.0088s** | **0.6051** |
+| 4 | **VIT5** | Abstractive | 0.5953 | 0.2778 | 0.3802 | 0.1548 | 0.7067 | 0.7457 | 2.6564s | **0.5788** |
+| 5 | **TEXTRANK ➔ VIT5** | Hybrid | 0.5819 | 0.2610 | 0.3676 | 0.1421 | 0.7013 | 0.7387 | 1.9019s | **0.5730** |
+| 6 | **LEXRANK ➔ VIT5** | Hybrid | 0.5822 | 0.2600 | 0.3663 | 0.1412 | 0.7011 | 0.7386 | 1.8453s | **0.5726** |
+| 7 | **LSA ➔ VIT5** | Hybrid | 0.5615 | 0.2296 | 0.3458 | 0.1202 | 0.6925 | 0.7248 | 1.7865s | **0.5612** |
+| 8 | **BARTPHO** | Abstractive | 0.5414 | 0.1995 | 0.3356 | 0.0798 | 0.6784 | 0.7761 | 5.1996s | **0.5594** |
+| 9 | **TEXTRANK ➔ MT5** | Hybrid | 0.5474 | 0.2201 | 0.3345 | 0.1117 | 0.6884 | 0.7225 | 2.6709s | **0.5557** |
+| 10 | **LEXRANK ➔ MT5** | Hybrid | 0.5462 | 0.2187 | 0.3332 | 0.1107 | 0.6880 | 0.7212 | 2.7206s | **0.5549** |
+| 11 | **TEXTRANK ➔ BARTPHO**| Hybrid | 0.5275 | 0.1879 | 0.3262 | 0.0749 | 0.6759 | 0.7653 | 2.4403s | **0.5537** |
+| 12 | **MT5** | Abstractive | 0.5508 | 0.2158 | 0.3330 | 0.1105 | 0.6870 | 0.7174 | 3.2492s | **0.5532** |
+| 13 | **LEXRANK ➔ BARTPHO** | Hybrid | 0.5269 | 0.1867 | 0.3253 | 0.0744 | 0.6758 | 0.7647 | 2.3137s | **0.5531** |
+| 14 | **LSA ➔ MT5** | Hybrid | 0.5219 | 0.1924 | 0.3183 | 0.0946 | 0.6800 | 0.7059 | 3.0224s | **0.5447** |
+| 15 | **LSA ➔ BARTPHO** | Hybrid | 0.5093 | 0.1671 | 0.3104 | 0.0675 | 0.6703 | 0.7518 | 2.1272s | **0.5438** |
 
 ### Nhận Xét Kết Luận Nghiên Cứu:
-1. **Chất lượng sinh vượt trội của ViT5:** Mô hình `VIT5` (Fine-tuned) đạt điểm ROUGE-L cao nhất (**0.3827**), sinh văn bản cực kỳ mượt mà và tự nhiên.
-2. **Hiệu năng của mô hình Hybrid:** Các mô hình lai (Hybrid) giảm thiểu hơn **35% - 50% độ trễ (latency)** so với mô hình sinh thuần túy (ví dụ: `BARTPho` giảm từ 3.38s xuống còn **1.68s** khi kết hợp với `LexRank`). Đồng thời, cơ chế trích lọc câu chính ở Giai đoạn 1 giúp triệt tiêu hoàn toàn nguy cơ sập VRAM GPU.
-3. **Thế mạnh của Extractive:** Đạt độ trung thực thông tin (`Faithfulness = 100%`) và tốc độ đáp ứng siêu nhanh (<10ms).
+1. **Chất lượng sinh vượt trội của ViT5:** Mô hình `VIT5` (Fine-tuned) vẫn duy trì điểm ROUGE-L cao nhất (**0.3802**), sinh văn bản mượt mà, trôi chảy và đạt điểm BLEU vượt trội (**0.1548**).
+2. **Hiệu năng của mô hình Hybrid:** Các mô hình lai (Hybrid) giúp tối ưu hóa đáng kể thời gian suy diễn. Ví dụ, `BARTPho` khi chạy độc lập có độ trễ lên tới 5.20s nhưng khi kết hợp qua mô hình lai `LEXRANK ➔ BARTPHO` độ trễ giảm xuống còn **2.31s** (rút ngắn hơn **55% thời gian**). Đồng thời, cơ chế lọc câu chính ở Giai đoạn 1 loại bỏ triệt để nguy cơ tràn VRAM GPU.
+3. **Thế mạnh của Extractive:** Các phương pháp trích xuất (`LEXRANK`, `TEXTRANK`) dẫn đầu bảng xếp hạng Composite Score (**0.6143** và **0.6139**) nhờ độ trễ cực thấp (dưới **20ms**), độ phủ ngữ nghĩa tốt và đạt độ trung thực thông tin tuyệt đối (`Faithfulness = 100%`).
 
 ---
 
@@ -69,6 +78,7 @@ NLP-Text-Summarization-Transformer-System/
 ├── evaluation/                     # Module tính toán metrics (ROUGE, BLEU, BERTScore, Hallucination)
 ├── frontend/                       # Client Single Page Application (React + Vite + Zustand + Tailwind)
 ├── loaders/                        # Trích xuất và đọc tài liệu PDF, DOCX, TXT
+├── notebooks/                      # Các notebook huấn luyện Colab cho ViT5 / BARTPho / mT5
 ├── pipeline/                       # Pipeline tóm tắt lai ghép (hybrid_summarizer.py)
 ├── scripts/                        # Các script chạy huấn luyện (train.py) và benchmark tự động
 └── storage/                        # Cơ sở dữ liệu SQLite cục bộ, ChromaDB index và kết quả thực nghiệm

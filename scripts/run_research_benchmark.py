@@ -53,33 +53,72 @@ HYBRID_KEYS = [
 ]
 ALL_CONFIGS = MODEL_KEYS + HYBRID_KEYS
 
-def load_test_samples(limit: int = 1000) -> list[dict]:
-    """Loads validation/test split from nam194/vietnews, randomly selects samples using seed=42."""
+def load_test_samples(limit: int = 1000, extend_from: str | None = None) -> tuple[list[dict], dict]:
+    """Loads test samples, extending from a previous benchmark run if provided."""
     from datasets import load_dataset
+    import json
+    
+    existing_samples = []
+    initial_db = {}
+    
+    if extend_from:
+        extend_path = Path(extend_from)
+        if extend_path.exists():
+            logger.info(f"Loading existing benchmark from {extend_from} to extend...")
+            try:
+                with open(extend_path, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                
+                old_samples = old_data.get("samples", [])
+                logger.info(f"Loaded {len(old_samples)} samples from existing benchmark.")
+                
+                for s in old_samples:
+                    sample_dict = {
+                        "id": s["id"],
+                        "title": s.get("title", "Không có tiêu đề"),
+                        "category": s.get("category", "Medium"),
+                        "article": s["article"],
+                        "summary": s["summary"]
+                    }
+                    existing_samples.append(sample_dict)
+                    initial_db[s["id"]] = s.get("models", {})
+            except Exception as e:
+                logger.error(f"Error reading extend_from file: {e}")
+        else:
+            logger.warning(f"File {extend_from} not found, starting fresh.")
+            
+    if len(existing_samples) >= limit:
+        logger.info(f"Existing samples count ({len(existing_samples)}) is already >= target limit ({limit}). No new samples needed.")
+        return existing_samples[:limit], {k: initial_db[k] for k in [s["id"] for s in existing_samples[:limit]]}
+        
+    needed_count = limit - len(existing_samples)
+    logger.info(f"Need to load {needed_count} new samples to reach total of {limit}...")
+    
     logger.info("Attempting to load 'nam194/vietnews' test dataset...")
     dataset = load_dataset("nam194/vietnews", split="test")
     
-    # Filter valid samples first to ensure high-fidelity inputs
     valid_samples = []
+    existing_articles = {s["article"].strip() for s in existing_samples}
+    
     for idx, item in enumerate(dataset):
         article = item.get("article", "").strip()
         summary = item.get("abstract", "").strip() or item.get("title", "").strip()
         if article and len(article.split()) >= 30 and summary:
-            valid_samples.append({
-                "article": article,
-                "summary": summary,
-                "title": item.get("title", "Không có tiêu đề")
-            })
+            if article not in existing_articles:
+                valid_samples.append({
+                    "article": article,
+                    "summary": summary,
+                    "title": item.get("title", "Không có tiêu đề")
+                })
             
-    logger.info(f"Filtered {len(valid_samples)} valid samples from 'nam194/vietnews'")
+    logger.info(f"Filtered {len(valid_samples)} valid NEW samples from 'nam194/vietnews'")
     
-    # Select randomly using seed 42
     random.seed(42)
-    sampled = random.sample(valid_samples, min(limit, len(valid_samples)))
+    sampled_new = random.sample(valid_samples, min(needed_count, len(valid_samples)))
     
-    # Assign category labels and IDs
-    for idx, s in enumerate(sampled):
-        s["id"] = f"benchmark_sample_{idx+1:04d}"
+    start_idx = len(existing_samples) + 1
+    for idx, s in enumerate(sampled_new):
+        s["id"] = f"benchmark_sample_{start_idx + idx:04d}"
         w_count = len(s["article"].split())
         if w_count < 250:
             s["category"] = "Short"
@@ -90,7 +129,9 @@ def load_test_samples(limit: int = 1000) -> list[dict]:
         else:
             s["category"] = "Very Long"
             
-    return sampled
+    total_samples = existing_samples + sampled_new
+    logger.info(f"Total active samples in benchmark: {len(total_samples)} ({len(existing_samples)} old + {len(sampled_new)} new)")
+    return total_samples, initial_db
 
 def run_model_inference(model_key: str, text: str) -> tuple[str, float]:
     """Run actual inference for one model on input text, return summary and elapsed time."""
@@ -158,12 +199,12 @@ def check_gpu_cooldown(checkpoint_path: Path, summaries_db: dict):
     global LAST_REST_TIME
     current_time = time.perf_counter()
     elapsed_since_rest = current_time - LAST_REST_TIME
-    # 2 giờ = 7200 giây
-    if elapsed_since_rest >= 7200:
-        logger.info("⏳ [GPU COOLDOWN] Đã chạy liên tục 2 giờ. Tạm dừng chương trình 30 phút để thiết bị hạ nhiệt...")
+    # 1 giờ = 3600 giây
+    if elapsed_since_rest >= 3600:
+        logger.info("⏳ [GPU COOLDOWN] Đã chạy liên tục 1 giờ. Tạm dừng chương trình 5 phút để thiết bị hạ nhiệt...")
         save_checkpoint(checkpoint_path, summaries_db)
-        time.sleep(1800)
-        logger.info("🚀 [GPU COOLDOWN] Đã nghỉ xong 30 phút. Tiếp tục chạy benchmark...")
+        time.sleep(300)
+        logger.info("🚀 [GPU COOLDOWN] Đã nghỉ xong 5 phút. Tiếp tục chạy benchmark...")
         # Reset mốc thời gian sau khi nghỉ
         LAST_REST_TIME = time.perf_counter()
 
@@ -543,6 +584,11 @@ def compute_remaining_cpu_metrics(samples: list[dict], summaries_db: dict, check
             if "metrics" not in val:
                 val["metrics"] = {}
             metrics = val["metrics"]
+            
+            # Skip computing if overlap metrics are already computed
+            if "rouge1" in metrics and "composite" in metrics:
+                continue
+                
             summary = val["summary"]
             latency = val["latency"]
             comp_ratio = val["compression_ratio"]
@@ -714,6 +760,7 @@ def main():
     parser = argparse.ArgumentParser(description="Real NLP Benchmarking script.")
     parser.add_argument("--samples", type=int, default=1000, help="Total number of samples")
     parser.add_argument("--output-dir", default="storage/results", help="Directory to save output files")
+    parser.add_argument("--extend-from", default=None, help="Path to previous benchmark JSON to extend from")
     args = parser.parse_args()
     
     out_dir = Path(args.output_dir)
@@ -726,10 +773,21 @@ def main():
     t_start = time.perf_counter()
 
     # 1. Load test samples
-    samples = load_test_samples(args.samples)
+    samples, initial_db = load_test_samples(args.samples, args.extend_from)
     
     # 2. Load checkpoint if available
     summaries_db = load_checkpoint(checkpoint_path)
+    
+    # Merge initial_db into summaries_db if not already present
+    for s_id, models in initial_db.items():
+        if s_id not in summaries_db:
+            summaries_db[s_id] = models
+        else:
+            for m_key, m_val in models.items():
+                if m_key not in summaries_db[s_id]:
+                    summaries_db[s_id][m_key] = m_val
+                    
+    save_checkpoint(checkpoint_path, summaries_db)
     
     # 3. Generate summaries
     run_all_model_summaries(samples, summaries_db, checkpoint_path)

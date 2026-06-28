@@ -294,6 +294,7 @@ const Benchmark = () => {
           >
             <option value={1000}>{lang === 'vie' ? '1.000 mẫu (Tiêu chuẩn)' : '1,000 samples (Standard)'}</option>
             <option value={2500}>{lang === 'vie' ? '2.500 mẫu (Quy mô vừa - 2 ngày)' : '2,500 samples (Medium-scale)'}</option>
+            <option value={5000}>{lang === 'vie' ? '5.000 mẫu (Quy mô lớn)' : '5,000 samples (Large-scale)'}</option>
           </select>
         </div>
       </div>

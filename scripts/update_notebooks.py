@@ -33,7 +33,7 @@ def update_notebook(path: Path) -> bool:
 
 
 if __name__ == "__main__":
-    notebooks = list(ROOT.glob("*.ipynb"))
+    notebooks = list((ROOT / "notebooks").glob("*.ipynb"))
     print(f"Found {len(notebooks)} notebooks")
     for nb in notebooks:
         changed = update_notebook(nb)

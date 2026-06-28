@@ -203,6 +203,11 @@ def _generate_one(
     use_fp16 = loaded.fp16
 
     prefixed = _prefix_text(key, text)
+    # BARTPho syllable-based model tokenizer does not support word segmentation underscores ('_')
+    # and treats them as <unk>, which causes word gluing upon skip_special_tokens=True decoding.
+    if key == "bartpho":
+        prefixed = prefixed.replace("_", " ")
+
     encoded = tokenizer(
         prefixed,
         return_tensors="pt",

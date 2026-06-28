@@ -544,7 +544,7 @@ def main():
             display_name=config["display_name"],
             use_fast=config["use_fast"]
         )
-        path = ROOT / config["filename"]
+        path = ROOT / "notebooks" / config["filename"]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(notebook, f, ensure_ascii=False, indent=2)
         print(f"Generated: {config['filename']}")

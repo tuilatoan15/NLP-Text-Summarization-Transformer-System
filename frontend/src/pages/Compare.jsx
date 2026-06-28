@@ -361,6 +361,7 @@ const Compare = () => {
             >
               <option value={1000}>{locale === 'vie' ? '1.000 mẫu' : '1,000 samples'}</option>
               <option value={2500}>{locale === 'vie' ? '2.500 mẫu (2 ngày)' : '2,500 samples'}</option>
+              <option value={5000}>{locale === 'vie' ? '5.000 mẫu' : '5,000 samples'}</option>
             </select>
           </div>
           

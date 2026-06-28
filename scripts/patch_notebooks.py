@@ -31,7 +31,7 @@ NOTEBOOKS = [
 ]
 
 for nb_name in NOTEBOOKS:
-    nb_path = ROOT / nb_name
+    nb_path = ROOT / "notebooks" / nb_name
     if not nb_path.exists():
         print(f"[SKIP] {nb_name} - not found")
         continue
