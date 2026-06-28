@@ -2,7 +2,7 @@ import React, { useMemo, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import {
-  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Award, CheckCircle2, Sparkles, Trash2
+  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Award, CheckCircle2, Sparkles, Trash2, HelpCircle, Info
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { usePlaygroundStore, filesFingerprint } from '../stores/playgroundStore';
@@ -10,15 +10,7 @@ import { extractFilesFromUpload, streamCompareSummaries, fetchCompareHistoryList
 import { invalidateAfterSummarization, invalidateFileExtractCache } from '../lib/cacheInvalidation';
 import { queryKeys } from '../lib/queryKeys';
 import { cacheLog } from '../lib/cacheLogger';
-
-const ALGORITHMS = [
-  { key: 'textrank', name: 'TextRank', group: 'extractive', color: '#14b8a6' },
-  { key: 'lexrank', name: 'LexRank', group: 'extractive', color: '#38bdf8' },
-  { key: 'lsa', name: 'LSA', group: 'extractive', color: '#84cc16' },
-  { key: 'vit5', name: 'ViT5', group: 'abstractive', color: '#f59e0b' },
-  { key: 'mt5', name: 'mT5', group: 'abstractive', color: '#e879f9' },
-  { key: 'bartpho', name: 'BARTPho', group: 'abstractive', color: '#fb7185' },
-];
+import { AlgorithmSelector, ALGORITHMS } from '../components/AlgorithmSelector';
 
 const STATUS = {
   idle: 'idle',
@@ -43,56 +35,7 @@ function initialRunState(keys) {
   return Object.fromEntries(keys.map(key => [key, { status: STATUS.idle, result: null, error: null }]));
 }
 
-const AlgorithmSelector = ({ selected, setSelected, disabled }) => {
-  const { t } = useApp();
-  const groupLabel = (group) => (group === 'abstractive' ? t('groupAbstractive') : t('groupExtractive'));
-
-  const toggle = (key) => {
-    if (disabled) return;
-    setSelected(current =>
-      current.includes(key) ? current.filter(item => item !== key) : [...current, key]
-    );
-  };
-
-  return (
-    <div className="space-y-4">
-
-      {['extractive', 'abstractive'].map(group => (
-        <section key={group} className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
-              {groupLabel(group)}
-            </h3>
-            <span className="text-[10px] font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/20 px-2 py-0.5 rounded-full">
-              {selected.filter(key => byKey(key).group === group).length}/3
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {ALGORITHMS.filter(item => item.group === group).map(item => {
-              const isSelected = selected.includes(item.key);
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => toggle(item.key)}
-                  className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-sky-50 dark:bg-sky-950/20 border-sky-400 dark:border-sky-800 text-sky-600 dark:text-sky-400 font-bold shadow-sm'
-                      : 'bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-sky-300 dark:hover:border-sky-800'
-                  } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full mb-1.5" style={{ background: item.color }} />
-                  <span className="text-[11px] font-bold truncate w-full">{item.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-};
+// AlgorithmSelector has been moved to a separate TSX component.
 
 const StatusBadge = ({ status }) => {
   const { t } = useApp();
@@ -192,6 +135,12 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
             <span className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/10 text-sky-600 dark:text-sky-400 border border-sky-250/20">
               BERTScore {pct(metric(row, 'bertscore_f1'))}
             </span>
+            <span className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/10 text-teal-600 dark:text-teal-400 border border-teal-250/20">
+              Faith {pct(metric(row, 'faithfulness'))}
+            </span>
+            <span className="px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/10 text-rose-600 dark:text-rose-400 border border-rose-250/20">
+              Bịa đặt {pct(metric(row, 'hallucination'))}
+            </span>
             <span className="px-2 py-1 rounded-lg bg-[var(--bg-muted)] text-[var(--text-muted)]">
               {t('pgWords', { count: row.word_count ?? 0 })} từ
             </span>
@@ -243,7 +192,59 @@ const RunProgress = ({ runningKey, completed, total, loading }) => {
 
 const ComparisonTable = ({ rows }) => {
   const { t } = useApp();
+  const [sortConfig, setSortConfig] = useState({ key: 'composite_score', direction: 'desc' }); // Mặc định xếp composite giảm dần
+
   if (!rows.length) return null;
+
+  const handleSort = (columnKey) => {
+    let direction = 'desc';
+    if (sortConfig.key === columnKey && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key: columnKey, direction });
+  };
+
+  const getSortValue = (row, key) => {
+    switch (key) {
+      case 'algorithm':
+        return row.algorithm || '';
+      case 'group':
+        return byKey(row.key).group || '';
+      case 'rouge1':
+        return metric(row, 'rouge1');
+      case 'rougeL':
+        return metric(row, 'rougeL');
+      case 'bleu':
+        return metric(row, 'bleu');
+      case 'bertscore_f1':
+        return metric(row, 'bertscore_f1');
+      case 'semantic_similarity':
+        return metric(row, 'semantic_similarity');
+      case 'faithfulness':
+        return metric(row, 'faithfulness');
+      case 'hallucination':
+        return metric(row, 'hallucination');
+      case 'processing_time':
+        return row.processing_time ?? 0;
+      case 'composite_score':
+        return metric(row, 'composite_score') || metric(row, 'combined_score') || 0;
+      default:
+        return 0;
+    }
+  };
+
+  const sortedRows = [...rows].sort((a, b) => {
+    const valA = getSortValue(a, sortConfig.key);
+    const valB = getSortValue(b, sortConfig.key);
+
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return sortConfig.direction === 'asc'
+        ? valA.localeCompare(valB)
+        : valB.localeCompare(valA);
+    }
+
+    return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+  });
 
   return (
     <motion.div
@@ -260,18 +261,43 @@ const ComparisonTable = ({ rows }) => {
         <table className="w-full text-xs">
           <thead className="ui-table-head border-b">
             <tr>
-              <th className="px-4 py-3 text-left">{t('colModel')}</th>
-              <th className="px-4 py-3">{t('colRouge1')}</th>
-              <th className="px-4 py-3">{t('colRouge2')}</th>
-              <th className="px-4 py-3">{t('colRougeL')}</th>
-              <th className="px-4 py-3">{t('colBert')}</th>
-              <th className="px-4 py-3 text-sky-600 dark:text-sky-400 font-bold bg-sky-500/5">{t('colCombined')}</th>
-              <th className="px-4 py-3">{t('colLength')}</th>
-              <th className="px-4 py-3">{t('colTime')}</th>
+              <th onClick={() => handleSort('algorithm')} className="px-4 py-3 text-left cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center">Mô hình</span>
+              </th>
+              <th onClick={() => handleSort('group')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">Nhóm</span>
+              </th>
+              <th onClick={() => handleSort('rouge1')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">ROUGE-1</span>
+              </th>
+              <th onClick={() => handleSort('rougeL')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">ROUGE-L</span>
+              </th>
+              <th onClick={() => handleSort('bleu')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">BLEU</span>
+              </th>
+              <th onClick={() => handleSort('bertscore_f1')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">BERTScore</span>
+              </th>
+              <th onClick={() => handleSort('semantic_similarity')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">Semantic</span>
+              </th>
+              <th onClick={() => handleSort('faithfulness')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">Faithfulness</span>
+              </th>
+              <th onClick={() => handleSort('hallucination')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">Hallucination</span>
+              </th>
+              <th onClick={() => handleSort('processing_time')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
+                <span className="inline-flex items-center justify-center">Độ trễ</span>
+              </th>
+              <th onClick={() => handleSort('composite_score')} className="px-4 py-3 text-center cursor-pointer bg-sky-500/5 hover:bg-sky-500/10 select-none group transition-all text-sky-600 dark:text-sky-400 font-bold">
+                <span className="inline-flex items-center justify-center">Composite</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-subtle)] font-medium">
-            {rows.map(row => (
+            {sortedRows.map(row => (
               <tr key={row.key} className="ui-table-row">
                 <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">
                   <span className="flex items-center gap-2">
@@ -279,17 +305,28 @@ const ComparisonTable = ({ rows }) => {
                     {row.algorithm}
                   </span>
                 </td>
+                <td className="px-4 py-3 text-center">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    byKey(row.key).group === 'hybrid'
+                      ? 'bg-purple-50 dark:bg-purple-950/20 text-purple-600 dark:text-purple-400 border border-purple-200/20'
+                      : byKey(row.key).group === 'abstractive'
+                        ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-200/20'
+                        : 'bg-teal-50 dark:bg-teal-950/20 text-teal-600 dark:text-teal-400 border border-teal-200/20'
+                  }`}>
+                    {byKey(row.key).group}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rouge1'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rouge2'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rougeL'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'bleu'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'bertscore_f1'))}</td>
-                <td className="px-4 py-3 text-center text-sky-700 dark:text-sky-300 font-mono font-bold bg-sky-500/5">{pct(metric(row, 'combined_score'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'semantic_similarity'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'faithfulness'))}</td>
+                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono" style={{ color: metric(row, 'hallucination') > 0.05 ? '#ef4444' : metric(row, 'hallucination') > 0.02 ? '#f59e0b' : '#10b981' }}>{pct(metric(row, 'hallucination'))}</td>
                 <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">
-                  {row.length_ratio_percent != null ? `${row.length_ratio_percent}%` : '—'}
+                  {(row.processing_time ?? 0).toFixed(3)}s
                 </td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">
-                  {(row.processing_time ?? 0).toFixed(2)}s
-                </td>
+                <td className="px-4 py-3 text-center text-sky-700 dark:text-sky-300 font-mono font-bold bg-sky-500/5">{pct(metric(row, 'composite_score') || metric(row, 'combined_score'))}</td>
               </tr>
             ))}
           </tbody>
@@ -341,6 +378,28 @@ export default function Playground() {
     const targetWords = Math.round(srcWords * (lengthRatio / 100));
     return { source: srcWords, reference: refWords, target: targetWords };
   }, [textInput, refInput, lengthRatio]);
+
+  const estimatedTime = useMemo(() => {
+    let time = 0;
+    selectedAlgorithms.forEach(key => {
+      const algo = ALGORITHMS.find(a => a.key === key);
+      if (!algo) return;
+      if (algo.group === 'extractive') time += 0.02;
+      else if (algo.group === 'abstractive') time += 2.6;
+      else if (algo.group === 'hybrid') time += 2.0;
+    });
+    return Math.round(time * 100) / 100;
+  }, [selectedAlgorithms]);
+
+  const absOrHybridCount = useMemo(() => {
+    return selectedAlgorithms.filter(key => {
+      const algo = ALGORITHMS.find(a => a.key === key);
+      return algo && (algo.group === 'abstractive' || algo.group === 'hybrid');
+    }).length;
+  }, [selectedAlgorithms]);
+
+  const hasInput = textInput.trim().length > 0 || files.length > 0;
+  const isRunDisabled = loading || selectedAlgorithms.length === 0 || !hasInput;
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -515,40 +574,76 @@ export default function Playground() {
       </div>
 
       {/* Top Control Panel (Cấu hình thử nghiệm) */}
-      <div className="ui-card p-5 bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm space-y-5">
-        <div className="flex items-center justify-between border-b border-[var(--border)]/60 pb-3">
+      <div className="ui-card p-6 bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--border)]/60 pb-3 gap-3">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5">
             <SlidersHorizontal size={14} className="text-sky-500" />
             Cấu hình thử nghiệm
           </h2>
           
-          <div className="flex gap-2.5 items-center">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => setSelectedAlgorithms(ALGORITHMS.map(item => item.key))}
-              className="text-[10px] font-extrabold text-sky-600 hover:text-sky-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            >
-              Chọn tất cả
-            </button>
-            <span className="text-[10px] text-[var(--text-faint)] font-bold">|</span>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => setSelectedAlgorithms([])}
-              className="text-[10px] font-extrabold text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            >
-              Bỏ chọn tất cả
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Presets */}
+            <div className="flex items-center bg-[var(--bg-muted)]/40 p-0.5 rounded-lg border border-[var(--border)] text-[9px] font-bold">
+              <span className="px-2 text-[var(--text-secondary)]">Presets:</span>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setSelectedAlgorithms(['textrank', 'lexrank', 'lsa'])}
+                className="px-2 py-1 rounded hover:bg-sky-500/10 text-sky-600 dark:text-sky-400 cursor-pointer disabled:opacity-40"
+              >
+                Nhanh
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setSelectedAlgorithms(['textrank', 'lexrank', 'vit5'])}
+                className="px-2 py-1 rounded hover:bg-sky-500/10 text-sky-600 dark:text-sky-400 cursor-pointer disabled:opacity-40"
+              >
+                Cân bằng
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setSelectedAlgorithms(ALGORITHMS.map(a => a.key))}
+                className="px-2 py-1 rounded hover:bg-sky-500/10 text-sky-600 dark:text-sky-400 cursor-pointer disabled:opacity-40"
+              >
+                Đầy đủ
+              </button>
+            </div>
+
+            <span className="text-[10px] text-[var(--text-faint)] font-bold hidden sm:inline">|</span>
+
+            {/* Chọn tất cả / Bỏ chọn tất cả */}
+            <div className="flex gap-2.5 items-center text-[10px] font-extrabold">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setSelectedAlgorithms(ALGORITHMS.map(item => item.key))}
+                className="text-sky-600 hover:text-sky-700 disabled:opacity-40 cursor-pointer"
+              >
+                Chọn tất cả
+              </button>
+              <span className="text-[10px] text-[var(--text-faint)] font-bold">|</span>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setSelectedAlgorithms([])}
+                className="text-red-500 hover:text-red-600 disabled:opacity-40 cursor-pointer"
+              >
+                Bỏ chọn tất cả
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Column Left (9 spans): File upload and algorithm selection */}
-          <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Left Box: File Upload */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--text-secondary)]">
+        {/* Layout 2 cột mới */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Cột trái (35% ~ lg:col-span-4): Upload area + Tóm tắt cấu hình (Sticky) */}
+          <div className="lg:col-span-4 lg:sticky lg:top-6 self-start space-y-4">
+            
+            {/* Upload Area */}
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold uppercase tracking-wider text-[var(--text-secondary)]">
                 Tài liệu đầu vào
               </label>
               
@@ -558,12 +653,12 @@ export default function Playground() {
                   onDragOver={handleDrag}
                   onDragLeave={handleDrag}
                   onDrop={handleDrop}
-                  className={`border border-dashed rounded-xl p-5 text-center cursor-pointer transition-all relative flex flex-col items-center justify-center group ${
+                  className={`border border-dashed rounded-xl p-4 text-center cursor-pointer transition-all relative flex flex-col items-center justify-center group ${
                     dragActive
-                      ? 'border-sky-500 bg-sky-500/5 ring-4 ring-sky-500/10'
+                      ? 'border-sky-500 bg-sky-500/5 ring-4 ring-sky-500/10 font-bold'
                       : 'border-[var(--border)] bg-[var(--bg-muted)]/10 hover:border-sky-400 hover:bg-sky-500/5'
                   }`}
-                  style={{ minHeight: '140px' }}
+                  style={{ minHeight: '110px' }}
                 >
                   <input
                     type="file"
@@ -572,94 +667,137 @@ export default function Playground() {
                     onChange={handleFileSelect}
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
-                  <div className="p-3 bg-sky-50 dark:bg-sky-950/40 rounded-full text-sky-500 mb-2 transition-transform group-hover:scale-110 duration-300">
-                    <UploadCloud size={24} className="animate-bounce" />
+                  <div className="p-2 bg-sky-50 dark:bg-sky-950/40 rounded-full text-sky-500 mb-1 transition-transform group-hover:scale-105 duration-300">
+                    <UploadCloud size={20} />
                   </div>
-                  <span className="text-xs font-bold text-[var(--text-primary)]">Tải lên tài liệu của bạn</span>
-                  <span className="text-[10px] text-[var(--text-muted)] mt-1">Kéo thả hoặc click chọn file PDF, DOCX, TXT</span>
+                  <span className="text-[11px] font-bold text-[var(--text-primary)]">Tải tài liệu</span>
+                  <span className="text-[9px] text-[var(--text-muted)] mt-0.5">Kéo thả PDF, DOCX, TXT</span>
                 </div>
               ) : (
-                <div className="border rounded-xl p-4 text-center bg-gradient-to-br from-emerald-500/5 to-teal-500/5 border-emerald-500/20 dark:border-emerald-500/10 relative flex flex-col items-center justify-center min-h-[140px] shadow-inner">
-                  <div className="absolute top-2.5 right-2.5">
-                    <span className="text-[8px] uppercase tracking-wider font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-250/20 px-2 py-0.5 rounded-full">
+                <div className="border rounded-xl p-3 text-center bg-gradient-to-br from-emerald-500/5 to-teal-500/5 border-emerald-500/20 dark:border-emerald-500/10 relative flex flex-col items-center justify-center min-h-[110px] shadow-inner">
+                  <div className="absolute top-2 right-2">
+                    <span className="text-[8px] uppercase tracking-wider font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-250/20 px-1.5 py-0.5 rounded-full">
                       Đã tải lên
                     </span>
                   </div>
-                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-full text-emerald-500 mb-2">
-                    <FileText size={20} className="animate-pulse" />
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 rounded-full text-emerald-500 mb-1.5">
+                    <FileText size={18} className="animate-pulse" />
                   </div>
-                  <span className="text-xs font-bold text-[var(--text-primary)] truncate max-w-full px-4">
+                  <span className="text-[11px] font-bold text-[var(--text-primary)] truncate max-w-full px-2">
                     {files[0].name}
-                  </span>
-                  <span className="text-[9px] text-[var(--text-faint)] mt-0.5 font-bold">
-                    {(files[0].size / 1024).toFixed(1)} KB
                   </span>
                   <button
                     onClick={clearFiles}
-                    className="mt-3 px-3 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-[10px] font-extrabold transition-all cursor-pointer border border-red-500/20 active:scale-95"
+                    className="mt-2 px-2.5 py-0.5 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-[9px] font-extrabold transition-all cursor-pointer border border-red-500/20"
                   >
-                    Hủy tải lên
+                    Hủy
                   </button>
                 </div>
               )}
               {extracting && (
-                <div className="flex items-center gap-2 text-[10px] font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/20 px-3 py-2 rounded-xl border border-sky-100 dark:border-sky-900/50">
-                  <Loader2 size={12} className="animate-spin" />
+                <div className="flex items-center gap-1.5 text-[9px] font-bold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/20 px-2.5 py-1.5 rounded-lg border border-sky-100 dark:border-sky-900/50">
+                  <Loader2 size={10} className="animate-spin" />
                   <span>{extractProgress}</span>
                 </div>
               )}
             </div>
 
-            {/* Right Box: Algorithm Selector */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--text-secondary)]">
-                Lựa chọn thuật toán
-              </label>
-              <AlgorithmSelector selected={selectedAlgorithms} setSelected={setSelectedAlgorithms} disabled={loading} />
-            </div>
-          </div>
-
-          {/* Column Right (3 spans): Action & Stats Summary */}
-          <div className="lg:col-span-3 flex flex-col justify-between min-h-[140px] gap-4 pt-6 lg:pt-0">
-            {/* Stats Summary Card */}
-            <div className="ui-card p-3 bg-[var(--bg-muted)]/30 border-[var(--border)] rounded-xl space-y-2 flex-grow flex flex-col justify-center">
-              <div className="text-[9px] font-extrabold text-[var(--text-faint)] uppercase tracking-wider mb-1">
+            {/* Stats Summary Panel */}
+            <div className={`ui-card p-4 border rounded-xl space-y-3 transition-colors ${
+              estimatedTime > 30 
+                ? 'border-orange-350 bg-orange-500/5 dark:border-orange-800' 
+                : 'bg-[var(--bg-muted)]/30 border-[var(--border)]'
+            }`}>
+              <div className="text-[9px] font-extrabold text-[var(--text-faint)] uppercase tracking-wider">
                 Tóm tắt cấu hình
               </div>
+              
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[var(--text-secondary)] font-medium">Đã chọn:</span>
                   <span className="font-extrabold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/20 px-2 py-0.5 rounded-md">
-                    {selectedAlgorithms.length} thuật toán
+                    {selectedAlgorithms.length} giải thuật
                   </span>
                 </div>
+                
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-[var(--text-secondary)] font-medium">Nguồn:</span>
                   <span className="font-extrabold text-[var(--text-primary)]">
                     {files.length > 0 ? 'File tài liệu' : textInput.trim() ? `${wordCounts.source} từ` : 'Trống'}
                   </span>
                 </div>
+
+                {/* Ước tính thời gian chạy */}
+                <div className="flex justify-between items-center text-xs border-t border-[var(--border)]/60 pt-2">
+                  <span className="text-[var(--text-secondary)] font-medium flex items-center gap-1">
+                    Ước tính chạy:
+                    <HelpCircle size={10} className="text-[var(--text-faint)] cursor-help" title="Extractive: ~0.02s | Hybrid: ~2.0s | Abstractive: ~2.6s mỗi thuật toán" />
+                  </span>
+                  <span className={`font-extrabold px-2 py-0.5 rounded-md ${
+                    estimatedTime > 30
+                      ? 'text-orange-700 bg-orange-100 dark:text-orange-400 dark:bg-orange-950/30'
+                      : 'text-slate-700 bg-slate-100 dark:text-slate-350 dark:bg-slate-800'
+                  }`}>
+                    ~{estimatedTime}s
+                  </span>
+                </div>
               </div>
+
+              {/* Cảnh báo thời gian chạy lâu (>30s) */}
+              {estimatedTime > 30 && (
+                <div className="p-2.5 rounded-lg bg-orange-100 dark:bg-orange-950/20 text-[10px] text-orange-850 dark:text-orange-400 border border-orange-200/50 leading-relaxed font-medium">
+                  ⚠️ Tổng thời gian ước tính vượt quá 30 giây. Nên giảm bớt các mô hình sinh để có kết quả nhanh hơn.
+                </div>
+              )}
+
+              {/* Cảnh báo chạy GPU tuần tự */}
+              {absOrHybridCount >= 2 && (
+                <div className="p-2.5 rounded-lg bg-sky-50 dark:bg-sky-955/20 text-[10px] text-sky-850 dark:text-sky-400 border border-sky-200/20 leading-relaxed font-medium flex gap-1 items-start">
+                  <Info size={12} className="shrink-0 text-sky-500 mt-0.5" />
+                  <span>Có thể chạy lâu trên GPU đơn vì các mô hình Transformer chạy tuần tự.</span>
+                </div>
+              )}
             </div>
 
-            {/* Run Button */}
-            <button
-              onClick={handleRun}
-              disabled={loading || selectedAlgorithms.length === 0 || !textInput.trim()}
-              className="w-full py-3.5 rounded-xl font-extrabold text-xs bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white shadow-md hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Đang xử lý NLP...</span>
-                </>
-              ) : (
-                <>
-                  <Play size={14} className="fill-white/10" />
-                  <span>Chạy so sánh ({selectedAlgorithms.length})</span>
-                </>
+            {/* Run Button Container with Tooltip for Disabled state */}
+            <div className="relative group/run">
+              <button
+                onClick={handleRun}
+                disabled={isRunDisabled}
+                className="w-full py-3 rounded-xl font-extrabold text-xs bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white shadow-md hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Đang xử lý NLP...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play size={14} className="fill-white/10" />
+                    <span>Chạy so sánh ({selectedAlgorithms.length})</span>
+                  </>
+                )}
+              </button>
+
+              {/* Tooltip khi nút chạy bị disable */}
+              {isRunDisabled && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 bg-slate-950 text-white text-[10px] rounded-lg shadow-xl opacity-0 group-hover/run:opacity-100 pointer-events-none transition-opacity duration-200 leading-normal text-center z-15 border border-slate-800 font-bold">
+                  {selectedAlgorithms.length === 0
+                    ? "Vui lòng chọn ít nhất 1 thuật toán để so sánh."
+                    : "Vui lòng nhập văn bản trực tiếp hoặc tải lên tài liệu đầu vào trước khi chạy."}
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-slate-950" />
+                </div>
               )}
-            </button>
+            </div>
+
+          </div>
+
+          {/* Cột phải (65% ~ lg:col-span-8): Algorithm Selector */}
+          <div className="lg:col-span-8 space-y-2">
+            <label className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--text-secondary)]">
+              Lựa chọn thuật toán
+            </label>
+            <AlgorithmSelector selected={selectedAlgorithms} setSelected={setSelectedAlgorithms} disabled={loading} />
           </div>
         </div>
       </div>

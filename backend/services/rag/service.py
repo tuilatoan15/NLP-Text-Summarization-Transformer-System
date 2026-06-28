@@ -721,8 +721,44 @@ class RAGChatService:
             model_key = _pick_available_model()
             if model_key:
                 profile = GENERATION_PROFILES[model_key]
-                summary = _run_transformer_generate(model_key, prompt, profile)
-                model_used = model_key
+                
+                # Trích xuất văn bản tóm tắt thô của từng tài liệu
+                current_summaries = []
+                for s, doc_id in zip(individual_summaries, document_ids):
+                    cleaned_s = s.replace(f"--- Tóm tắt tài liệu (ID: {doc_id}): ---\n", "").strip()
+                    if cleaned_s:
+                        current_summaries.append(cleaned_s)
+                
+                if current_summaries:
+                    logger.info("🌳 Bắt đầu tóm tắt phân cấp đệ quy cho %d tài liệu bằng model local: %s", len(current_summaries), model_key)
+                    step = 1
+                    while len(current_summaries) > 1:
+                        next_summaries = []
+                        logger.info("🌳 Vòng tóm tắt phân cấp %d: Số lượng bản tóm tắt hiện tại là %d", step, len(current_summaries))
+                        
+                        for i in range(0, len(current_summaries), 2):
+                            if i + 1 < len(current_summaries):
+                                pair_text = f"Bản tóm tắt 1:\n{current_summaries[i]}\n\nBản tóm tắt 2:\n{current_summaries[i+1]}"
+                                pair_prompt = (
+                                    "Hãy viết một bản tóm tắt kết hợp nội dung của hai văn bản dưới đây một cách logic và ngắn gọn:\n\n"
+                                    f"{pair_text}\n\n"
+                                    "Bản tóm tắt kết hợp tiếng Việt:"
+                                )
+                                pair_summary = _run_transformer_generate(model_key, pair_prompt, profile)
+                                if not pair_summary or len(pair_summary.split()) < 10:
+                                    logger.warning("⚠️ Lỗi sinh tóm tắt cặp ở vòng %d, dùng phương án ghép thô", step)
+                                    pair_summary = f"{current_summaries[i]}\n{current_summaries[i+1]}"
+                                next_summaries.append(pair_summary)
+                            else:
+                                next_summaries.append(current_summaries[i])
+                        
+                        current_summaries = next_summaries
+                        step += 1
+                    
+                    summary = current_summaries[0]
+                    model_used = model_key
+                else:
+                    summary = ""
 
         if not summary:
             summary = "\n\n".join(individual_summaries)

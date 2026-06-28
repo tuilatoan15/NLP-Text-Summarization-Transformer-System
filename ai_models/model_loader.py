@@ -218,11 +218,12 @@ class ModelRegistry:
         with MODEL_LOAD_LOCK:
             tokenizer = self._load_tokenizer(algorithm, model_path)
 
-            load_kwargs: dict[str, Any] = {"low_cpu_mem_usage": True}
+            load_kwargs: dict[str, Any] = {}
             use_8bit = getattr(config, "USE_8BIT", False)
             use_4bit = getattr(config, "USE_4BIT", False)
 
             if use_4bit:
+                load_kwargs["low_cpu_mem_usage"] = True
                 try:
                     from transformers import BitsAndBytesConfig
                     load_kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -240,6 +241,7 @@ class ModelRegistry:
                     if self.fp16:
                         load_kwargs["torch_dtype"] = torch.float16
             elif use_8bit:
+                load_kwargs["low_cpu_mem_usage"] = True
                 try:
                     from transformers import BitsAndBytesConfig
                     load_kwargs["quantization_config"] = BitsAndBytesConfig(

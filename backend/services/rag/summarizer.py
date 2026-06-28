@@ -158,7 +158,7 @@ def _run_transformer_generate(
         logger.error("❌ Transformer generate [%s] lỗi: %s", model_key, exc)
         return ""
 def _run_llm_api(prompt: str, generator_type: str) -> str:
-    """Gọi LLM API tương ứng để sinh văn bản (có retry khi bị rate-limit)."""
+    """Gọi LLM API tương ứng để sinh văn bản (có retry + rate-limit throttling)."""
     import requests
     import time
     from .rag_config import (
@@ -169,12 +169,15 @@ def _run_llm_api(prompt: str, generator_type: str) -> str:
         OLLAMA_API_URL,
         OLLAMA_MODEL,
     )
+    from .agent import _wait_for_rate_limit
 
     MAX_RETRIES = 3
-    BASE_DELAY = 2  # giây
+    BASE_DELAY = 5  # giây (tăng từ 2 lên 5 để tránh retry quá nhanh)
 
     for attempt in range(MAX_RETRIES + 1):
         try:
+            _wait_for_rate_limit()
+
             if generator_type == "gemini":
                 if not GEMINI_API_KEY:
                     raise ValueError("GEMINI_API_KEY chưa được cấu hình trong .env")
@@ -245,7 +248,7 @@ def _run_llm_api(prompt: str, generator_type: str) -> str:
 
         except requests.exceptions.HTTPError as exc:
             if exc.response is not None and exc.response.status_code == 429 and attempt < MAX_RETRIES:
-                delay = BASE_DELAY * (2 ** attempt)  # 2s → 4s → 8s
+                delay = BASE_DELAY * (2 ** attempt)  # 5s → 10s → 20s
                 logger.warning(
                     "⏳ Rate-limited [%s] — retry %d/%d sau %ds...",
                     generator_type, attempt + 1, MAX_RETRIES, delay
@@ -435,7 +438,13 @@ class RAGTransformerSummarizer:
             model_key = _pick_available_model()
             if model_key:
                 profile = GENERATION_PROFILES[model_key]
-                answer = _run_transformer_generate(model_key, prompt, profile)
+                # Tối giản prompt cho local model (BARTPho/ViT5/mT5) để tránh lỗi lặp lại system instructions
+                local_prompt = (
+                    f"Ngữ cảnh:\n{full_context}\n\n"
+                    f"Hãy trích xuất và tóm tắt thông tin từ ngữ cảnh trên để trả lời câu hỏi: {question}\n"
+                    "Trả lời:"
+                )
+                answer = _run_transformer_generate(model_key, local_prompt, profile)
 
         if not answer or len(answer.split()) < 3:
             # Fallback: trả về câu liên quan nhất từ context

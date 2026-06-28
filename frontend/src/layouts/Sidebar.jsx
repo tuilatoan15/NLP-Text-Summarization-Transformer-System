@@ -33,8 +33,8 @@ const navGroups = [
     labelVie: 'QUẢN TRỊ HỆ THỐNG',
     labelEng: 'SYSTEM & DATA',
     items: [
-      { nameKey: 'navDocuments', path: '/documents', icon: FileText, labelVie: 'Tập dữ liệu', labelEng: 'Datasets' },
-      { nameKey: 'navBenchmark', path: '/benchmark', icon: Cpu, labelVie: 'Mô hình AI', labelEng: 'Models' },
+      // { nameKey: 'navDocuments', path: '/documents', icon: FileText, labelVie: 'Phân tích tài liệu', labelEng: 'Datasets' },
+      { nameKey: 'navBenchmark', path: '/benchmark', icon: Cpu, labelVie: 'Kết quả Benchmark', labelEng: 'Models' },
       { nameKey: 'navSettings', path: '/settings', icon: Settings, labelVie: 'Cấu hình hệ thống', labelEng: 'Settings' },
     ],
   },
@@ -49,10 +49,9 @@ const NavItem = ({ item, collapsed }) => {
     <NavLink
       to={item.path}
       className={({ isActive }) =>
-        `group relative flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${
-          isActive
-            ? 'text-[var(--accent)] font-semibold bg-[var(--accent-muted)]'
-            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-muted)]'
+        `group relative flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive
+          ? 'text-[var(--accent)] font-semibold bg-[var(--accent-muted)]'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-muted)]'
         } ${collapsed ? 'justify-center px-2' : ''}`
       }
     >

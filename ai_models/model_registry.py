@@ -9,7 +9,7 @@ from typing import Literal
 from src import config
 
 
-AlgorithmGroup = Literal["extractive", "abstractive"]
+AlgorithmGroup = Literal["extractive", "abstractive", "hybrid"]
 
 
 @dataclass(frozen=True)
@@ -90,12 +90,77 @@ ABSTRACTIVE_ALGORITHMS: dict[str, AlgorithmConfig] = {
 }
 
 
+HYBRID_ALGORITHMS: dict[str, AlgorithmConfig] = {
+    "textrank-vit5": AlgorithmConfig(
+        key="textrank-vit5",
+        name="TextRank ➔ ViT5",
+        group="hybrid",
+        description="Two-stage pipeline: TextRank filtering followed by ViT5 abstractive rewrite.",
+    ),
+    "lexrank-vit5": AlgorithmConfig(
+        key="lexrank-vit5",
+        name="LexRank ➔ ViT5",
+        group="hybrid",
+        description="Two-stage pipeline: LexRank filtering followed by ViT5 abstractive rewrite.",
+    ),
+    "lsa-vit5": AlgorithmConfig(
+        key="lsa-vit5",
+        name="LSA ➔ ViT5",
+        group="hybrid",
+        description="Two-stage pipeline: LSA filtering followed by ViT5 abstractive rewrite.",
+    ),
+    "textrank-mt5": AlgorithmConfig(
+        key="textrank-mt5",
+        name="TextRank ➔ mT5",
+        group="hybrid",
+        description="Two-stage pipeline: TextRank filtering followed by mT5 abstractive rewrite.",
+    ),
+    "lexrank-mt5": AlgorithmConfig(
+        key="lexrank-mt5",
+        name="LexRank ➔ mT5",
+        group="hybrid",
+        description="Two-stage pipeline: LexRank filtering followed by mT5 abstractive rewrite.",
+    ),
+    "lsa-mt5": AlgorithmConfig(
+        key="lsa-mt5",
+        name="LSA ➔ mT5",
+        group="hybrid",
+        description="Two-stage pipeline: LSA filtering followed by mT5 abstractive rewrite.",
+    ),
+    "textrank-bartpho": AlgorithmConfig(
+        key="textrank-bartpho",
+        name="TextRank ➔ BARTPho",
+        group="hybrid",
+        description="Two-stage pipeline: TextRank filtering followed by BARTPho abstractive rewrite.",
+    ),
+    "lexrank-bartpho": AlgorithmConfig(
+        key="lexrank-bartpho",
+        name="LexRank ➔ BARTPho",
+        group="hybrid",
+        description="Two-stage pipeline: LexRank filtering followed by BARTPho abstractive rewrite.",
+    ),
+    "lsa-bartpho": AlgorithmConfig(
+        key="lsa-bartpho",
+        name="LSA ➔ BARTPho",
+        group="hybrid",
+        description="Two-stage pipeline: LSA filtering followed by BARTPho abstractive rewrite.",
+    ),
+}
+
+
 ALGORITHMS: dict[str, AlgorithmConfig] = {
     **EXTRACTIVE_ALGORITHMS,
     **ABSTRACTIVE_ALGORITHMS,
+    **HYBRID_ALGORITHMS,
 }
 
-DEFAULT_ALGORITHMS = ["textrank", "lexrank", "lsa", "tfidf", "vit5", "mt5", "bartpho"]
+DEFAULT_ALGORITHMS = [
+    "textrank", "lexrank", "lsa", "tfidf",
+    "vit5", "mt5", "bartpho",
+    "textrank-vit5", "lexrank-vit5", "lsa-vit5",
+    "textrank-mt5", "lexrank-mt5", "lsa-mt5",
+    "textrank-bartpho", "lexrank-bartpho", "lsa-bartpho"
+]
 
 
 def normalize_algorithm_key(key: str) -> str:
@@ -118,6 +183,12 @@ def resolve_algorithm(key: str) -> AlgorithmConfig:
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in ALGORITHMS:
+        alt_1 = normalized.replace("-", "_")
+        if alt_1 in ALGORITHMS:
+            return ALGORITHMS[alt_1]
+        alt_2 = normalized.replace("_", "-")
+        if alt_2 in ALGORITHMS:
+            return ALGORITHMS[alt_2]
         raise KeyError(f"Unsupported algorithm: {key}")
     return ALGORITHMS[normalized]
 

@@ -260,10 +260,12 @@ def _generate_one(
     require_vietnamese = key in {"vit5", "mt5"}
     decoded = tokenizer.batch_decode(
         generated_ids,
-        skip_special_tokens=True,
+        skip_special_tokens=(key != "bartpho"),
         clean_up_tokenization_spaces=is_t5_family,
     )
     raw = decoded[0] if decoded else ""
+    if key == "bartpho":
+        raw = raw.replace("<unk>", " ")
     raw = unicodedata.normalize("NFC", raw)
     summary = clean_generated_summary(raw)
 
@@ -284,10 +286,12 @@ def _generate_one(
         fallback_ids = _run_model_generate(fallback_preset)
         decoded_fallback = tokenizer.batch_decode(
             fallback_ids,
-            skip_special_tokens=True,
+            skip_special_tokens=(key != "bartpho"),
             clean_up_tokenization_spaces=is_t5_family,
         )
         raw_fallback = decoded_fallback[0] if decoded_fallback else ""
+        if key == "bartpho":
+            raw_fallback = raw_fallback.replace("<unk>", " ")
         raw_fallback = unicodedata.normalize("NFC", raw_fallback)
         summary_fallback = clean_generated_summary(raw_fallback)
 

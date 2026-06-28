@@ -40,7 +40,7 @@ type PlaygroundState = {
   loadFromHistoryRecord: (record: Record<string, any>) => void;
 };
 
-const initialAlgorithms = ['textrank', 'lexrank', 'lsa', 'vit5', 'mt5', 'bartpho'];
+const initialAlgorithms = ['textrank', 'lexrank', 'vit5'];
 
 const initialState = {
   text: SAMPLE_TEXT,

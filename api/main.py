@@ -15,6 +15,10 @@ Changes vs old version
 
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore", message="dtype.*align", category=DeprecationWarning)
+
+
 import asyncio
 import json
 import re
