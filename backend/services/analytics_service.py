@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ def _load_all_results() -> list[dict]:
     files = sorted(RESULT_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
     results: list[dict] = []
     for path in files:
+        if not re.match(r"^[0-9a-f]{32}$", path.stem):
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             # Normalize dictionary-based results (from legacy/benchmark runs) to list-of-dicts
@@ -95,7 +98,7 @@ def list_recent_results(limit: int = 20) -> list[dict]:
             {
                 "result_id": record.get("result_id"),
                 "created_at": record.get("created_at"),
-                "type": record.get("type", "compare"),
+                "type": record.get("type"),
                 "input_words": meta.get("input_words", 0),
                 "target_length_ratio": meta.get("target_length_ratio"),
                 "target_words": meta.get("target_words"),

@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, field_validator
 from src import config
 from src.analytics import get_dashboard_payload, list_recent_results
 from src.dashboard import stream_compare, summarize_all
-from src.storage import persist_compare_result
+from src.storage import persist_compare_result, RESULT_DIR
 from src.file_parser import SUPPORTED_EXTENSIONS, extract_text_from_file
 from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
@@ -642,6 +642,42 @@ async def extract_files_text(files: list[UploadFile] = File(...)):
     """Extract text from uploaded files without summarizing them."""
     text, documents = await _read_uploads(files)
     return {"text": text, "documents": documents}
+
+
+@app.get("/summarize/history", tags=["Summarization"])
+def get_summarize_history(limit: int = 20):
+    """Retrieve list of recent summarization runs of type 'compare'."""
+    all_results = list_recent_results(limit=100)
+    compare_results = [r for r in all_results if r.get("type") == "compare"]
+    return compare_results[:limit]
+
+
+@app.get("/summarize/history/{result_id}", tags=["Summarization"])
+def get_summarize_history_detail(result_id: str):
+    """Retrieve full details of a specific comparison run."""
+    path = RESULT_DIR / f"{result_id}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Result not found")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/summarize/history/{result_id}", tags=["Summarization"])
+def delete_summarize_history_record(result_id: str):
+    """Delete a specific comparison run from storage."""
+    path = RESULT_DIR / f"{result_id}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Result not found")
+    try:
+        path.unlink()
+        from src.storage import invalidate_dashboard_cache
+        invalidate_dashboard_cache()
+        return {"status": "success", "message": f"Deleted result {result_id}"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ─────────────────────────── Dev entrypoint ────────────────────────────────

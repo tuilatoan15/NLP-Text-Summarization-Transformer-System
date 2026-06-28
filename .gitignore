@@ -63,4 +63,8 @@ Thumbs.db
 # Docs artifacts & diagrams (not to be pushed)
 docs/*.md
 docs/*.xml
+docs/*.docx
+docs/*.doc
+docs/*.txt
+
 

@@ -29,14 +29,19 @@ _NULL_BERTSCORE = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
 _NULL_HEAVY: dict = {"bertscore": _NULL_BERTSCORE, "bertscore_f1": 0.0, "semantic_similarity": 0.0}
 
 
-def compute_rouge(prediction: str, reference: str, use_stemmer: bool = False) -> dict[str, float]:
-    if not prediction or not prediction.strip() or not reference or not reference.strip():
-        return {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+@lru_cache(maxsize=256)
+def _compute_rouge_cached(prediction: str, reference: str, use_stemmer: bool = False) -> tuple[tuple[str, float], ...]:
     scorer = _ROUGE_SCORER if not use_stemmer else rouge_scorer.RougeScorer(
         ["rouge1", "rouge2", "rougeL", "rougeLsum"], use_stemmer=True,
     )
     scores = scorer.score(clean_text(reference), clean_text(prediction))
-    return {key: round(float(value.fmeasure), 4) for key, value in scores.items()}
+    return tuple((key, round(float(value.fmeasure), 4)) for key, value in scores.items())
+
+
+def compute_rouge(prediction: str, reference: str, use_stemmer: bool = False) -> dict[str, float]:
+    if not prediction or not prediction.strip() or not reference or not reference.strip():
+        return {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0, "rougeLsum": 0.0}
+    return dict(_compute_rouge_cached(prediction, reference, use_stemmer))
 
 
 def compute_rouge_batch(
@@ -63,6 +68,7 @@ def _ngram_counts(tokens: list[str], n: int) -> dict[tuple[str, ...], int]:
     return counts
 
 
+@lru_cache(maxsize=256)
 def compute_bleu(prediction: str, reference: str, max_order: int = 4) -> float:
     pred_tokens = tokenize_words(prediction)
     ref_tokens = tokenize_words(reference)
@@ -109,16 +115,13 @@ def _lexical_f1(prediction: str, reference: str) -> float:
     return round(2 * precision * recall / (precision + recall), 4)
 
 
-def compute_bertscore(
+@lru_cache(maxsize=256)
+def _compute_bertscore_cached(
     prediction: str,
     reference: str,
-    lang: str = config.BERTSCORE_LANG,
-    model_type: str = config.BERTSCORE_MODEL,
-) -> dict[str, float]:
-    if not prediction or not prediction.strip() or not reference or not reference.strip():
-        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-    if clean_text(prediction) == clean_text(reference):
-        return {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+    lang: str,
+    model_type: str,
+) -> tuple[float, float, float]:
     try:
         from bert_score import score as bert_score_fn
         import torch
@@ -133,15 +136,29 @@ def compute_bertscore(
                 rescale_with_baseline=False,
                 device=device,
             )
-        return {
-            "precision": round(float(precision[0]), 4),
-            "recall": round(float(recall[0]), 4),
-            "f1": round(float(f1[0]), 4),
-        }
+        return (
+            round(float(precision[0]), 4),
+            round(float(recall[0]), 4),
+            round(float(f1[0]), 4),
+        )
     except Exception as exc:
         logger.warning("BERTScore unavailable, using lexical F1 fallback: %s", exc)
         val = _lexical_f1(prediction, reference)
-        return {"precision": val, "recall": val, "f1": val}
+        return (val, val, val)
+
+
+def compute_bertscore(
+    prediction: str,
+    reference: str,
+    lang: str = config.BERTSCORE_LANG,
+    model_type: str = config.BERTSCORE_MODEL,
+) -> dict[str, float]:
+    if not prediction or not prediction.strip() or not reference or not reference.strip():
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    if clean_text(prediction) == clean_text(reference):
+        return {"precision": 1.0, "recall": 1.0, "f1": 1.0}
+    p, r, f = _compute_bertscore_cached(prediction, reference, lang, model_type)
+    return {"precision": p, "recall": r, "f1": f}
 
 
 _SBERT_LOAD_LOCK = threading.Lock()
@@ -169,17 +186,15 @@ def _load_sentence_transformer(model_name: str):
     return _SBERT_CACHE[model_name]
 
 
-def compute_semantic_similarity(
+@lru_cache(maxsize=256)
+def _compute_semantic_similarity_cached(
     prediction: str,
     reference: str,
-    model_name: str = config.SBERT_MODEL,
+    model_name: str,
 ) -> float:
-    if not prediction or not prediction.strip() or not reference or not reference.strip():
-        return 0.0
-    if clean_text(prediction) == clean_text(reference):
-        return 1.0
     try:
         from sentence_transformers import util
+        import torch
 
         model = _load_sentence_transformer(model_name)
         embeddings = model.encode(
@@ -192,6 +207,18 @@ def compute_semantic_similarity(
     except Exception as exc:
         logger.warning("Semantic similarity unavailable, lexical fallback: %s", exc)
         return _lexical_f1(prediction, reference)
+
+
+def compute_semantic_similarity(
+    prediction: str,
+    reference: str,
+    model_name: str = config.SBERT_MODEL,
+) -> float:
+    if not prediction or not prediction.strip() or not reference or not reference.strip():
+        return 0.0
+    if clean_text(prediction) == clean_text(reference):
+        return 1.0
+    return _compute_semantic_similarity_cached(prediction, reference, model_name)
 
 
 def _compute_heavy(prediction: str, reference: str) -> dict:
@@ -460,6 +487,7 @@ def compute_composite_score(
     return round(max(0.0, min(1.0, score)), 4)
 
 
+@lru_cache(maxsize=256)
 def compute_coverage_score(prediction: str, source_text: str) -> float:
     """Measure information coverage — how much key content from the source is
     retained in the summary using keyphrase/token overlap.
@@ -504,22 +532,12 @@ def compute_info_retention(
     return round(max(0.0, min(1.0, retention)), 4)
 
 
-def compute_faithfulness_score(
+@lru_cache(maxsize=256)
+def _compute_faithfulness_score_cached(
     prediction: str,
     source_text: str,
-    model_name: str = config.SBERT_MODEL,
+    model_name: str,
 ) -> float:
-    """Compute faithfulness score — how faithful the summary is to the source
-    document based on sentence-level semantic alignment.
-
-    For extractive summaries this should always be ~1.0 (sentences come from source).
-    For abstractive summaries this measures if generated content is grounded.
-
-    Returns a score in [0, 1].
-    """
-    if not prediction or not source_text:
-        return 0.0
-
     from src.preprocess import split_sentences
 
     pred_sentences = split_sentences(prediction)
@@ -564,4 +582,14 @@ def compute_faithfulness_score(
             )
             scores.append(max_overlap)
         return round(sum(scores) / max(1, len(scores)), 4) if scores else 0.0
+
+
+def compute_faithfulness_score(
+    prediction: str,
+    source_text: str,
+    model_name: str = config.SBERT_MODEL,
+) -> float:
+    if not prediction or not source_text:
+        return 0.0
+    return _compute_faithfulness_score_cached(prediction, source_text, model_name)
 

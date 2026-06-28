@@ -6,9 +6,9 @@ import hashlib
 import html
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Iterable
 
-from bs4 import BeautifulSoup
 
 from src.utils import logger
 
@@ -28,6 +28,88 @@ VN_STOPWORDS = {
     "là", "có", "không", "này", "đó", "từ", "khi", "về", "theo", "sau",
     "trước", "tại", "để", "nhiều", "người", "năm", "ngày", "ra", "vào",
 }
+
+GLUED_PATTERNS = {
+    "chủnghĩa": "chủ nghĩa",
+    "tựdo": "tự do",
+    "đồán": "đồ án",
+    "đềtài": "đề tài",
+    "tựđộng": "tự động",
+    "sửdụng": "sử dụng",
+    "hệthống": "hệ thống",
+    "ngữnghĩa": "ngữ nghĩa",
+    "tựkhóa": "từ khóa",
+    "tựnhiên": "tự nhiên",
+    "xửlý": "xử lý",
+    "ngữcảnh": "ngữ cảnh",
+    "họtên": "họ tên",
+    "nộidung": "nội dung",
+    "kếtquả": "kết quả",
+    "đạtđược": "đạt được",
+    "cánbộ": "cán bộ",
+    "sinhviên": "sinh viên",
+    "phânhiệu": "phân hiệu",
+    "bộmôn": "bộ môn",
+    "tiếnđộ": "tiến độ",
+    "thựchiện": "thực hiện",
+    "hướngdẫn": "hướng dẫn",
+    "môhình": "mô hình",
+    "tiếngviệt": "tiếng Việt",
+    "dunglượng": "dung lượng",
+    "bằngcách": "bằng cách",
+    "lấydúng": "lấy đúng",
+    "ngắngọn": "ngắn gọn",
+    "huấnluyện": "huấn luyện",
+    "chạythử": "chạy thử",
+    "trênmáy": "trên máy",
+    "bộnhớ": "bộ nhớ",
+    "trànbộ": "tràn bộ",
+    "ngônngữ": "ngôn ngữ",
+    "độthực": "độ thực",
+    "ngữtự": "ngữ tự",
+    "nhỏnội": "nhỏ nội",
+    "đểhệ": "để hệ",
+    "đểlấy": "để lấy",
+    "đểtạo": "để tạo",
+    "vụhuấn": "vụ huấn",
+    "thửtrên": "thử trên",
+    "bộhướng": "bộ hướng",
+    "cánbộhướng": "cán bộ hướng",
+    "độc lập": "độc lập",
+    "hạnh phúc": "hạnh phúc",
+    "độchính": "độ chính",
+    "trảlời": "trả lời",
+    "chínhxác": "chính xác",
+    "câutrả": "câu trả",
+    "nghiêncứu": "nghiên cứu",
+    "pháttriển": "phát triển",
+    "dựán": "dự án",
+    "thôngtin": "thông tin",
+    "tốtnghiệp": "tốt nghiệp",
+    "côngnghệ": "công nghệ",
+    "nghệthông": "nghệ thông",
+    "họctập": "học tập",
+    "vănbản": "văn bản",
+}
+
+_GLUED_RE_LIST = [
+    (re.compile(re.escape(pattern), re.IGNORECASE), replacement)
+    for pattern, replacement in GLUED_PATTERNS.items()
+]
+
+_RE_PUNCT_EXCL = re.compile(r"([!?]){2,}")
+_RE_PUNCT_SEMI = re.compile(r"([,;:]){2,}")
+_RE_PUNCT_DOTS = re.compile(r"\.{3,}")
+_RE_PUNCT_DOT_LETTER = re.compile(r"(?<!\d)\.(?!\d)(?=[A-Za-zÀ-ỹĐđ])")
+_RE_PUNCT_SPACED = re.compile(r"\s*([,;:!?])\s*")
+_RE_PUNCT_SPACE_DOT = re.compile(r"\s+\.")
+
+_RE_WS_TAB = re.compile(r"[\r\t]+")
+_RE_WS_NL = re.compile(r"\n{3,}")
+_RE_WS_LETTER_DIGIT = re.compile(rf"([{VI_LETTER_RE}])(\\d)")
+_RE_WS_DIGIT_LETTER = re.compile(rf"(\\d)([{VI_LETTER_RE}])")
+_RE_WS_CAP = re.compile(r"([a-z])([A-Z])")
+_RE_WS_SPACES = re.compile(r"[ ]{2,}")
 
 
 def fix_vietnamese_ocr_spacing(text: str) -> str:
@@ -114,12 +196,14 @@ def normalize_unicode(text: str) -> str:
     return unicodedata.normalize("NFC", text or "")
 
 
+@lru_cache(maxsize=512)
 def remove_html_tags(text: str) -> str:
     if not text:
         return ""
     if "<" not in text and not HTML_ENTITY_RE.search(text):
         return html.unescape(text)
     try:
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(text, "lxml")
         return soup.get_text(separator=" ")
     except Exception:
@@ -141,12 +225,12 @@ def normalize_punctuation(text: str) -> str:
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
-    text = re.sub(r"([!?]){2,}", r"\1", text)
-    text = re.sub(r"([,;:]){2,}", r"\1", text)
-    text = re.sub(r"\.{3,}", "...", text)
-    text = re.sub(r"(?<!\d)\.(?!\d)(?=[A-Za-zÀ-ỹĐđ])", ". ", text)
-    text = re.sub(r"\s*([,;:!?])\s*", r"\1 ", text)
-    text = re.sub(r"\s+\.", ".", text)
+    text = _RE_PUNCT_EXCL.sub(r"\1", text)
+    text = _RE_PUNCT_SEMI.sub(r"\1", text)
+    text = _RE_PUNCT_DOTS.sub("...", text)
+    text = _RE_PUNCT_DOT_LETTER.sub(". ", text)
+    text = _RE_PUNCT_SPACED.sub(r"\1 ", text)
+    text = _RE_PUNCT_SPACE_DOT.sub(".", text)
     return fix_decimal_spacing(text)
 
 
@@ -159,12 +243,12 @@ def remove_noise_characters(text: str) -> str:
 
 
 def normalize_whitespace(text: str) -> str:
-    text = re.sub(r"[\r\t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(rf"([{VI_LETTER_RE}])(\d)", r"\1 \2", text)
-    text = re.sub(rf"(\d)([{VI_LETTER_RE}])", r"\1 \2", text)
-    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
-    text = re.sub(r"[ ]{2,}", " ", text)
+    text = _RE_WS_TAB.sub(" ", text)
+    text = _RE_WS_NL.sub("\n\n", text)
+    text = _RE_WS_LETTER_DIGIT.sub(r"\1 \2", text)
+    text = _RE_WS_DIGIT_LETTER.sub(r"\1 \2", text)
+    text = _RE_WS_CAP.sub(r"\1 \2", text)
+    text = _RE_WS_SPACES.sub(" ", text)
     return "\n".join(line.strip() for line in text.splitlines()).strip()
 
 

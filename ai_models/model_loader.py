@@ -218,7 +218,7 @@ class ModelRegistry:
         with MODEL_LOAD_LOCK:
             tokenizer = self._load_tokenizer(algorithm, model_path)
 
-            load_kwargs: dict[str, Any] = {}
+            load_kwargs: dict[str, Any] = {"low_cpu_mem_usage": True}
             use_8bit = getattr(config, "USE_8BIT", False)
             use_4bit = getattr(config, "USE_4BIT", False)
 

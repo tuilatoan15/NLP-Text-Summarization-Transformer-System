@@ -68,3 +68,35 @@ export async function streamCompareSummaries(
     }
   }
 }
+
+export async function fetchCompareHistoryList(limit = 20): Promise<any[]> {
+  cacheLog('API', `GET /summarize/history?limit=${limit}`);
+  const response = await fetch(`${API}/summarize/history?limit=${limit}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchCompareHistoryDetail(resultId: string): Promise<any> {
+  cacheLog('API', `GET /summarize/history/${resultId}`);
+  const response = await fetch(`${API}/summarize/history/${resultId}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function deleteCompareHistoryRecord(resultId: string): Promise<any> {
+  cacheLog('API', `DELETE /summarize/history/${resultId}`);
+  const response = await fetch(`${API}/summarize/history/${resultId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+  return response.json();
+}

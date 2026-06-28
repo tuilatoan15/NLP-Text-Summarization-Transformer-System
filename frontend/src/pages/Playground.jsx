@@ -1,12 +1,12 @@
 import React, { useMemo, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import {
-  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Award, CheckCircle2, Sparkles
+  Play, RefreshCcw, Check, Loader2, Clock, SlidersHorizontal, Activity, Terminal, AlertCircle, FileText, UploadCloud, BookOpen, Award, CheckCircle2, Sparkles, Trash2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { usePlaygroundStore, filesFingerprint } from '../stores/playgroundStore';
-import { extractFilesFromUpload, streamCompareSummaries } from '../services/cachedApi';
+import { extractFilesFromUpload, streamCompareSummaries, fetchCompareHistoryList, fetchCompareHistoryDetail, deleteCompareHistoryRecord } from '../services/cachedApi';
 import { invalidateAfterSummarization, invalidateFileExtractCache } from '../lib/cacheInvalidation';
 import { queryKeys } from '../lib/queryKeys';
 import { cacheLog } from '../lib/cacheLogger';
@@ -316,8 +316,17 @@ export default function Playground() {
 
   const [loading, setLoading] = useState(false);
   const [runningKey, setRunningKey] = useState(null);
-  const [completedCount, setCompletedCount] = useState(0);
-  const [runStates, setRunStates] = useState(() => initialRunState(ALGORITHMS.map(a => a.key)));
+
+  const runStates = usePlaygroundStore(state => state.runState);
+  const setRunStates = usePlaygroundStore(state => state.setRunState);
+  const completedCount = usePlaygroundStore(state => state.completedCount);
+  const setCompletedCount = usePlaygroundStore(state => state.setCompletedCount);
+  const loadFromHistoryRecord = usePlaygroundStore(state => state.loadFromHistoryRecord);
+
+  // History states
+  const [showHistory, setShowHistory] = useState(false);
+  const [activeHistoryId, setActiveHistoryId] = useState(null);
+  const [fetchingDetailId, setFetchingDetailId] = useState(null);
 
   // File states
   const [dragActive, setDragActive] = useState(false);
@@ -371,6 +380,51 @@ export default function Playground() {
     if (e.target.files?.length) processFiles(Array.from(e.target.files));
   }, [processFiles]);
 
+  // History query and handlers
+  const { data: historyList, isLoading: isLoadingHistory } = useQuery({
+    queryKey: queryKeys.compareHistory,
+    queryFn: () => fetchCompareHistoryList(20),
+    enabled: showHistory,
+  });
+
+  const handleSelectHistory = async (resultId) => {
+    if (fetchingDetailId) return;
+    setFetchingDetailId(resultId);
+    try {
+      const detail = await fetchCompareHistoryDetail(resultId);
+      loadFromHistoryRecord(detail);
+      setActiveHistoryId(resultId);
+      setShowHistory(false);
+    } catch (err) {
+      console.error('Failed to fetch history detail:', err);
+      alert('Không thể tải chi tiết lịch sử chạy này. Vui lòng thử lại.');
+    } finally {
+      setFetchingDetailId(null);
+    }
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: (resultId) => deleteCompareHistoryRecord(resultId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.compareHistory });
+    },
+  });
+
+  const handleDeleteHistory = async (e, resultId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm('Bạn có chắc chắn muốn xóa bản ghi lịch sử này không?')) return;
+    try {
+      await deleteMutation.mutateAsync(resultId);
+      if (activeHistoryId === resultId) {
+        setActiveHistoryId(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete history record:', err);
+      alert('Không thể xóa bản ghi lịch sử này.');
+    }
+  };
+
   const clearFiles = useCallback(() => {
     if (files.length > 0) {
       invalidateFileExtractCache(queryClient);
@@ -386,6 +440,7 @@ export default function Playground() {
     setLoading(true);
     setCompletedCount(0);
     setRunStates(initialRunState(selectedAlgorithms));
+    setActiveHistoryId(null);
 
     try {
       await streamCompareSummaries({
@@ -450,6 +505,13 @@ export default function Playground() {
           </h1>
           <p className="ui-page-subtitle">So sánh trực quan kết quả và các chỉ số ROUGE, BERTScore của các giải thuật NLP thời gian thực.</p>
         </div>
+        <button
+          onClick={() => setShowHistory(true)}
+          className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold bg-[var(--bg-elevated)] hover:bg-[var(--bg-muted)]/50 border border-[var(--border)] rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 self-start md:self-auto"
+        >
+          <Clock size={14} className="text-sky-500" />
+          <span>Lịch sử chạy</span>
+        </button>
       </div>
 
       {/* Top Control Panel (Cấu hình thử nghiệm) */}
@@ -663,6 +725,118 @@ export default function Playground() {
         {/* Table summary of metrics */}
         <ComparisonTable rows={tableRows} />
       </div>
+
+      {/* Loading Overlay for Detail Fetching */}
+      {fetchingDetailId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-50 flex items-center justify-center">
+          <div className="ui-card p-6 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl flex items-center gap-3 shadow-2xl">
+            <Loader2 className="animate-spin text-sky-500" size={20} />
+            <span className="text-xs font-bold text-[var(--text-primary)]">Đang tải kết quả chi tiết...</span>
+          </div>
+        </div>
+      )}
+
+      {/* History Drawer */}
+      <AnimatePresence>
+        {showHistory && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.4 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowHistory(false)}
+              className="fixed inset-0 bg-black z-40"
+            />
+
+            {/* Drawer */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 w-80 sm:w-96 bg-[var(--bg-elevated)] border-l border-[var(--border)] shadow-2xl z-50 flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-[var(--border)] flex items-center justify-between bg-[var(--bg-muted)]/30">
+                <div className="flex items-center gap-2 font-extrabold text-xs text-[var(--text-primary)] uppercase tracking-wider">
+                  <Clock size={14} className="text-sky-500" />
+                  Lịch sử so sánh
+                </div>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className="text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {isLoadingHistory ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-[var(--text-faint)] gap-2">
+                    <Loader2 size={20} className="animate-spin text-sky-500" />
+                    <span className="text-[10px] font-bold">Đang tải lịch sử...</span>
+                  </div>
+                ) : !historyList || historyList.length === 0 ? (
+                  <div className="text-center py-12 text-[var(--text-faint)] text-xs font-medium">
+                    Không có lịch sử chạy so sánh nào.
+                  </div>
+                ) : (
+                  historyList.map((item) => {
+                    const isActive = activeHistoryId === item.result_id;
+                    const date = new Date(item.created_at);
+                    const formattedDate = date.toLocaleString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    });
+
+                    return (
+                      <div
+                        key={item.result_id}
+                        onClick={(e) => {
+                          if (e.target.closest('.btn-delete-history')) return;
+                          handleSelectHistory(item.result_id);
+                        }}
+                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all hover:border-sky-400 hover:bg-sky-500/5 ${
+                          isActive
+                            ? 'border-sky-500 bg-sky-500/5 ring-1 ring-sky-500/10'
+                            : 'border-[var(--border)] bg-[var(--bg-elevated)]'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start gap-2 mb-1.5">
+                          <span className="text-[9px] font-bold text-[var(--text-faint)]">{formattedDate}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteHistory(e, item.result_id)}
+                            className="btn-delete-history text-[9px] font-bold text-red-500 hover:text-red-750 opacity-60 hover:opacity-100 transition-opacity p-0.5 rounded cursor-pointer"
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mb-2.5 leading-relaxed font-medium">
+                          {item.text_preview}
+                        </p>
+                        <div className="flex items-center justify-between text-[10px] font-extrabold text-[var(--text-faint)]">
+                          <span>{item.algorithm_count} thuật toán</span>
+                          {item.best_algorithm && (
+                            <span className="text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-250/20">
+                              Tốt nhất: {byKey(item.best_algorithm).name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

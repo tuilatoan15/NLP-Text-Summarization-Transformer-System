@@ -37,6 +37,8 @@ def persist_compare_result(compare: dict[str, Any], *, input_preview: str | None
         "performance": compare.get("performance", {}),
         "warning": compare.get("warning"),
         "text_preview": preview,
+        "full_text": meta.get("full_text", ""),
+        "reference_text": meta.get("reference_text"),
         "processing_time_seconds": (compare.get("performance") or {}).get("total_wall_time_s", 0),
     }
     return persist_result(payload)

@@ -15,6 +15,7 @@ import os
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from typing import Optional
 
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
@@ -72,12 +73,13 @@ def _max_words_per_chunk(key: str) -> int:
     return max(180, int(config.MAX_INPUT_TOKENS * 0.55))
 
 
-def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
+@lru_cache(maxsize=256)
+def _chunk_text_cached(text: str, max_words_per_chunk: int) -> tuple[str, ...]:
     """Split text into chunks at sentence boundaries, respecting max_words_per_chunk.
     Limit to config.ABSTRACTIVE_MAX_CHUNKS (default 16) to bound memory usage."""
     sentences = split_sentences(text)
     if not sentences:
-        return [text]
+        return (text,)
 
     chunks: list[str] = []
     current: list[str] = []
@@ -95,7 +97,11 @@ def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
         chunks.append(" ".join(current))
 
     max_chunks = getattr(config, "ABSTRACTIVE_MAX_CHUNKS", 16)
-    return chunks[:max_chunks]
+    return tuple(chunks[:max_chunks])
+
+
+def _chunk_text(text: str, max_words_per_chunk: int) -> list[str]:
+    return list(_chunk_text_cached(text, max_words_per_chunk))
 
 
 def _sanitize_gen_preset(key: str, preset: dict) -> dict:
@@ -181,6 +187,7 @@ def _build_generation_preset(
 
 # ─────────────────────────── core generation ────────────────────────────────
 
+@lru_cache(maxsize=128)
 def _generate_one(
     key: str,
     text: str,

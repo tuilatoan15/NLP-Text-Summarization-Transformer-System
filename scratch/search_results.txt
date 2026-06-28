@@ -1,0 +1,137 @@
+Total paragraphs: 540
+
+[P-136]: 3.4.2. Quy trình tiền xử lý dữ liệu	26
+--- CONTEXT ---
+    [P-131]: 3.3.2. Giao diện tóm tắt văn bản	22
+    [P-132]: 3.3.3. Giao diện so sánh bản tóm tắt của các mô hình	23
+    [P-133]: 3.3.4. Giao diện đánh giá kết quả	24
+    [P-134]: 3.4. Phân tích và thiết kế mô hình nghiên cứu	25
+    [P-135]: 3.4.1. Dữ liệu sử dụng trong nghiên cứu	25
+>>> [P-136]: 3.4.2. Quy trình tiền xử lý dữ liệu	26
+    [P-137]: 3.4.3. Quy trình huấn luyện mô hình	26
+    [P-138]: 3.4.4. Quy trình suy luận và sinh tóm tắt	27
+    [P-139]: 3.4.5. Đánh giá kết quả	27
+    [P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+    [P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+    [P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+    [P-143]: 3.5.3. Kiến trúc AI Engine	28
+    [P-144]: 3.6. Các sơ đồ thiết kế hệ thống	29
+    [P-145]: 3.6.1. Sơ đồ kiến trúc nghiên cứu	29
+    [P-146]: 3.6.2. Sơ đồ Pipeline xử lý dữ liệu	30
+    [P-147]: 3.6.3. Workflow suy luận mô hình	30
+    [P-148]: 3.6.4. Biểu đồ Use Case	31
+    [P-149]: CHƯƠNG 4: CÀI ĐẶT THỰC NGHIỆM VÀ ĐÁNH GIÁ	34
+    [P-150]: 4.1. Môi trường và công nghệ cài đặt	34
+    [P-151]: 4.1.1. Cấu hình phần cứng hệ thống	34
+    [P-152]: 4.1.2. Môi trường công nghệ phần mềm và thư viện hỗ trợ	34
+    [P-153]: 4.2. Cơ chế hoạt động của Pipeline Tóm tắt Lai	35
+    [P-154]: 4.3. Cài đặt mô hình và thiết kế thực nghiệm	36
+    [P-155]: 4.3.1. Phân tích thống kê tập dữ liệu VietNews	36
+----------------
+
+[P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+--- CONTEXT ---
+    [P-135]: 3.4.1. Dữ liệu sử dụng trong nghiên cứu	25
+    [P-136]: 3.4.2. Quy trình tiền xử lý dữ liệu	26
+    [P-137]: 3.4.3. Quy trình huấn luyện mô hình	26
+    [P-138]: 3.4.4. Quy trình suy luận và sinh tóm tắt	27
+    [P-139]: 3.4.5. Đánh giá kết quả	27
+>>> [P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+    [P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+    [P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+    [P-143]: 3.5.3. Kiến trúc AI Engine	28
+    [P-144]: 3.6. Các sơ đồ thiết kế hệ thống	29
+    [P-145]: 3.6.1. Sơ đồ kiến trúc nghiên cứu	29
+    [P-146]: 3.6.2. Sơ đồ Pipeline xử lý dữ liệu	30
+    [P-147]: 3.6.3. Workflow suy luận mô hình	30
+    [P-148]: 3.6.4. Biểu đồ Use Case	31
+    [P-149]: CHƯƠNG 4: CÀI ĐẶT THỰC NGHIỆM VÀ ĐÁNH GIÁ	34
+    [P-150]: 4.1. Môi trường và công nghệ cài đặt	34
+    [P-151]: 4.1.1. Cấu hình phần cứng hệ thống	34
+    [P-152]: 4.1.2. Môi trường công nghệ phần mềm và thư viện hỗ trợ	34
+    [P-153]: 4.2. Cơ chế hoạt động của Pipeline Tóm tắt Lai	35
+    [P-154]: 4.3. Cài đặt mô hình và thiết kế thực nghiệm	36
+    [P-155]: 4.3.1. Phân tích thống kê tập dữ liệu VietNews	36
+    [P-156]: 4.3.2. Thiết kế kịch bản thực nghiệm và Các độ đo đánh giá	36
+    [P-157]: 4.4. Đánh giá hệ thống và phân tích kết quả đạt được	38
+    [P-158]: 4.4.1. Số liệu benchmark tóm tắt văn bản	38
+    [P-159]: 4.4.2. Nhận xét và phân tích chuyên sâu hiệu năng tóm tắt	39
+----------------
+
+[P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+--- CONTEXT ---
+    [P-136]: 3.4.2. Quy trình tiền xử lý dữ liệu	26
+    [P-137]: 3.4.3. Quy trình huấn luyện mô hình	26
+    [P-138]: 3.4.4. Quy trình suy luận và sinh tóm tắt	27
+    [P-139]: 3.4.5. Đánh giá kết quả	27
+    [P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+>>> [P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+    [P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+    [P-143]: 3.5.3. Kiến trúc AI Engine	28
+    [P-144]: 3.6. Các sơ đồ thiết kế hệ thống	29
+    [P-145]: 3.6.1. Sơ đồ kiến trúc nghiên cứu	29
+    [P-146]: 3.6.2. Sơ đồ Pipeline xử lý dữ liệu	30
+    [P-147]: 3.6.3. Workflow suy luận mô hình	30
+    [P-148]: 3.6.4. Biểu đồ Use Case	31
+    [P-149]: CHƯƠNG 4: CÀI ĐẶT THỰC NGHIỆM VÀ ĐÁNH GIÁ	34
+    [P-150]: 4.1. Môi trường và công nghệ cài đặt	34
+    [P-151]: 4.1.1. Cấu hình phần cứng hệ thống	34
+    [P-152]: 4.1.2. Môi trường công nghệ phần mềm và thư viện hỗ trợ	34
+    [P-153]: 4.2. Cơ chế hoạt động của Pipeline Tóm tắt Lai	35
+    [P-154]: 4.3. Cài đặt mô hình và thiết kế thực nghiệm	36
+    [P-155]: 4.3.1. Phân tích thống kê tập dữ liệu VietNews	36
+    [P-156]: 4.3.2. Thiết kế kịch bản thực nghiệm và Các độ đo đánh giá	36
+    [P-157]: 4.4. Đánh giá hệ thống và phân tích kết quả đạt được	38
+    [P-158]: 4.4.1. Số liệu benchmark tóm tắt văn bản	38
+    [P-159]: 4.4.2. Nhận xét và phân tích chuyên sâu hiệu năng tóm tắt	39
+    [P-160]: 4.5. Khó khăn và hạn chế trong quá trình triển khai thực nghiệm	40
+----------------
+
+[P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+--- CONTEXT ---
+    [P-137]: 3.4.3. Quy trình huấn luyện mô hình	26
+    [P-138]: 3.4.4. Quy trình suy luận và sinh tóm tắt	27
+    [P-139]: 3.4.5. Đánh giá kết quả	27
+    [P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+    [P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+>>> [P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+    [P-143]: 3.5.3. Kiến trúc AI Engine	28
+    [P-144]: 3.6. Các sơ đồ thiết kế hệ thống	29
+    [P-145]: 3.6.1. Sơ đồ kiến trúc nghiên cứu	29
+    [P-146]: 3.6.2. Sơ đồ Pipeline xử lý dữ liệu	30
+    [P-147]: 3.6.3. Workflow suy luận mô hình	30
+    [P-148]: 3.6.4. Biểu đồ Use Case	31
+    [P-149]: CHƯƠNG 4: CÀI ĐẶT THỰC NGHIỆM VÀ ĐÁNH GIÁ	34
+    [P-150]: 4.1. Môi trường và công nghệ cài đặt	34
+    [P-151]: 4.1.1. Cấu hình phần cứng hệ thống	34
+    [P-152]: 4.1.2. Môi trường công nghệ phần mềm và thư viện hỗ trợ	34
+    [P-153]: 4.2. Cơ chế hoạt động của Pipeline Tóm tắt Lai	35
+    [P-154]: 4.3. Cài đặt mô hình và thiết kế thực nghiệm	36
+    [P-155]: 4.3.1. Phân tích thống kê tập dữ liệu VietNews	36
+    [P-156]: 4.3.2. Thiết kế kịch bản thực nghiệm và Các độ đo đánh giá	36
+    [P-157]: 4.4. Đánh giá hệ thống và phân tích kết quả đạt được	38
+    [P-158]: 4.4.1. Số liệu benchmark tóm tắt văn bản	38
+    [P-159]: 4.4.2. Nhận xét và phân tích chuyên sâu hiệu năng tóm tắt	39
+    [P-160]: 4.5. Khó khăn và hạn chế trong quá trình triển khai thực nghiệm	40
+    [P-161]: KẾT QUẢ VÀ KIẾN NGHỊ	42
+----------------
+
+[P-143]: 3.5.3. Kiến trúc AI Engine	28
+--- CONTEXT ---
+    [P-138]: 3.4.4. Quy trình suy luận và sinh tóm tắt	27
+    [P-139]: 3.4.5. Đánh giá kết quả	27
+    [P-140]: 3.5. Thiết kế kiến trúc hệ thống	28
+    [P-141]: 3.5.1. Kiến trúc tổng thể hệ thống	28
+    [P-142]: 3.5.2. Kiến trúc Frontend - Backend	28
+>>> [P-143]: 3.5.3. Kiến trúc AI Engine	28
+    [P-144]: 3.6. Các sơ đồ thiết kế hệ thống	29
+    [P-145]: 3.6.1. Sơ đồ kiến trúc nghiên cứu	29
+    [P-146]: 3.6.2. Sơ đồ Pipeline xử lý dữ liệu	30
+    [P-147]: 3.6.3. Workflow suy luận mô hình	30
+    [P-148]: 3.6.4. Biểu đồ Use Case	31
+    [P-149]: CHƯƠNG 4: CÀI ĐẶT THỰC NGHIỆM VÀ ĐÁNH GIÁ	34
+    [P-150]: 4.1. Môi trường và công nghệ cài đặt	34
+    [P-151]: 4.1.1. Cấu hình phần cứng hệ thống	34
+    [P-152]: 4.1.2. Môi trường công nghệ phần mềm và thư viện hỗ trợ	34
+    [P-153]: 4.2. Cơ chế hoạt động của Pipeline Tóm tắt Lai	35
+    [P-154]: 4.3. Cài đặt mô hình và thiết kế thực nghiệm	36

@@ -33,10 +33,11 @@ type PlaygroundState = {
   setSummaryLength: (length: string) => void;
   setResult: (result: (Record<string, unknown> | null) | ((prev: Record<string, unknown> | null) => Record<string, unknown> | null)) => void;
   setRunState: (runState: PlaygroundRunState | ((prev: PlaygroundRunState) => PlaygroundRunState)) => void;
-  setCompletedCount: (count: number) => void;
+  setCompletedCount: (count: number | ((prev: number) => number)) => void;
   setLastExtractFingerprint: (fp: string | null) => void;
   clearUploadCache: () => void;
   resetSession: () => void;
+  loadFromHistoryRecord: (record: Record<string, any>) => void;
 };
 
 const initialAlgorithms = ['textrank', 'lexrank', 'lsa', 'vit5', 'mt5', 'bartpho'];
@@ -71,7 +72,9 @@ export const usePlaygroundStore = create<PlaygroundState>()(
       setRunState: (runState) => set((state) => ({
         runState: typeof runState === 'function' ? runState(state.runState) : runState,
       })),
-      setCompletedCount: (completedCount) => set({ completedCount }),
+      setCompletedCount: (completedCount) => set((state) => ({
+        completedCount: typeof completedCount === 'function' ? completedCount(state.completedCount) : completedCount,
+      })),
       setLastExtractFingerprint: (lastExtractFingerprint) => set({ lastExtractFingerprint }),
       clearUploadCache: () => {
         cacheLog('INVALIDATE', 'playground upload cache');
@@ -80,6 +83,33 @@ export const usePlaygroundStore = create<PlaygroundState>()(
       resetSession: () => {
         cacheLog('INVALIDATE', 'playground session');
         set({ ...initialState });
+      },
+      loadFromHistoryRecord: (record) => {
+        cacheLog('RESTORE', 'playground session from history record');
+        const meta = record.meta || {};
+        const fullText = record.full_text || meta.full_text || '';
+        const referenceText = record.reference_text ?? meta.reference_text ?? '';
+        const results = record.results || [];
+        const selected = results.map((r: any) => r.key || r.algorithm).filter(Boolean);
+        const runState: PlaygroundRunState = {};
+        results.forEach((row: any) => {
+          const key = row.key || row.algorithm;
+          if (key) {
+            runState[key] = {
+              status: 'done',
+              result: row,
+              error: null,
+            };
+          }
+        });
+        set({
+          text: fullText,
+          reference: referenceText,
+          selected,
+          runState,
+          completedCount: results.length,
+          result: record,
+        });
       },
     }),
     {

@@ -570,6 +570,8 @@ def _assemble_compare_result(
             "input_words": input_words,
             "input_sentences": len(split_sentences(cleaned)),
             "input_preview": cleaned[:400],
+            "full_text": cleaned,
+            "reference_text": reference_text if reference_provided else None,
             "reference_provided": reference_provided,
             "reference_words": count_words(reference_text),
             "sentence_count": sentence_count,
