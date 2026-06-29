@@ -50,82 +50,111 @@ def _wait_for_rate_limit():
         _time.sleep(wait)
 
 
-def _call_llm(prompt: str) -> str:
-    """Gọi LLM API theo cấu hình hiện tại, có retry + rate limiting."""
-    generator_type = RAG_GENERATOR_TYPE.lower()
+def _execute_llm_request(
+    prompt: str,
+    generator_type: str,
+    temperature: float = 0.2,
+    max_tokens: int = 800
+) -> str:
+    """Gọi LLM API với retry cho lỗi 429 và tự động fallback chéo giữa Gemini và OpenAI."""
+    import time
+    
+    # Xác định danh sách các API provider dự phòng
+    providers = [generator_type]
+    if generator_type == "gemini" and OPENAI_API_KEY:
+        providers.append("openai")
+    elif generator_type == "openai" and GEMINI_API_KEY:
+        providers.append("gemini")
 
-    MAX_RETRIES = 3
-    BASE_DELAY = 5  # giây (tăng từ 0 lên 5s cho exponential backoff)
+    MAX_RETRIES = 1  # Chỉ retry 1 lần để tránh làm nghẽn UI quá lâu
+    BASE_DELAY = 2   # Giảm delay cơ sở từ 5s xuống 2s
 
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            # Chờ rate limiter trước khi gọi
-            _wait_for_rate_limit()
+    for provider in providers:
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                _wait_for_rate_limit()
 
-            if generator_type == "gemini":
-                if not GEMINI_API_KEY:
-                    return ""
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 150}
-                }
-                res = requests.post(url, json=payload, headers=headers, timeout=15)
-                res.raise_for_status()
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if provider == "gemini":
+                    if not GEMINI_API_KEY:
+                        raise ValueError("GEMINI_API_KEY chưa cấu hình")
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                    headers = {"Content-Type": "application/json"}
+                    payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": temperature,
+                            "maxOutputTokens": max_tokens
+                        }
+                    }
+                    res = requests.post(url, json=payload, headers=headers, timeout=25)
+                    res.raise_for_status()
+                    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-            elif generator_type == "openai":
-                if not OPENAI_API_KEY:
-                    return ""
-                url = "https://api.openai.com/v1/chat/completions"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENAI_API_KEY}"
-                }
-                payload = {
-                    "model": OPENAI_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 150
-                }
-                res = requests.post(url, json=payload, headers=headers, timeout=15)
-                res.raise_for_status()
-                return res.json()["choices"][0]["message"]["content"].strip()
+                elif provider == "openai":
+                    if not OPENAI_API_KEY:
+                        raise ValueError("OPENAI_API_KEY chưa cấu hình")
+                    url = "https://api.openai.com/v1/chat/completions"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {OPENAI_API_KEY}"
+                    }
+                    payload = {
+                        "model": OPENAI_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens
+                    }
+                    res = requests.post(url, json=payload, headers=headers, timeout=25)
+                    res.raise_for_status()
+                    return res.json()["choices"][0]["message"]["content"].strip()
 
-            elif generator_type == "ollama":
-                url = OLLAMA_API_URL
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.1}
-                }
-                res = requests.post(url, json=payload, headers=headers, timeout=15)
-                res.raise_for_status()
-                return res.json()["response"].strip()
+                elif provider == "ollama":
+                    url = OLLAMA_API_URL
+                    headers = {"Content-Type": "application/json"}
+                    payload = {
+                        "model": OLLAMA_MODEL,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": temperature}
+                    }
+                    res = requests.post(url, json=payload, headers=headers, timeout=35)
+                    res.raise_for_status()
+                    return res.json()["response"].strip()
 
-            else:
-                return ""
-
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 429 and attempt < MAX_RETRIES:
-                delay = BASE_DELAY * (2 ** attempt)  # 5s → 10s → 20s
-                logger.warning(
-                    "⏳ Rate-limited [%s] — retry %d/%d sau %ds...",
-                    generator_type, attempt + 1, MAX_RETRIES, delay
+            except requests.exceptions.HTTPError as exc:
+                is_rate_limit = exc.response is not None and exc.response.status_code == 429
+                if is_rate_limit and attempt < MAX_RETRIES:
+                    delay = BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "⏳ Rate-limited [%s] — retry %d/%d sau %ds...",
+                        provider, attempt + 1, MAX_RETRIES, delay
+                    )
+                    time.sleep(delay)
+                    continue
+                
+                logger.error(
+                    "❌ Gọi LLM API [%s] lỗi HTTP (status %s): %s",
+                    provider,
+                    exc.response.status_code if exc.response else "N/A",
+                    exc
                 )
-                _time.sleep(delay)
-                continue
-            logger.warning("⚠️ Agent LLM call failed (attempt %d), fallback to rule-based: %s", attempt + 1, exc)
-            return ""
+                break  # Bị lỗi khác hoặc hết lượt retry -> thử provider tiếp theo
 
-        except Exception as exc:
-            logger.warning("⚠️ Agent LLM call failed, fallback to rule-based logic: %s", exc)
-            return ""
+            except Exception as exc:
+                logger.error("❌ Gọi LLM API [%s] lỗi: %s", provider, exc)
+                break  # Lỗi kết nối -> thử provider tiếp theo
 
     return ""
+
+
+def _call_llm(prompt: str) -> str:
+    """Gọi LLM API theo cấu hình hiện tại thông qua _execute_llm_request."""
+    return _execute_llm_request(
+        prompt, 
+        RAG_GENERATOR_TYPE.lower(), 
+        temperature=0.1, 
+        max_tokens=150
+    )
 
 
 def classify_intent(query: str, document_ids: list[str] | None = None) -> str:

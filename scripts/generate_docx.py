@@ -289,20 +289,19 @@ def create_document():
         "Sự tổng hòa các nghiên cứu trên cho thấy phương trình Composite Score tích hợp tối ưu các thành phần để tạo ra mối tương quan cao nhất có thể với đánh giá thực tế của con người."
     )
 
-    # --- Section 4: THỰC NGHIỆM ---
-    add_h1("4. THỰC NGHIỆM VÀ KẾT QUẢ (EXPERIMENTS AND RESULTS)")
+    add_h2("3.4.4. Thực nghiệm và kết quả (Experiments and Results)")
     add_body(
-        "Để kiểm chứng tính hiệu quả của Composite Score, nghiên cứu tiến hành đo lường chất lượng của giải thuật lai LSA ➔ BARTPho (kết hợp giải thuật trích xuất Latent Semantic Analysis [27] để rút gọn văn bản nguồn và mạng sinh BARTPho [4] để viết lại tóm tắt trừu tượng)."
+        "Để kiểm chứng tính hiệu quả của Composite Score, nghiên cứu tiến hành đo lường chất lượng của giải thuật lai LSA ➔ BARTPho kết hợp giải thuật trích xuất Latent Semantic Analysis [27] để rút gọn văn bản nguồn và mạng sinh BARTPho [4] để viết lại tóm tắt trừu tượng."
     )
     add_body("Dữ liệu thực nghiệm thu được từ hệ thống đối với giải thuật LSA ➔ BARTPho:")
     
     bullet_data = [
-        "Điểm ROUGE-L ($S_{ROUGEL}$) = 0.3606 [20]",
-        "Điểm BERTScore ($S_{BERTScore}$) = 0.9310 [22]",
-        "Điểm Semantic ($S_{semantic}$) = 0.9052 [25]",
-        "Điểm Faithfulness ($S_{faithfulness}$) = 0.9100 [23]",
-        "Điểm Coverage ($S_{coverage}$) = 0.9600 [24]",
-        "Điểm Fluency ($S_{fluency}$) = 0.5081 [26]"
+        "Điểm ROUGE-L (SROUGEL) = 0.3104 [20]",
+        "Điểm BERTScore (SBERTScore) = 0.6703 [22]",
+        "Điểm Semantic (Ssemantic) = 0.7518 [25]",
+        "Điểm Faithfulness (Sfaithfulness) = 0.8570 [23]",
+        "Điểm Coverage (Scoverage) = 0.0720 [24]",
+        "Điểm Fluency (Sfluency) = 0.2508"
     ]
     for b in bullet_data:
         doc.add_paragraph(b, style='List Bullet')
@@ -311,16 +310,16 @@ def create_document():
     add_equation_latex("$$CS = 0.25 \\cdot S_{ROUGEL} + 0.25 \\cdot S_{BERTScore} + 0.20 \\cdot S_{semantic} + 0.15 \\cdot S_{faithfulness} + 0.10 \\cdot S_{coverage} + 0.05 \\cdot S_{fluency}$$")
     add_body("Thực hiện tính toán chi tiết từng thành phần:")
     add_equation_latex(
-        "$$\\begin{aligned} CS &= 0.25 \\cdot 0.3606 + 0.25 \\cdot 0.9310 + 0.20 \\cdot 0.9052 + 0.15 \\cdot 0.9100 + 0.10 \\cdot 0.9600 + 0.05 \\cdot 0.5081 \\\\ "
-        "&= 0.09015 + 0.23275 + 0.18104 + 0.13650 + 0.09600 + 0.025405 \\\\ "
-        "&= 0.761845 \\approx 0.7618 \\quad (76.18\\%) \\end{aligned}$$"
+        "$$\\begin{aligned} CS &= 0.25 \\cdot 0.3104 + 0.25 \\cdot 0.6703 + 0.20 \\cdot 0.7518 + 0.15 \\cdot 0.8570 + 0.10 \\cdot 0.0720 + 0.05 \\cdot 0.2508 \\\\ "
+        "&= 0.077600 + 0.167575 + 0.150360 + 0.128550 + 0.007200 + 0.012540 \\\\ "
+        "&= 0.543825 \\approx 0.5438 \\quad (54.38\\%) \\end{aligned}$$"
     )
     
     add_body(
-        "Thảo luận (Discussion): Mặc dù điểm trùng khớp từ vựng $S_{ROUGEL}$ của LSA ➔ BARTPho ở mức vừa phải (36.06%) do tính chất viết lại linh hoạt của mô hình abstractive, "
-        "nhưng điểm ngữ nghĩa sâu (BERTScore đạt 93.10% và Semantic đạt 90.52%) đã chứng minh nội dung tóm tắt truyền đạt cực kỳ chính xác. "
-        "Đồng thời, độ phủ ý chính đạt 96.00% và độ trung thực đạt 91.00% đảm bảo văn bản tóm tắt không bị mất ý hay xảy ra lỗi ảo giác thông tin. "
-        "Nếu chỉ sử dụng ROUGE-L để đánh giá, thuật toán này sẽ bị đánh giá thấp một cách bất công. Nhờ Composite Score, thuật toán lai đã đạt điểm tổng hợp thực chất là 76.18%, giúp hệ thống nhận diện đây là giải thuật tối ưu nhất về mặt cân bằng chất lượng."
+        "Thảo luận: Mặc dù điểm trùng khớp từ vựng SROUGEL của LSA ➔ BARTPho ở mức vừa phải (31.04%) do tính chất viết lại linh hoạt của mô hình abstractive, "
+        "nhưng điểm ngữ nghĩa sâu BERTScore đạt 67.03% và Semantic đạt 75.18% đã chứng minh nội dung tóm tắt truyền đạt tương đối chính xác. "
+        "Độ phủ ý chính đạt 7.20% và độ trung thực đạt 85.70% đảm bảo văn bản tóm tắt có chất lượng thông tin khá tốt và hạn chế ảo giác thông tin. "
+        "Nếu chỉ sử dụng ROUGE-L để đánh giá, thuật toán này sẽ bị đánh giá thấp một cách bất công. Nhờ Composite Score, thuật toán lai đã đạt điểm tổng hợp thực chất là 54.38%, giúp hệ thống nhận diện khách quan hiệu năng thực tế của giải thuật."
     )
     
     # --- Section 5: KẾT LUẬN ---

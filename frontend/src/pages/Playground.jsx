@@ -540,7 +540,11 @@ export default function Playground() {
     const completed = selectedAlgorithms
       .map(key => ({ key, result: runStates[key]?.result }))
       .filter(item => item.result);
-    completed.sort((a, b) => (b.result.combined_score ?? 0) - (a.result.combined_score ?? 0));
+    completed.sort((a, b) => {
+      const scoreA = metric(a.result, 'composite_score') || metric(a.result, 'combined_score') || 0;
+      const scoreB = metric(b.result, 'composite_score') || metric(b.result, 'combined_score') || 0;
+      return scoreB - scoreA;
+    });
     return Object.fromEntries(completed.map((item, idx) => [item.key, idx + 1]));
   }, [selectedAlgorithms, runStates]);
 

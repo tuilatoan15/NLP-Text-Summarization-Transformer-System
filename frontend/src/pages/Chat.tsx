@@ -58,7 +58,7 @@ export default function Chat() {
 
   // RAG defaults (không hiển thị cho người dùng sửa)
   const ragModel = 'intfloat/multilingual-e5-large';
-  const topK = 4;
+  const topK = 3;
   const threshold = 0.35;
   const retrievalMode = 'hybrid';
   const useReranking = true;

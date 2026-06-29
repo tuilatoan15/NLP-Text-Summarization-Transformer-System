@@ -285,6 +285,11 @@ def evaluate_summary(
         logger.warning("Heavy metrics error: %s", exc)
         heavy = _NULL_HEAVY.copy()
 
+    from evaluation.readability import readability_scores
+
+    readability = readability_scores(prediction)
+    fluency = max(0.0, 1.0 - readability.get("redundancy_ratio", 0.0))
+
     # Calculate composite score
     composite = compute_composite_score(
         rougeL=rouge["rougeL"],
@@ -292,11 +297,9 @@ def evaluate_summary(
         faithfulness=faithfulness,
         bertscore=heavy["bertscore_f1"],
         coverage=coverage,
+        fluency=fluency,
     )
 
-    from evaluation.readability import readability_scores
-
-    readability = readability_scores(prediction)
     memory_mb: float | None = None
     try:
         import psutil
@@ -467,6 +470,7 @@ def compute_composite_score(
     faithfulness: float,
     bertscore: float,
     coverage: float,
+    fluency: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> float:
     """Compute a weighted composite score for overall model ranking.
@@ -478,11 +482,12 @@ def compute_composite_score(
         weights = config.COMPOSITE_SCORE_WEIGHTS
 
     score = (
-        weights.get("rougeL", 0.30) * max(0.0, min(1.0, rougeL))
-        + weights.get("semantic_similarity", 0.25) * max(0.0, min(1.0, semantic_similarity))
-        + weights.get("faithfulness", 0.20) * max(0.0, min(1.0, faithfulness))
-        + weights.get("bertscore", 0.15) * max(0.0, min(1.0, bertscore))
+        weights.get("rougeL", 0.25) * max(0.0, min(1.0, rougeL))
+        + weights.get("bertscore", 0.25) * max(0.0, min(1.0, bertscore))
+        + weights.get("semantic_similarity", 0.20) * max(0.0, min(1.0, semantic_similarity))
+        + weights.get("faithfulness", 0.15) * max(0.0, min(1.0, faithfulness))
         + weights.get("coverage", 0.10) * max(0.0, min(1.0, coverage))
+        + weights.get("fluency", 0.05) * max(0.0, min(1.0, fluency))
     )
     return round(max(0.0, min(1.0, score)), 4)
 

@@ -101,16 +101,20 @@ class RAGChatService:
         return self.embedding_service.list_models()
 
     def _trigger_auto_title(self, conv_id: str) -> None:
-        try:
-            messages = self.repository.list_messages(conv_id)
-            if 2 <= len(messages) <= 4:
-                first_user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
-                if first_user_msg:
-                    new_title = generate_title_for_conversation(first_user_msg)
-                    self.repository.rename_conversation(conv_id, new_title)
-                    logger.info(f"Auto title generated for conversation {conv_id}: {new_title}")
-        except Exception as e:
-            logger.error(f"Failed to auto-update conversation title: {e}")
+        def run():
+            try:
+                messages = self.repository.list_messages(conv_id)
+                if 2 <= len(messages) <= 4:
+                    first_user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
+                    if first_user_msg:
+                        new_title = generate_title_for_conversation(first_user_msg)
+                        self.repository.rename_conversation(conv_id, new_title)
+                        logger.info(f"Auto title generated asynchronously for conversation {conv_id}: {new_title}")
+            except Exception as e:
+                logger.error(f"Failed to auto-update conversation title asynchronously: {e}")
+
+        import threading
+        threading.Thread(target=run, daemon=True).start()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Upload — chunk_size và embedding_model được hardcode
@@ -169,17 +173,22 @@ class RAGChatService:
         self.vector_store.upsert_chunks(chunks, vectors)
 
         # RAPTOR-lite hierarchical indexing (Recursive GMM Tree)
-        try:
-            from .raptor import RaptorIndexer
-            indexer = RaptorIndexer(
-                repository=self.repository,
-                vector_store=self.vector_store,
-                embedding_service=self.embedding_service,
-                generator=self.generator
-            )
-            indexer.build_tree(document_id, chunks, vectors, embedding_model, max_levels=3)
-        except Exception as exc:
-            logger.error(f"❌ Failed to build RAPTOR tree for document {document_id}: {exc}", exc_info=True)
+        import os
+        use_raptor = os.getenv("RAG_USE_RAPTOR", "1").lower() in ("1", "true", "yes")
+        if use_raptor:
+            try:
+                from .raptor import RaptorIndexer
+                indexer = RaptorIndexer(
+                    repository=self.repository,
+                    vector_store=self.vector_store,
+                    embedding_service=self.embedding_service,
+                    generator=self.generator
+                )
+                indexer.build_tree(document_id, chunks, vectors, embedding_model, max_levels=3)
+            except Exception as exc:
+                logger.error(f"❌ Failed to build RAPTOR tree for document {document_id}: {exc}", exc_info=True)
+        else:
+            logger.info("🌲 Bỏ qua dựng cây RAPTOR theo cấu hình RAG_USE_RAPTOR=0 để nạp file nhanh.")
 
         logger.info("✅ Upload xong: %s — %d chunks", filename, len(chunks))
         return {
@@ -323,9 +332,10 @@ class RAGChatService:
             return response
 
         # 2. DOCUMENT_QA / SUMMARIZE INTENT (Vòng lặp Agentic RAG tự sửa lỗi)
+        import os
         current_query = query
         retries = 0
-        max_retries = 2  # Cho phép thử lại tối đa 2 lần
+        max_retries = int(os.getenv("RAG_AGENT_MAX_RETRIES", "2"))  # Đọc cấu hình số lần retry tối đa
         current_threshold = threshold
         current_top_k = top_k
         
@@ -344,8 +354,9 @@ class RAGChatService:
                     top_k=RETRIEVAL_INITIAL_TOP_K,
                     document_ids=document_ids or None,
                 )
-                # Query expansion (chỉ chạy ở lần thử đầu tiên)
-                if retries == 0:
+                # Query expansion (chỉ chạy ở lần thử đầu tiên nếu được bật)
+                use_expansion = os.getenv("RAG_USE_QUERY_EXPANSION", "1").lower() in ("1", "true", "yes")
+                if retries == 0 and use_expansion:
                     expanded = expand_query(current_query)
                     if expanded:
                         seen_ids = {c["id"] for c in candidates}
@@ -440,7 +451,9 @@ class RAGChatService:
 
         # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk) bằng NLI audit
         eval_metrics = None
-        if retrieved:
+        import os
+        run_audit = os.getenv("RAG_EVALUATE_HALLUCINATION", "1").lower() in ("1", "true", "yes")
+        if retrieved and run_audit:
             try:
                 from evaluation.hallucination import audit_summary
                 source_text = "\n\n".join(c["text"] for c in retrieved)

@@ -202,14 +202,32 @@ class RAGRepository:
             ).fetchall()
         items: list[dict[str, Any]] = []
         for row in rows:
+            doc_id = row["id"]
+            
+            # Tính toán chunks_count thực tế
+            with self._connect() as conn_chunk:
+                count_row = conn_chunk.execute(
+                    "SELECT COUNT(*) as count FROM rag_chunks WHERE document_id = ?", (doc_id,)
+                ).fetchone()
+                chunks_count = count_row["count"] if count_row else 0
+                
+            # Ước tính file_size dựa trên tổng độ dài text trong các chunks
+            with self._connect() as conn_size:
+                size_row = conn_size.execute(
+                    "SELECT SUM(LENGTH(text_content)) as total_len FROM rag_chunks WHERE document_id = ?", (doc_id,)
+                ).fetchone()
+                file_size = size_row["total_len"] if size_row and size_row["total_len"] is not None else 0
+                
             items.append(
                 {
-                    "id": row["id"],
+                    "id": doc_id,
                     "filename": row["filename"],
                     "source_type": row["source_type"],
                     "status": row["status"],
                     "created_at": row["created_at"],
                     "metadata": json.loads(row["metadata_json"] or "{}"),
+                    "chunks_count": chunks_count,
+                    "file_size": file_size,
                 }
             )
         return items

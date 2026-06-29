@@ -157,112 +157,12 @@ def _run_transformer_generate(
     except Exception as exc:
         logger.error("❌ Transformer generate [%s] lỗi: %s", model_key, exc)
         return ""
+
+
 def _run_llm_api(prompt: str, generator_type: str) -> str:
-    """Gọi LLM API tương ứng để sinh văn bản (có retry + rate-limit throttling)."""
-    import requests
-    import time
-    from .rag_config import (
-        GEMINI_API_KEY,
-        OPENAI_API_KEY,
-        GEMINI_MODEL,
-        OPENAI_MODEL,
-        OLLAMA_API_URL,
-        OLLAMA_MODEL,
-    )
-    from .agent import _wait_for_rate_limit
-
-    MAX_RETRIES = 3
-    BASE_DELAY = 5  # giây (tăng từ 2 lên 5 để tránh retry quá nhanh)
-
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            _wait_for_rate_limit()
-
-            if generator_type == "gemini":
-                if not GEMINI_API_KEY:
-                    raise ValueError("GEMINI_API_KEY chưa được cấu hình trong .env")
-                
-                # Gemini API Endpoint
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "contents": [
-                        {
-                            "parts": [
-                                {"text": prompt}
-                            ]
-                        }
-                    ],
-                    "generationConfig": {
-                        "temperature": 0.2,
-                        "maxOutputTokens": 800
-                    }
-                }
-                
-                response = requests.post(url, json=payload, headers=headers, timeout=30)
-                response.raise_for_status()
-                res_data = response.json()
-                return res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-            elif generator_type == "openai":
-                if not OPENAI_API_KEY:
-                    raise ValueError("OPENAI_API_KEY chưa được cấu hình trong .env")
-                
-                # OpenAI Chat Completion Endpoint
-                url = "https://api.openai.com/v1/chat/completions"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENAI_API_KEY}"
-                }
-                payload = {
-                    "model": OPENAI_MODEL,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 800
-                }
-                
-                response = requests.post(url, json=payload, headers=headers, timeout=30)
-                response.raise_for_status()
-                res_data = response.json()
-                return res_data["choices"][0]["message"]["content"].strip()
-
-            elif generator_type == "ollama":
-                # Ollama API Endpoint
-                url = OLLAMA_API_URL
-                headers = {"Content-Type": "application/json"}
-                payload = {
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.2
-                    }
-                }
-                
-                response = requests.post(url, json=payload, headers=headers, timeout=45)
-                response.raise_for_status()
-                res_data = response.json()
-                return res_data["response"].strip()
-
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 429 and attempt < MAX_RETRIES:
-                delay = BASE_DELAY * (2 ** attempt)  # 5s → 10s → 20s
-                logger.warning(
-                    "⏳ Rate-limited [%s] — retry %d/%d sau %ds...",
-                    generator_type, attempt + 1, MAX_RETRIES, delay
-                )
-                time.sleep(delay)
-                continue
-            logger.error("❌ Gọi LLM API [%s] lỗi: %s", generator_type, exc)
-            return ""
-
-        except Exception as exc:
-            logger.error("❌ Gọi LLM API [%s] lỗi: %s", generator_type, exc)
-            return ""
-    
-    return ""
+    """Gọi LLM API tương ứng để sinh văn bản (có retry + rate-limit throttling và fallback)."""
+    from .agent import _execute_llm_request
+    return _execute_llm_request(prompt, generator_type, temperature=0.2, max_tokens=800)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

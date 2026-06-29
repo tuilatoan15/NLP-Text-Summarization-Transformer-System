@@ -365,14 +365,15 @@ const Compare = () => {
             </select>
           </div>
           
-          <button
+          {/* Ẩn nút kích hoạt benchmark tự động theo yêu cầu của người dùng để tránh bấm nhầm gây treo máy */}
+          {/* <button
             onClick={handleRunBenchmark}
             disabled={runningBenchmark}
             className="ui-btn-primary py-2 px-4 text-xs font-bold shrink-0 flex items-center gap-2 cursor-pointer"
           >
             {runningBenchmark ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
             Kích hoạt Benchmark tự động
-          </button>
+          </button> */}
         </div>
       </div>
 
