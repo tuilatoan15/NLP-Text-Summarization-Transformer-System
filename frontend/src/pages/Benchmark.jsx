@@ -174,6 +174,43 @@ const Benchmark = () => {
   const lang = locale === 'vie' ? 'vie' : 'eng';
   const t = (key) => T[lang][key] ?? key;
 
+  const getModelTypeStyles = (key) => {
+    // 1. Extractive
+    if (['textrank', 'lexrank', 'lsa'].includes(key)) {
+      return {
+        bg: 'bg-emerald-50 dark:bg-emerald-950/20',
+        border: 'border-emerald-250 dark:border-emerald-900/30',
+        text: 'text-emerald-700 dark:text-emerald-400',
+        label: 'Extractive'
+      };
+    }
+    // 2. Abstractive (Fine-tuned)
+    if (['vit5', 'bartpho'].includes(key)) {
+      return {
+        bg: 'bg-amber-50 dark:bg-amber-950/20',
+        border: 'border-amber-250 dark:border-amber-900/30',
+        text: 'text-amber-700 dark:text-amber-400',
+        label: 'Abstractive (FT)'
+      };
+    }
+    // 3. Abstractive (Baseline)
+    if (key === 'mt5') {
+      return {
+        bg: 'bg-rose-50 dark:bg-rose-950/20',
+        border: 'border-rose-250 dark:border-rose-900/30',
+        text: 'text-rose-700 dark:text-rose-400',
+        label: 'Abstractive (Base)'
+      };
+    }
+    // 4. Hybrid (Lai ghép)
+    return {
+      bg: 'bg-sky-50 dark:bg-sky-950/20',
+      border: 'border-sky-250 dark:border-sky-900/30',
+      text: 'text-sky-700 dark:text-sky-400',
+      label: 'Hybrid'
+    };
+  };
+
   const [benchmarkSize, setBenchmarkSize] = useState(1000);
 
   const leaderboardQuery = useResearchLeaderboardQuery('All', benchmarkSize, true);
@@ -299,72 +336,7 @@ const Benchmark = () => {
         </div>
       </div>
 
-      {/* Top Performer Card */}
-      {topModel && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="ui-card p-6 border-2"
-          style={{ borderColor: '#fbbf24' }}
-        >
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-16 h-16 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
-              <span className="text-3xl">👑</span>
-            </div>
-            <div className="flex-1">
-              <h2 className="text-2xl font-bold text-[var(--text-primary)]">{topModel.name}</h2>
-              <p className="text-sm text-[var(--text-muted)]">{t('topPerformer')}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-4xl font-bold text-yellow-600">{(topModel.composite * 100).toFixed(1)}%</p>
-              <p className="text-xs text-[var(--text-muted)]">{t('composite')}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <p className="text-xs text-[var(--text-muted)]">ROUGE-1</p>
-              <p className="text-lg font-semibold text-[var(--text-primary)]">{(topModel.rouge1 * 100).toFixed(1)}%</p>
-            </div>
-            <div>
-              <p className="text-xs text-[var(--text-muted)]">BERTScore</p>
-              <p className="text-lg font-semibold text-[var(--text-primary)]">{(topModel.bertscore * 100).toFixed(1)}%</p>
-            </div>
-            <div>
-              <p className="text-xs text-[var(--text-muted)]">{t('latency')}</p>
-              <p className="text-lg font-semibold text-[var(--text-primary)]">{topModel.latency?.toFixed(3)}s</p>
-            </div>
-            <div>
-              <p className="text-xs text-[var(--text-muted)]">{t('type')}</p>
-              <p className="text-lg font-semibold text-[var(--text-primary)] capitalize">{t(topModel.group) || topModel.group}</p>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard icon={Target} label={t('avgRouge')} value={avgRouge} unit="%" color="#6366f1" />
-        <MetricCard icon={TrendingUp} label={t('avgBertscore')} value={avgBertscore} unit="%" color="#10b981" />
-        <MetricCard icon={Zap} label={t('fastestModel')} value={fastestName} unit={` (${fastest.toFixed(3)}s)`} color="#f59e0b" />
-        <MetricCard icon={Clock} label={t('totalSamples')} value={metadata.total_samples?.toLocaleString() || '—'} unit="" color="#3b82f6" />
-      </div>
-
-      {/* Model Rankings */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="space-y-3"
-      >
-        <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
-          <Trophy size={20} style={{ color: 'var(--accent)' }} />
-          {t('modelRanking')}
-        </h2>
-        <div className="space-y-2">
-          {models.map((model, index) => (
-            <ModelRankCard key={model.key || model.name} model={model} rank={index + 1} t={t} />
-          ))}
-        </div>
-      </motion.div>
 
       {/* Radar Chart */}
       {radarData.length > 0 && (
@@ -430,46 +402,38 @@ const Benchmark = () => {
         <table className="w-full text-sm" style={{ minWidth: '900px' }}>
           <thead>
             <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
-              <th className="text-left py-2 px-2 font-semibold text-[var(--text-primary)]">{t('model')}</th>
-              <th className="text-left py-2 px-2 font-semibold text-[var(--text-primary)]">{t('group')}</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-1</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-L</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">BLEU</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">BERTScore</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">{t('semantic')}</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">{t('faithfulness')}</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">{t('hallucination')}</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">{t('latency')} (s)</th>
-              <th className="text-right py-2 px-2 font-semibold text-[var(--text-primary)]">{t('composite')}</th>
+              <th className="text-left py-2 px-2 font-semibold text-[var(--text-primary)]">Phương pháp</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-1 (R1)</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-2 (R2)</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-L (RL)</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">ROUGE-LSum</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">BERT P</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">BERT R</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)]">BERT F1</th>
+              <th className="text-center py-2 px-2 font-semibold text-[var(--text-primary)] bg-sky-500/5 text-sky-600 dark:text-sky-400">Latency (s)</th>
             </tr>
           </thead>
           <tbody>
             {models.map((m) => (
               <tr key={m.key || m.name} className="border-b hover:bg-[var(--bg-muted)]" style={{ borderColor: 'var(--border-subtle)' }}>
                 <td className="py-3 px-2">
-                  <span className="font-medium text-[var(--text-primary)]">{m.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${getModelTypeStyles(m.key).bg} ${getModelTypeStyles(m.key).border} ${getModelTypeStyles(m.key).text}`}>
+                      {getModelTypeStyles(m.key).label}
+                    </span>
+                    <span className="font-semibold text-[var(--text-primary)]">{m.name}</span>
+                  </div>
                 </td>
-                <td className="py-3 px-2">
-                  <span
-                    className="text-xs px-2 py-1 rounded-full text-white font-semibold"
-                    style={{ backgroundColor: GROUP_COLORS[m.group] || '#888' }}
-                  >
-                    {t(m.group) || m.group}
-                  </span>
+                <td className="py-3 px-2 text-center font-mono">{(m.rouge1 ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.rouge2 ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.rougeL ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.rougeLsum ?? m.rougeL ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.bert_p ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.bert_r ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 text-center font-mono">{(m.bertscore ?? 0).toFixed(4)}</td>
+                <td className="py-3 px-2 bg-sky-500/5 text-sky-700 dark:text-sky-300 font-bold text-center font-mono">
+                  {(m.latency ?? 0).toFixed(4)}
                 </td>
-                <td className="py-3 px-2 text-right font-semibold text-[var(--accent)]">{(m.rouge1 * 100).toFixed(2)}%</td>
-                <td className="py-3 px-2 text-right">{(m.rougeL * 100).toFixed(2)}%</td>
-                <td className="py-3 px-2 text-right">{(m.bleu * 100).toFixed(2)}%</td>
-                <td className="py-3 px-2 text-right">{(m.bertscore * 100).toFixed(2)}%</td>
-                <td className="py-3 px-2 text-right">{(m.semantic * 100).toFixed(1)}%</td>
-                <td className="py-3 px-2 text-right">{((m.faithfulness || 0) * 100).toFixed(1)}%</td>
-                <td className="py-3 px-2 text-right">
-                  <span style={{ color: (m.hallucination_pct || 0) > 15 ? '#ef4444' : (m.hallucination_pct || 0) > 5 ? '#f59e0b' : '#10b981' }}>
-                    {(m.hallucination_pct || 0).toFixed(1)}%
-                  </span>
-                </td>
-                <td className="py-3 px-2 text-right text-[var(--text-muted)]">{(m.latency || 0).toFixed(3)}s</td>
-                <td className="py-3 px-2 text-right font-bold text-[var(--text-primary)]">{((m.composite || 0) * 100).toFixed(1)}%</td>
               </tr>
             ))}
           </tbody>

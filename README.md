@@ -41,23 +41,23 @@ Hệ thống tích hợp song song các thuật toán trích xuất (Extractive)
 
 Dưới đây là kết quả thực nghiệm chi tiết thu được khi chạy thử nghiệm trên tập mẫu kiểm thử **5.000 tài liệu VietNews** (seed=42) trên cấu hình cục bộ (CPU Intel64 Family 6 Model 154 Stepping 3, RAM 15.63GB, GPU NVIDIA GeForce RTX 3050 Ti Laptop 4GB VRAM):
 
-| Hạng | Mô hình / Giải thuật | Nhóm | ROUGE-1 | ROUGE-2 | ROUGE-L | BLEU | BERTScore | Sem. Sim | Latency (s) | Composite Score |
+| Hạng | Model/Giải thuật | Nhóm | ROUGE-1 | ROUGE-2 | ROUGE-L | BERTScore | Thời gian TB | Tỷ lệ nén | Độ trung thực | Điểm tổng hợp |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 | **LEXRANK** | Extractive | 0.4258 | 0.2102 | 0.2835 | 0.0773 | 0.7210 | 0.8169 | **0.0093s** | **0.6143** |
-| 2 | **TEXTRANK** | Extractive | 0.4198 | 0.2076 | 0.2820 | 0.0758 | 0.7196 | 0.8165 | **0.0198s** | **0.6139** |
-| 3 | **LSA** | Extractive | 0.4604 | 0.2008 | 0.2931 | 0.0775 | 0.7101 | 0.8008 | **0.0088s** | **0.6051** |
-| 4 | **VIT5** | Abstractive | 0.5953 | 0.2778 | 0.3802 | 0.1548 | 0.7067 | 0.7457 | 2.6564s | **0.5788** |
-| 5 | **TEXTRANK ➔ VIT5** | Hybrid | 0.5819 | 0.2610 | 0.3676 | 0.1421 | 0.7013 | 0.7387 | 1.9019s | **0.5730** |
-| 6 | **LEXRANK ➔ VIT5** | Hybrid | 0.5822 | 0.2600 | 0.3663 | 0.1412 | 0.7011 | 0.7386 | 1.8453s | **0.5726** |
-| 7 | **LSA ➔ VIT5** | Hybrid | 0.5615 | 0.2296 | 0.3458 | 0.1202 | 0.6925 | 0.7248 | 1.7865s | **0.5612** |
-| 8 | **BARTPHO** | Abstractive | 0.5414 | 0.1995 | 0.3356 | 0.0798 | 0.6784 | 0.7761 | 5.1996s | **0.5594** |
-| 9 | **TEXTRANK ➔ MT5** | Hybrid | 0.5474 | 0.2201 | 0.3345 | 0.1117 | 0.6884 | 0.7225 | 2.6709s | **0.5557** |
-| 10 | **LEXRANK ➔ MT5** | Hybrid | 0.5462 | 0.2187 | 0.3332 | 0.1107 | 0.6880 | 0.7212 | 2.7206s | **0.5549** |
-| 11 | **TEXTRANK ➔ BARTPHO**| Hybrid | 0.5275 | 0.1879 | 0.3262 | 0.0749 | 0.6759 | 0.7653 | 2.4403s | **0.5537** |
-| 12 | **MT5** | Abstractive | 0.5508 | 0.2158 | 0.3330 | 0.1105 | 0.6870 | 0.7174 | 3.2492s | **0.5532** |
-| 13 | **LEXRANK ➔ BARTPHO** | Hybrid | 0.5269 | 0.1867 | 0.3253 | 0.0744 | 0.6758 | 0.7647 | 2.3137s | **0.5531** |
-| 14 | **LSA ➔ MT5** | Hybrid | 0.5219 | 0.1924 | 0.3183 | 0.0946 | 0.6800 | 0.7059 | 3.0224s | **0.5447** |
-| 15 | **LSA ➔ BARTPHO** | Hybrid | 0.5093 | 0.1671 | 0.3104 | 0.0675 | 0.6703 | 0.7518 | 2.1272s | **0.5438** |
+| 1 | TextRank | Extractive | 41% | 21% | 28% | 72% | 0.01s | 23% | 100% | 61% |
+| 2 | LexRank | Extractive | 42% | 21% | 28% | 72% | 0.01s | 22% | 100% | 61% |
+| 3 | LSA Summarizer | Extractive | 46% | 20% | 29% | 71% | 0.01s | 18% | 100% | 61% |
+| 4 | ViT5 (Fine-tuned) | Abstractive | 60% | 28% | 38% | 71% | 2.49s | 10% | 83% | 58% |
+| 5 | TextRank ➔ ViT5 | Hybrid | 58% | 26% | 37% | 70% | 1.64s | 9% | 83% | 57% |
+| 6 | LexRank ➔ ViT5 | Hybrid | 58% | 26% | 37% | 70% | 1.61s | 9% | 83% | 57% |
+| 7 | LSA ➔ ViT5 | Hybrid | 56% | 23% | 35% | 69% | 1.57s | 9% | 83% | 56% |
+| 8 | BARTPho (Fine-tuned) | Abstractive | 54% | 20% | 33% | 68% | 3.38s | 9% | 86% | 56% |
+| 9 | TextRank ➔ mT5 | Hybrid | 55% | 22% | 33% | 69% | 1.99s | 9% | 83% | 56% |
+| 10 | TextRank ➔ BARTPho | Hybrid | 53% | 19% | 33% | 68% | 1.86s | 8% | 87% | 55% |
+| 11 | LexRank ➔ BARTPho | Hybrid | 53% | 19% | 33% | 68% | 1.68s | 8% | 87% | 55% |
+| 12 | LexRank ➔ mT5 | Hybrid | 54% | 22% | 33% | 69% | 1.89s | 9% | 83% | 55% |
+| 13 | mT5 (Baseline) | Abstractive | 55% | 21% | 33% | 69% | 2.73s | 9% | 82% | 55% |
+| 14 | LSA ➔ mT5 | Hybrid | 52% | 19% | 32% | 68% | 1.70s | 8% | 84% | 55% |
+| 15 | LSA ➔ BARTPho | Hybrid | 51% | 16% | 31% | 67% | 1.50s | 8% | 86% | 54% |
 
 ### Nhận Xét Kết Luận Nghiên Cứu:
 1. **Chất lượng sinh vượt trội của ViT5:** Mô hình `VIT5` (Fine-tuned) vẫn duy trì điểm ROUGE-L cao nhất (**0.3802**), sinh văn bản mượt mà, trôi chảy và đạt điểm BLEU vượt trội (**0.1548**).

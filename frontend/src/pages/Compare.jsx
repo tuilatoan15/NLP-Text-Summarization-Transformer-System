@@ -339,6 +339,43 @@ const Compare = () => {
     return 'bg-[var(--bg-muted)] text-[var(--text-muted)]';
   };
 
+  const getModelTypeStyles = (key) => {
+    // 1. Extractive
+    if (['textrank', 'lexrank', 'lsa'].includes(key)) {
+      return {
+        bg: 'bg-emerald-50 dark:bg-emerald-950/20',
+        border: 'border-emerald-250 dark:border-emerald-900/30',
+        text: 'text-emerald-700 dark:text-emerald-400',
+        label: 'Extractive'
+      };
+    }
+    // 2. Abstractive (Fine-tuned)
+    if (['vit5', 'bartpho'].includes(key)) {
+      return {
+        bg: 'bg-amber-50 dark:bg-amber-950/20',
+        border: 'border-amber-250 dark:border-amber-900/30',
+        text: 'text-amber-700 dark:text-amber-400',
+        label: 'Abstractive (FT)'
+      };
+    }
+    // 3. Abstractive (Baseline)
+    if (key === 'mt5') {
+      return {
+        bg: 'bg-rose-50 dark:bg-rose-950/20',
+        border: 'border-rose-250 dark:border-rose-900/30',
+        text: 'text-rose-700 dark:text-rose-400',
+        label: 'Abstractive (Base)'
+      };
+    }
+    // 4. Hybrid (Lai ghép)
+    return {
+      bg: 'bg-sky-50 dark:bg-sky-950/20',
+      border: 'border-sky-250 dark:border-sky-900/30',
+      text: 'text-sky-700 dark:text-sky-400',
+      label: 'Hybrid'
+    };
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
@@ -472,46 +509,37 @@ const Compare = () => {
               <table className="w-full text-xs">
                 <thead className="ui-table-head border-b">
                   <tr className="divide-x divide-[var(--border)]/20">
-                    <th className="px-4 py-3 text-left w-12 text-center">Hạng</th>
-                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-[var(--bg-muted)]" onClick={() => requestSort('algorithm')}>Model/Giải thuật</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rouge1')}>ROUGE-1</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rouge2')}>ROUGE-2</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rougeL')}>ROUGE-L</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('bertscore')}>BERTScore</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('latency')}>Thời gian TB</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('compression')}>Tỷ lệ nén</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('faithfulness')}>Độ trung thực</th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center bg-sky-500/5 text-sky-600 dark:text-sky-400" onClick={() => requestSort('composite')}>Điểm tổng hợp</th>
+                    <th className="px-4 py-3 text-left cursor-pointer hover:bg-[var(--bg-muted)]" onClick={() => requestSort('algorithm')}>Phương pháp</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rouge1')}>ROUGE-1 (R1)</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rouge2')}>ROUGE-2 (R2)</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rougeL')}>ROUGE-L (RL)</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('rougeLsum')}>ROUGE-LSum</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('bert_p')}>BERT P</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('bert_r')}>BERT R</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center" onClick={() => requestSort('bertscore')}>BERT F1</th>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] text-center bg-sky-500/5 text-sky-600 dark:text-sky-400" onClick={() => requestSort('latency')}>Latency (s)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-subtle)] font-medium text-[var(--text-secondary)]">
                   {processedLeaderboard.map((row, idx) => (
                     <tr key={row.key} className="ui-table-row hover:bg-[var(--bg-muted)]/40 divide-x divide-[var(--border)]/10">
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-extrabold ${getRankBadge(idx)}`}>
-                          {idx + 1}
-                        </span>
-                      </td>
                       <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">
-                        <div className="flex flex-col">
-                          <span>{modelsSpecifications[row.key]?.name || row.name || row.key}</span>
-                          <span className="text-[9px] text-[var(--text-faint)] uppercase tracking-wider font-bold mt-0.5">{row.group}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${getModelTypeStyles(row.key).bg} ${getModelTypeStyles(row.key).border} ${getModelTypeStyles(row.key).text}`}>
+                            {getModelTypeStyles(row.key).label}
+                          </span>
+                          <span className="text-xs font-bold">{modelsSpecifications[row.key]?.name || row.name || row.key}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.rouge1)}</td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.rouge2)}</td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.rougeL)}</td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.bertscore)}</td>
-                      <td className="px-4 py-3 text-center font-mono">{(row.latency ?? 0).toFixed(2)}s</td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.compression)}</td>
-                      <td className="px-4 py-3 text-center font-mono">{pct(row.faithfulness ?? 0.85)}</td>
-                      <td className="px-4 py-3 bg-sky-500/5 text-sky-700 dark:text-sky-300 font-bold">
-                        <div className="flex items-center gap-2">
-                          <span className="w-10 text-right font-mono">{pct(row.composite)}</span>
-                          <div className="h-2 rounded bg-[var(--bg-inset)] flex-1 overflow-hidden max-w-[80px] hidden md:block">
-                            <div className="h-full bg-sky-500 rounded composite-score-bar" style={{ width: pct(row.composite) }} />
-                          </div>
-                        </div>
+                      <td className="px-4 py-3 text-center font-mono">{(row.rouge1 ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.rouge2 ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.rougeL ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.rougeLsum ?? row.rougeL ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.bert_p ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.bert_r ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 text-center font-mono">{(row.bertscore ?? 0).toFixed(4)}</td>
+                      <td className="px-4 py-3 bg-sky-500/5 text-sky-700 dark:text-sky-300 font-bold text-center font-mono">
+                        {(row.latency ?? 0).toFixed(4)}
                       </td>
                     </tr>
                   ))}

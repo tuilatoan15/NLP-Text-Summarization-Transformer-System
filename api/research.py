@@ -627,6 +627,11 @@ FALLBACK_LEADERBOARD = {
 }
 
 def _calculate_leaderboard_composite(model_data: dict) -> float:
+    # Nếu dữ liệu đã có sẵn trường composite (ví dụ từ file JSON cấu hình cứng của người dùng),
+    # trả về luôn để hiển thị đúng thứ hạng thực nghiệm đã báo cáo.
+    if "composite" in model_data and model_data["composite"] is not None:
+        return model_data["composite"]
+        
     from src import config
     w = getattr(config, "COMPOSITE_SCORE_WEIGHTS", {})
     rougeL = model_data.get("rougeL", 0.0)
@@ -645,6 +650,7 @@ def _calculate_leaderboard_composite(model_data: dict) -> float:
         + w.get("fluency", 0.05) * fluency
     )
     return round(score, 4)
+
 
 def _get_fallback_samples() -> list[dict]:
     """Tự động sinh 100 mẫu thử nghiệm tiếng Việt chất lượng cao để hiển thị làm dữ liệu dự phòng."""

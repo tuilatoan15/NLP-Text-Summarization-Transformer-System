@@ -155,7 +155,7 @@ export async function exportPodcastTts(documentId: string): Promise<any> {
 }
 
 export async function getResearchLeaderboard(size = 1000): Promise<any> {
-  const response = await fetch(`${API}/research/leaderboard?size=${size}`);
+  const response = await fetch(`${API}/research/leaderboard?size=${size}&_t=${Date.now()}`);
   return parseJson(response, 'Research leaderboard');
 }
 
@@ -202,7 +202,7 @@ export async function runResearchBenchmark(samples = 10000): Promise<any> {
 }
 
 export async function getLeaderboardByCategory(category: string, size = 1000): Promise<any> {
-  const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}&size=${size}`);
+  const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}&size=${size}&_t=${Date.now()}`);
   return parseJson(response, 'Leaderboard by category');
 }
 

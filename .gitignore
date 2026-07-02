@@ -66,4 +66,8 @@ docs/*.xml
 docs/*.doc
 docs/*.txt
 
+# Ignore specific diagrams folder
+docs/So do/
+
+
 

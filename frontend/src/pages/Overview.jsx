@@ -48,9 +48,8 @@ const StatCard = memo(({ title, value, subtext, trend, trendType, icon: Icon, co
       <div className="flex items-baseline gap-2 mb-1">
         <h3 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{value}</h3>
         {trend && (
-          <span className={`text-[10px] font-bold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${
-            isUp ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-          }`}>
+          <span className={`text-[10px] font-bold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${isUp ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
+            }`}>
             {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
             {trend}
           </span>
@@ -132,7 +131,7 @@ const Overview = () => {
             {loading ? <Skeleton className="h-10 w-64" /> : `${greeting}!`}
           </h1>
           <p className="text-sm text-[var(--text-secondary)] font-medium leading-relaxed">
-            Hệ thống phân tích và tóm tắt tài liệu khoa học sử dụng các thuật toán học máy Transformer tối tân. Thực hiện so kè, trò chuyện ngữ nghĩa RAG và đánh giá hiệu năng tự động.
+            Xây dựng và so sánh phương pháp tóm tắt lai kết hợp giữa tóm tắt trích rút và mô hình Transformer cho bài toán tóm tắt văn bản tiếng việt.
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-2 text-xs font-semibold">
             {loading ? (
@@ -317,8 +316,8 @@ const Overview = () => {
                 <AreaChart data={timeseries} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={chart.accent} stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor={chart.accent} stopOpacity={0}/>
+                      <stop offset="5%" stopColor={chart.accent} stopOpacity={0.2} />
+                      <stop offset="95%" stopColor={chart.accent} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chart.grid} />
@@ -365,7 +364,7 @@ const Overview = () => {
               >
                 {/* Timeline Dot */}
                 <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-elevated)] bg-sky-500 group-hover:scale-125 transition-transform" />
-                
+
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[var(--bg-muted)]/30 hover:bg-[var(--bg-muted)]/60 border border-[var(--border)]/40 rounded-xl p-3 transition-colors duration-150">
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-secondary)]">
