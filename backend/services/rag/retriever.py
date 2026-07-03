@@ -19,6 +19,8 @@ from .rag_config import (
     RETRIEVAL_PRE_RERANK_TOP_K,
     RETRIEVAL_FINAL_TOP_K,
     RETRIEVAL_THRESHOLD,
+    RAG_PARALLEL_RETRIEVAL,
+    RAG_RRF_K,
 )
 from .reranker import CrossEncoderReranker
 
@@ -81,55 +83,49 @@ class HybridRetriever:
         if not chunks:
             return []
 
-        # ── Bước 1: Tính BM25 scores ──────────────────────────────────────
-        t_bm25_start = time.perf_counter()
-        bm25_scores = self._bm25_scores(query, chunks)
-        t_bm25 = time.perf_counter() - t_bm25_start
+        # ── Bước 1 & 2: BM25 + Dense (song song nếu bật) ───────────────────
+        if RAG_PARALLEL_RETRIEVAL and len(chunks) >= 8:
+            from concurrent.futures import ThreadPoolExecutor
 
-        # ── Bước 2: Tính Dense Vector similarity (cosine) ──────────────────
-        t_dense_start = time.perf_counter()
-        q = np.array(query_vector, dtype=np.float32)
-        q_norm = np.linalg.norm(q) or 1.0
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rag_ret") as pool:
+                f_bm25 = pool.submit(self._bm25_scores, query, chunks)
+                f_dense = pool.submit(self._dense_scores, query_vector, chunks)
+                bm25_scores = f_bm25.result()
+                dense_scored = f_dense.result()
+            t_bm25 = self.last_latency.get("bm25", 0.0)
+            t_dense = self.last_latency.get("dense", 0.0)
+        else:
+            t_bm25_start = time.perf_counter()
+            bm25_scores = self._bm25_scores(query, chunks)
+            t_bm25 = time.perf_counter() - t_bm25_start
+            self.last_latency["bm25"] = round(t_bm25, 6)
+            dense_scored = self._dense_scores(query_vector, chunks)
+            t_dense = self.last_latency.get("dense", 0.0)
 
-        dense_scored: list[tuple[int, float]] = []
-        for idx, chunk in enumerate(chunks):
-            if "embedding_score" in chunk:
-                sim = float(chunk["embedding_score"])
-            else:
-                vec = np.array(chunk.get("vector", []), dtype=np.float32)
-                if vec.size == 0:
-                    sim = 0.0
-                else:
-                    sim = float(np.dot(q, vec) / ((np.linalg.norm(vec) or 1.0) * q_norm))
-            dense_scored.append((idx, sim))
-        t_dense = time.perf_counter() - t_dense_start
-
-        # ── Bước 3: Reciprocal Rank Fusion (RRF) ──────────────────────────
+        # ── Bước 3: Weighted Reciprocal Rank Fusion (RRF) ───────────────────
         t_rrf_start = time.perf_counter()
         # Sắp xếp Dense để lấy hạng (rank)
         dense_scored.sort(key=lambda x: x[1], reverse=True)
         dense_ranks = {item[0]: rank for rank, item in enumerate(dense_scored, start=1)}
+        dense_sim = {item[0]: item[1] for item in dense_scored}
 
         # Sắp xếp BM25 để lấy hạng (rank)
         bm25_scored = list(enumerate(bm25_scores))
         bm25_scored.sort(key=lambda x: x[1], reverse=True)
         bm25_ranks = {item[0]: rank for rank, item in enumerate(bm25_scored, start=1)}
 
-        # Tính điểm RRF kết hợp
-        # RRF Score formula: RRF(d) = sum(1 / (k + rank_i(d)))
-        # Mặc định hằng số k = 60 theo tiêu chuẩn của Elasticsearch & IR Research
-        k = 60.0
+        # Weighted RRF: vector 70% + BM25 30% (theo rag_config)
+        k = RAG_RRF_K
         rrf_scored: list[dict[str, Any]] = []
 
         for idx, chunk in enumerate(chunks):
             dense_rank = dense_ranks[idx]
             bm25_rank = bm25_ranks[idx]
-            
-            # Tính RRF Score
-            rrf_score = (1.0 / (k + dense_rank)) + (1.0 / (k + bm25_rank))
+
+            rrf_score = (VECTOR_WEIGHT / (k + dense_rank)) + (BM25_WEIGHT / (k + bm25_rank))
             
             # Giữ lại các chỉ số điểm số thô để phân tích học thuật / XAI
-            sim = next(item[1] for item in dense_scored if item[0] == idx)
+            sim = dense_sim[idx]
             bm = bm25_scores[idx]
             
             rrf_scored.append({
@@ -201,6 +197,28 @@ class HybridRetriever:
         )
         return reranked
 
+    def _dense_scores(
+        self, query_vector: list[float], chunks: list[dict[str, Any]]
+    ) -> list[tuple[int, float]]:
+        import time
+
+        t0 = time.perf_counter()
+        q = np.array(query_vector, dtype=np.float32)
+        q_norm = np.linalg.norm(q) or 1.0
+        dense_scored: list[tuple[int, float]] = []
+        for idx, chunk in enumerate(chunks):
+            if "embedding_score" in chunk:
+                sim = float(chunk["embedding_score"])
+            else:
+                vec = np.array(chunk.get("vector", []), dtype=np.float32)
+                if vec.size == 0:
+                    sim = 0.0
+                else:
+                    sim = float(np.dot(q, vec) / ((np.linalg.norm(vec) or 1.0) * q_norm))
+            dense_scored.append((idx, sim))
+        self.last_latency["dense"] = round(time.perf_counter() - t0, 6)
+        return dense_scored
+
     # ─────────────────────── BM25 Implementation ────────────────────────────
 
     def _bm25_scores(self, query: str, chunks: list[dict[str, Any]]) -> list[float]:
@@ -208,6 +226,9 @@ class HybridRetriever:
         BM25 (Okapi BM25) với k1=1.5, b=0.75.
         Kết quả được normalize về [0, 1] để dễ kết hợp.
         """
+        import time
+
+        t0 = time.perf_counter()
         docs_tokens = [_tokens(chunk["text"]) for chunk in chunks]
         query_tokens = _tokens(query)
 
@@ -245,4 +266,5 @@ class HybridRetriever:
         max_score = max(scores) if scores else 0.0
         if max_score > 0:
             scores = [s / max_score for s in scores]
+        self.last_latency["bm25"] = round(time.perf_counter() - t0, 6)
         return scores

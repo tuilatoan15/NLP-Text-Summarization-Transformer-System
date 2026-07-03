@@ -54,12 +54,48 @@ def setup_logger(name: str = "nlp_summarizer", level: str | None = None) -> logg
 logger = setup_logger()
 
 
+def cuda_is_usable() -> bool:
+    """True khi CUDA khả dụng và có ít nhất 1 GPU visible (tránh CUDA_VISIBLE_DEVICES='')."""
+    try:
+        from src import config
+        if getattr(config, "FORCE_CPU", False):
+            return False
+        import torch
+        return bool(torch.cuda.is_available() and torch.cuda.device_count() > 0)
+    except Exception:
+        return False
+
+
+def resolve_torch_device_str() -> str:
+    """Trả về 'cuda:0' hoặc 'cpu' — dùng chung cho SentenceTransformer / CrossEncoder."""
+    return "cuda:0" if cuda_is_usable() else "cpu"
+
+
+def resolve_torch_device():
+    """Trả về torch.device — dùng chung cho HuggingFace / PyTorch."""
+    import torch
+    return torch.device(resolve_torch_device_str())
+
+
+def get_model_device_str(model: Any) -> str:
+    """Lấy device string từ model PyTorch / SentenceTransformer."""
+    try:
+        if hasattr(model, "device"):
+            return str(model.device)
+        return str(next(model.parameters()).device)
+    except Exception:
+        return "unknown"
+
+
 def get_device_info() -> dict:
     info: dict[str, Any] = {"device": "cpu", "cuda_available": False}
     try:
         import torch
-        info["cuda_available"] = torch.cuda.is_available()
-        if torch.cuda.is_available():
+        usable = cuda_is_usable()
+        info["cuda_available"] = usable
+        info["cuda_build"] = torch.version.cuda
+        info["torch_version"] = torch.__version__
+        if usable:
             idx = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(idx)
             total_mb = props.total_memory / 1024 ** 2
@@ -68,11 +104,11 @@ def get_device_info() -> dict:
             info.update(
                 device=f"cuda:{idx}",
                 gpu_name=props.name,
+                compute_capability=f"{props.major}.{props.minor}",
                 total_vram_mb=round(total_mb, 1),
                 reserved_vram_mb=round(reserved_mb, 1),
                 allocated_vram_mb=round(allocated_mb, 1),
                 free_vram_mb=round(total_mb - reserved_mb, 1),
-                torch_version=torch.__version__,
             )
     except Exception as exc:
         info["error"] = str(exc)
@@ -86,8 +122,25 @@ def log_device_info() -> None:
         logger.info("⚠️  PyTorch not importable")
         return
 
-    if not torch.cuda.is_available():
+    try:
+        from src import config
+        force_cpu = getattr(config, "FORCE_CPU", False)
+    except Exception:
+        force_cpu = False
+
+    if force_cpu:
+        logger.info("⚠️  FORCE_CPU=1 — tất cả model chạy trên CPU")
+        logger.info("    torch=%s  cuda_build=%s", torch.__version__, torch.version.cuda or "None")
+        return
+
+    if not cuda_is_usable():
+        reason = "CUDA build không có GPU visible"
+        if torch.cuda.is_available() and torch.cuda.device_count() == 0:
+            reason = "CUDA_VISIBLE_DEVICES ẩn GPU (kiểm tra .env / docker-compose)"
+        elif not torch.cuda.is_available():
+            reason = "PyTorch CPU-only hoặc driver CUDA chưa cài"
         logger.info("⚠️  No GPU found — running on CPU (inference will be slower)")
+        logger.info("    Root cause: %s", reason)
         logger.info("    torch=%s  cuda_build=%s", torch.__version__, torch.version.cuda or "None (CPU-only build)")
         return
 
@@ -105,13 +158,54 @@ def log_device_info() -> None:
     logger.info("=" * 56)
     logger.info("  🚀 GPU DETECTED — Running on CUDA")
     logger.info("  GPU Name    : %s", props.name)
+    logger.info("  Device      : cuda:%d", idx)
     logger.info("  VRAM Total  : %.0f MB  (%.1f GB)", total_mb, total_mb / 1024)
     logger.info("  VRAM Free   : %.0f MB", free_mb)
     logger.info("  Compute Cap : %d.%d  (sm_%d%d)", props.major, props.minor, props.major, props.minor)
-    logger.info("  CUDA Build  : %s  (Driver CUDA: %s)", torch.version.cuda, torch.version.cuda)
+    logger.info("  CUDA Build  : %s  (PyTorch CUDA)", torch.version.cuda)
     logger.info("  fp16 OK     : %s  (requires compute >= 7.0)", fp16_ok)
     logger.info("  torch ver   : %s", torch.__version__)
     logger.info("=" * 56)
+
+
+def log_all_model_devices() -> None:
+    """In device của từng model đã load — gọi sau preload startup."""
+    entries: list[str] = []
+
+    try:
+        from src.model_loader import _registry
+        for key, loaded in _registry._loaded.items():
+            try:
+                dev = get_model_device_str(loaded.model)
+                entries.append(f"  Summarizer[{key}] → {dev}  fp16={loaded.fp16}")
+            except Exception as exc:
+                entries.append(f"  Summarizer[{key}] → error: {exc}")
+    except Exception:
+        pass
+
+    try:
+        from backend.services.rag.embedding_service import _embedders
+        for name, embedder in _embedders.items():
+            model = embedder._model
+            if model is not None:
+                entries.append(f"  Embedding[{name}] → {get_model_device_str(model)}")
+    except Exception:
+        pass
+
+    try:
+        from backend.services.rag import reranker as reranker_mod
+        rer = reranker_mod._reranker_instance
+        if rer is not None:
+            entries.append(f"  Reranker → {get_model_device_str(rer.model)}")
+    except Exception:
+        pass
+
+    if entries:
+        logger.info("── Model devices ──")
+        for line in entries:
+            logger.info(line)
+    else:
+        logger.info("ℹ️  Chưa có model nào được load (lazy mode)")
 
 
 def log_vram_usage(tag: str = "") -> None:

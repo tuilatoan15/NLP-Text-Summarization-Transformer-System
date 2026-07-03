@@ -72,6 +72,59 @@ class HybridSummarizer:
         self.abstractive_model_key = abstractive_model_key
         self.abstractive_engine = AbstractiveSummarizer(model_name=abstractive_model_key)
 
+    def build_condensed_context(
+        self,
+        text: str,
+        extractive_algo: str = "textrank",
+        compression_ratio: float = 0.35,
+        use_semantic_chunking: bool = False,
+    ) -> str:
+        """Chạy stage extractive một lần — dùng chung cho nhóm hybrid cùng backbone."""
+        cleaned_text = clean_text(text, aggressive=True)
+        sentences = split_sentences(cleaned_text)
+        input_word_count = count_words(cleaned_text)
+        if input_word_count < 10 or len(sentences) <= 3:
+            return cleaned_text
+
+        num_sentences = max(3, min(int(len(sentences) * compression_ratio), 25))
+        if use_semantic_chunking:
+            chunker = SemanticChunker(threshold=0.45)
+            semantic_chunks = chunker.chunk_document(sentences)
+            selected_sentences: list[str] = []
+            sents_per_chunk = max(1, int(num_sentences / max(1, len(semantic_chunks))))
+            for chunk in semantic_chunks:
+                chunk_sents = split_sentences(chunk)
+                if len(chunk_sents) <= sents_per_chunk:
+                    selected_sentences.extend(chunk_sents)
+                else:
+                    extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo) or EXTRACTIVE_RUNNERS["textrank"]
+                    details = extractive_runner(chunk, sentence_count=sents_per_chunk)
+                    selected_sentences.extend(split_sentences(details.get("summary", "")))
+            return " ".join(selected_sentences[:num_sentences])
+
+        extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo) or EXTRACTIVE_RUNNERS["textrank"]
+        condensed_details = extractive_runner(cleaned_text, sentence_count=num_sentences)
+        return condensed_details.get("summary", "")
+
+    def summarize_from_condensed(
+        self,
+        condensed_text: str,
+        max_target_tokens: int = 200,
+        temperature: float = 0.7,
+        num_beams: int = 4,
+        repetition_penalty: float = 2.0,
+    ) -> str:
+        """Sinh abstractive từ condensed context đã có — bỏ qua stage extractive."""
+        if not (condensed_text or "").strip():
+            return ""
+        return self._run_abstractive_direct(
+            condensed_text,
+            max_target_tokens,
+            temperature,
+            num_beams,
+            repetition_penalty,
+        )
+
     def summarize(
         self,
         text: str,
@@ -104,67 +157,31 @@ class HybridSummarizer:
             Bản tóm tắt cuối cùng dạng sinh (Abstractive Summary)
         """
         t_start = time.perf_counter()
-        
-        # Tiền xử lý văn bản đầu vào
         cleaned_text = clean_text(text, aggressive=True)
-        sentences = split_sentences(cleaned_text)
-        
         input_word_count = count_words(cleaned_text)
+        sentences = split_sentences(cleaned_text)
         if input_word_count < 10 or len(sentences) <= 3:
             logger.info("Văn bản quá ngắn, chuyển trực tiếp sang tóm tắt Abstractive nguyên bản.")
             return self._run_abstractive_direct(cleaned_text, max_target_tokens, temperature, num_beams, repetition_penalty)
 
-        # Lấy số câu cần chọn lọc
-        num_sentences = max(3, min(int(len(sentences) * compression_ratio), 25))
-
-        # ── Bước 1: Filtering (Nén văn bản) ───────────────────
-        if use_semantic_chunking:
-            logger.info(f"⚡ [Hybrid Summarizer] Semantic Chunking Stage: Lọc lấy top {num_sentences} câu")
-            chunker = SemanticChunker(threshold=0.45)
-            semantic_chunks = chunker.chunk_document(sentences)
-            
-            selected_sentences = []
-            sents_per_chunk = max(1, int(num_sentences / max(1, len(semantic_chunks))))
-            
-            for chunk in semantic_chunks:
-                chunk_sents = split_sentences(chunk)
-                if len(chunk_sents) <= sents_per_chunk:
-                    selected_sentences.extend(chunk_sents)
-                else:
-                    extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo) or EXTRACTIVE_RUNNERS["textrank"]
-                    details = extractive_runner(chunk, sentence_count=sents_per_chunk)
-                    selected_sentences.extend(split_sentences(details.get("summary", "")))
-            
-            condensed_text = " ".join(selected_sentences[:num_sentences])
-        else:
-            logger.info(
-                f"⚡ [Hybrid Summarizer] Extractive Stage: {len(sentences)} câu ➔ Lọc lấy top {num_sentences} câu "
-                f"bằng thuật toán '{extractive_algo}' (tỷ lệ nén {compression_ratio * 100:.1f}%)"
-            )
-            
-            extractive_runner = EXTRACTIVE_RUNNERS.get(extractive_algo)
-            if not extractive_runner:
-                logger.warning(f"Thuật toán extractive '{extractive_algo}' không tìm thấy. Fallback sang 'textrank'")
-                extractive_runner = EXTRACTIVE_RUNNERS["textrank"]
-                
-            condensed_details = extractive_runner(cleaned_text, sentence_count=num_sentences)
-            condensed_text = condensed_details.get("summary", "")
-        
+        condensed_text = self.build_condensed_context(
+            text,
+            extractive_algo=extractive_algo,
+            compression_ratio=compression_ratio,
+            use_semantic_chunking=use_semantic_chunking,
+        )
         condensed_word_count = count_words(condensed_text)
         logger.info(
             f"✅ [Hybrid Summarizer] Nén xong: {input_word_count} từ ➔ {condensed_word_count} từ "
-            f"(Giảm {100.0 * (1.0 - condensed_word_count / input_word_count):.1f}% số lượng token đầu vào)"
+            f"(Giảm {100.0 * (1.0 - condensed_word_count / max(1, input_word_count)):.1f}% số lượng token đầu vào)"
         )
-
-        # ── Bước 2: Abstractive Generation (Sinh văn bản) ──────────────────
         logger.info(f"⚡ [Hybrid Summarizer] Abstractive Stage: Sinh chữ bằng mô hình: {self.abstractive_model_key}")
-        
-        final_summary = self._run_abstractive_direct(
-            condensed_text, 
-            max_target_tokens, 
-            temperature, 
-            num_beams, 
-            repetition_penalty
+        final_summary = self.summarize_from_condensed(
+            condensed_text,
+            max_target_tokens,
+            temperature,
+            num_beams,
+            repetition_penalty,
         )
         
         elapsed = time.perf_counter() - t_start
@@ -197,3 +214,48 @@ class HybridSummarizer:
             # Fallback sang lấy extractive 3 câu chính của đoạn text
             fallback_runner = EXTRACTIVE_RUNNERS["textrank"]
             return fallback_runner(text, sentence_count=3)
+
+
+def summarize_retrieved_chunks(
+    chunks: list[dict],
+    *,
+    query: str = "",
+    compression_ratio: float = 0.40,
+    max_target_tokens: int = 280,
+) -> tuple[str, str | None, str | None]:
+    """
+    Sinh Hybrid Summary từ danh sách RAG chunks đã retrieve + rerank.
+    Reuse HybridSummarizer — chọn backbone abstractive tốt nhất đã load.
+
+    Returns:
+        (summary_text, model_used, hybrid_algo_key)
+    """
+    if not chunks:
+        return "", None, None
+
+    parts: list[str] = []
+    for i, chunk in enumerate(chunks, start=1):
+        filename = chunk.get("filename", "?")
+        page = chunk.get("page")
+        page_info = f" trang {page}" if page else ""
+        parts.append(f"[Nguồn {i} — {filename}{page_info}]\n{chunk.get('text', '')}")
+    combined_text = "\n\n".join(parts)
+
+    try:
+        from backend.services.rag.context_compression import pick_best_hybrid_key
+        hybrid_key, ext_algo, backbone = pick_best_hybrid_key()
+    except Exception:
+        hybrid_key, ext_algo, backbone = "textrank-bartpho", "textrank", "bartpho"
+
+    engine = HybridSummarizer(abstractive_model_key=backbone)
+    summary = engine.summarize(
+        combined_text,
+        extractive_algo=ext_algo,
+        compression_ratio=compression_ratio,
+        max_target_tokens=max_target_tokens,
+        temperature=0.15,
+        num_beams=4,
+        repetition_penalty=1.5,
+    )
+    model_used = backbone if summary else None
+    return summary.strip(), model_used, hybrid_key

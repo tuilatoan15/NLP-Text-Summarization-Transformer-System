@@ -14,8 +14,11 @@ except ImportError:  # pragma: no cover - python-dotenv is in requirements.txt
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if load_dotenv is not None:
     load_dotenv(PROJECT_ROOT / ".env")
-if os.getenv("CUDA_VISIBLE_DEVICES") == "":
+# Chuỗi rỗng hoặc "-1" trong .env/docker ẩn GPU — chuẩn hóa để tránh cuda "available" nhưng không có device
+_cuda_vis = os.getenv("CUDA_VISIBLE_DEVICES", "").strip()
+if _cuda_vis in ("", "-1"):
     os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+FORCE_CPU = os.getenv("FORCE_CPU", "0").lower() in ("1", "true", "yes")
 
 DATA_DIR = PROJECT_ROOT / "data"
 CACHE_DIR = PROJECT_ROOT / "cache"
@@ -112,6 +115,10 @@ MT5_LATIN_RATIO_THRESHOLD = float(os.getenv("MT5_LATIN_RATIO_THRESHOLD", "0.35")
 
 # ─────────────────────────────────── GPU / DEVICE ──────────────────
 PRELOAD_MODELS = os.getenv("PRELOAD_MODELS", "1") == "1"
+PRELOAD_MODELS_LIST: list[str] = [
+    m.strip() for m in os.getenv("PRELOAD_MODELS_LIST", "vit5").split(",") if m.strip()
+]
+WARM_ANALYTICS_CACHE = os.getenv("WARM_ANALYTICS_CACHE", "0") == "1"
 GPU_VRAM_LIMIT_GB = float(os.getenv("GPU_VRAM_LIMIT_GB", "4.0"))
 USE_FP16 = os.getenv("USE_FP16", "auto")   # "auto" | "1" | "0"
 USE_8BIT = os.getenv("USE_8BIT", "0") == "1"

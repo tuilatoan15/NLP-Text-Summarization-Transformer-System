@@ -20,7 +20,7 @@ from visualization.embeddings_viz import embedding_map_2d, similarity_heatmap
 from pipeline.schema import EmbeddingConfig, IngestConfig
 from src.extractive import summarize_extractive_algorithm
 from src.preprocess import clean_text, split_sentences, tokenize_words
-from src.utils import count_words, logger, save_json
+from src.utils import count_words, logger, resolve_torch_device_str, save_json
 from utils.metrics import lexical_overlap
 
 
@@ -398,6 +398,8 @@ class DocumentIntelligenceService:
             embedder = SentenceTransformerEmbedder(
                 EmbeddingConfig(
                     model_name=str(model_name),
+                    device=resolve_torch_device_str(),
+                    use_fp16=True,
                     show_progress=False,
                     fallback_to_hashing=True,
                     normalize_embeddings=True,

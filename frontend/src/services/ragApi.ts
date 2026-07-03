@@ -114,6 +114,7 @@ export async function deleteAllDocuments(): Promise<void> {
 export async function streamRagChat(
   request: RAGChatRequest,
   onToken: (text: string, conversationId: string) => void,
+  onStage?: (stage: string, status: string) => void,
 ): Promise<RAGChatResponse> {
   const response = await fetch(`${API}/rag/chat/stream`, {
     method: 'POST',
@@ -144,6 +145,9 @@ export async function streamRagChat(
         finalResponse = parsedEvent.response as RAGChatResponse;
       } else if (parsedEvent.event === 'token') {
         onToken(parsedEvent.content as string, parsedEvent.conversation_id as string);
+        onStage?.('streaming', 'active');
+      } else if (parsedEvent.event === 'stage' && onStage) {
+        onStage(parsedEvent.stage as string, parsedEvent.status as string);
       }
     }
   }

@@ -8,6 +8,13 @@ No simulation, no extrapolation. Real inference on GPU, real metrics.
 
 from __future__ import annotations
 
+# Pre-import pyarrow/pandas trước torch — tránh WinError 6714 trên Windows khi import song song
+try:
+    import pyarrow  # noqa: F401
+    import pandas  # noqa: F401
+except OSError:
+    pass
+
 import argparse
 import csv
 import json

@@ -141,7 +141,14 @@ def test_save_message_and_auto_title_trigger(client):
         assert msg2.status_code == 200
         
         # Tiêu đề cuộc trò chuyện cần được tự động đặt lại thông qua mock_title
+        # (auto-title chạy async trong background thread)
+        import time
         updated_detail = client.get(f"/api/chat/conversations/{conv_id}").json()
+        for _ in range(50):
+            if updated_detail["title"] == mock_title:
+                break
+            time.sleep(0.05)
+            updated_detail = client.get(f"/api/chat/conversations/{conv_id}").json()
         assert updated_detail["title"] == mock_title
         assert len(updated_detail["messages"]) == 2
 

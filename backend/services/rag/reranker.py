@@ -17,6 +17,8 @@ from .rag_config import (
     RERANKER_MODEL_FALLBACK,
     RETRIEVAL_FINAL_TOP_K,
     RETRIEVAL_THRESHOLD,
+    RAG_RERANKER_BATCH_SIZE,
+    RAG_RERANKER_FP16,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,12 +45,25 @@ def _get_reranker():
         for model_name in (RERANKER_MODEL, RERANKER_MODEL_FALLBACK):
             try:
                 from sentence_transformers import CrossEncoder  # type: ignore
+                from src.utils import resolve_torch_device_str, get_model_device_str
 
-                logger.info("🔄 Đang tải Cross-Encoder reranker: %s ...", model_name)
-                model = CrossEncoder(model_name, max_length=512)
+                device = resolve_torch_device_str()
+                logger.info("🔄 Đang tải Cross-Encoder reranker: %s trên %s ...", model_name, device)
+                model = CrossEncoder(model_name, max_length=512, device=device)
+                if RAG_RERANKER_FP16:
+                    try:
+                        from src.utils import cuda_is_usable
+                        if cuda_is_usable():
+                            model.model.half()
+                    except Exception:
+                        pass
                 _reranker_instance = model
                 _reranker_available = True
-                logger.info("✅ Cross-Encoder reranker đã sẵn sàng: %s", model_name)
+                logger.info(
+                    "✅ Cross-Encoder reranker đã sẵn sàng: %s → %s",
+                    model_name,
+                    get_model_device_str(model.model),
+                )
                 return model
             except Exception as exc:
                 logger.warning(
@@ -122,7 +137,11 @@ class CrossEncoderReranker:
             # Predict trả về raw logit (unbounded), dùng sigmoid để normalize về [0, 1]
             import torch  # type: ignore
 
-            scores_raw = reranker.predict(pairs, convert_to_numpy=True)
+            scores_raw = reranker.predict(
+                pairs,
+                batch_size=RAG_RERANKER_BATCH_SIZE,
+                convert_to_numpy=True,
+            )
 
             # Sigmoid normalize
             import numpy as np

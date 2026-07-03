@@ -24,6 +24,10 @@ class RAGRepository:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -64000;")  # ~64MB page cache
+        conn.execute("PRAGMA temp_store = MEMORY;")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -111,6 +115,8 @@ class RAGRepository:
             # Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON rag_chunks(document_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_index ON rag_chunks(document_id, chunk_index);")
 
             # Check and migrate legacy SQLite tables: rag_conversations and rag_messages
             cursor = conn.cursor()
@@ -195,39 +201,49 @@ class RAGRepository:
             )
         return document_id
 
+    def get_document_embedding_model(self, document_id: str) -> str | None:
+        """Return embedding_model from document metadata without loading all documents."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT metadata_json FROM rag_documents WHERE id = ?",
+                (document_id,),
+            ).fetchone()
+        if not row:
+            return None
+        metadata = json.loads(row["metadata_json"] or "{}")
+        return metadata.get("embedding_model")
+
     def list_documents(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, filename, source_type, status, created_at, metadata_json FROM rag_documents ORDER BY created_at DESC"
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.source_type,
+                    d.status,
+                    d.created_at,
+                    d.metadata_json,
+                    COUNT(c.id) AS chunks_count,
+                    COALESCE(SUM(LENGTH(c.text_content)), 0) AS file_size
+                FROM rag_documents d
+                LEFT JOIN rag_chunks c ON c.document_id = d.id
+                GROUP BY d.id
+                ORDER BY d.created_at DESC
+                """
             ).fetchall()
         items: list[dict[str, Any]] = []
         for row in rows:
-            doc_id = row["id"]
-            
-            # Tính toán chunks_count thực tế
-            with self._connect() as conn_chunk:
-                count_row = conn_chunk.execute(
-                    "SELECT COUNT(*) as count FROM rag_chunks WHERE document_id = ?", (doc_id,)
-                ).fetchone()
-                chunks_count = count_row["count"] if count_row else 0
-                
-            # Ước tính file_size dựa trên tổng độ dài text trong các chunks
-            with self._connect() as conn_size:
-                size_row = conn_size.execute(
-                    "SELECT SUM(LENGTH(text_content)) as total_len FROM rag_chunks WHERE document_id = ?", (doc_id,)
-                ).fetchone()
-                file_size = size_row["total_len"] if size_row and size_row["total_len"] is not None else 0
-                
             items.append(
                 {
-                    "id": doc_id,
+                    "id": row["id"],
                     "filename": row["filename"],
                     "source_type": row["source_type"],
                     "status": row["status"],
                     "created_at": row["created_at"],
                     "metadata": json.loads(row["metadata_json"] or "{}"),
-                    "chunks_count": chunks_count,
-                    "file_size": file_size,
+                    "chunks_count": int(row["chunks_count"] or 0),
+                    "file_size": int(row["file_size"] or 0),
                 }
             )
         return items
@@ -240,33 +256,40 @@ class RAGRepository:
 
     def save_chunks(self, chunks: list[dict[str, Any]], vectors: list[list[float]], model_name: str) -> None:
         now = _now_iso()
+        chunk_rows = [
+            (
+                chunk["id"],
+                chunk["document_id"],
+                chunk["filename"],
+                chunk.get("page"),
+                chunk["chunk_index"],
+                chunk["text"],
+                model_name,
+                json.dumps(chunk.get("metadata", {}), ensure_ascii=False),
+            )
+            for chunk in chunks
+        ]
+        embed_rows = [
+            (chunk["id"], json.dumps(vector), len(vector), model_name, now)
+            for chunk, vector in zip(chunks, vectors)
+        ]
         with self._connect() as conn:
-            for chunk, vector in zip(chunks, vectors):
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO rag_chunks
-                    (id, document_id, filename, page, chunk_index, text_content, embedding_model, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        chunk["id"],
-                        chunk["document_id"],
-                        chunk["filename"],
-                        chunk.get("page"),
-                        chunk["chunk_index"],
-                        chunk["text"],
-                        model_name,
-                        json.dumps(chunk.get("metadata", {}), ensure_ascii=False),
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO rag_embeddings
-                    (chunk_id, vector_json, dimension, model_name, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (chunk["id"], json.dumps(vector), len(vector), model_name, now),
-                )
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO rag_chunks
+                (id, document_id, filename, page, chunk_index, text_content, embedding_model, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                chunk_rows,
+            )
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO rag_embeddings
+                (chunk_id, vector_json, dimension, model_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                embed_rows,
+            )
 
     def list_chunks(
         self, document_ids: list[str] | None = None

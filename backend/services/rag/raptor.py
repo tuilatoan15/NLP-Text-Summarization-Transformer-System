@@ -177,10 +177,11 @@ class RaptorIndexer:
                 summary = _run_llm_api(prompt, RAG_GENERATOR_TYPE)
                 
             if not summary:
-                from .summarizer import _pick_available_model, _run_transformer_generate, GENERATION_PROFILES
+                from .summarizer import _pick_available_model, _run_transformer_generate
+                from .rag_config import resolve_generation_profile
                 model_key = _pick_available_model()
                 if model_key:
-                    profile = GENERATION_PROFILES[model_key]
+                    profile = resolve_generation_profile(model_key)
                     summary = _run_transformer_generate(model_key, text, profile)
                     
             if not summary:

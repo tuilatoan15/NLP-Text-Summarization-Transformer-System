@@ -8,13 +8,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.services.rag import RAGChatService
+from backend.services.rag import get_rag_service
 from src import config
 from src.file_parser import SUPPORTED_EXTENSIONS
 
 
 router = APIRouter(prefix="/rag", tags=["RAG Chat"])
-service = RAGChatService()
+service = get_rag_service()
 
 
 class ChatRequest(BaseModel):
@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     threshold: float = Field(default=0.35, ge=0.0, le=1.0)
     retrieval_mode: str = Field(default="hybrid")
-    use_reranking: bool = Field(default=False)
+    use_reranking: bool = Field(default=True)
     embedding_model: str = Field(default=config.DEFAULT_EMBEDDING_MODEL)
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
 

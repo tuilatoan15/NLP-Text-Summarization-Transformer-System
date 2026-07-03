@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -15,7 +16,7 @@ import torch
 
 from src import config
 from src.abstractive import abstractive_summarize_key, get_summarizer
-from src.evaluate import evaluate_summary
+from backend.services.evaluation_service import evaluate_compare_metrics, bertscore_detail
 from src.extractive import summarize_extractive_algorithm, summarize_extractive_parallel
 from src.model_registry import (
     ABSTRACTIVE_ALGORITHMS,
@@ -159,6 +160,17 @@ def _run_abstractive(
     }
 
 
+def _metrics_warning_badge(metrics: dict, existing: str | None = None) -> str | None:
+    """Surface evaluation warnings on algorithm cards."""
+    if existing:
+        return existing
+    if metrics.get("bertscore_status") in {"timeout", "error"}:
+        return metrics.get("bertscore_error") or "BERTScore không khả dụng"
+    if metrics.get("is_biased"):
+        return metrics.get("warning") or "Chưa có tóm tắt tham chiếu — ROUGE có thể = 0"
+    return metrics.get("warning")
+
+
 def _evaluate_result(
     key: str,
     text: str,
@@ -230,26 +242,8 @@ def _evaluate_result(
         algorithm.key, duration, count_words(summary),
     )
 
-    metrics = evaluate_summary(summary, reference, text, duration)
+    metrics = evaluate_compare_metrics(summary, reference, text, duration)
     metrics["combined_score"] = _combined_score(metrics)
-
-    # Tính toán chỉ số hallucination thực tế
-    key_lower = algorithm.key.lower()
-    faith_val = metrics.get("faithfulness", 1.0)
-    if algorithm.group == "extractive":
-        hallucination = 0.0
-    else:
-        if "bartpho" in key_lower:
-            factor = 0.05
-        elif "vit5" in key_lower:
-            factor = 0.15
-        else: # mt5
-            factor = 0.18
-        raw_val = (1.0 - faith_val) * factor
-        import hashlib
-        h_val = (int(hashlib.md5(key_lower.encode()).hexdigest(), 16) % 50) / 10000.0
-        hallucination = round(max(0.0, raw_val + h_val), 4)
-    metrics["hallucination"] = hallucination
 
     src_w = source_words or count_words(text)
     from src.length_control import length_ratio_percent
@@ -257,7 +251,7 @@ def _evaluate_result(
     actual_length_ratio = length_ratio_percent(count_words(summary), src_w)
 
     is_experimental = False
-    warning_badge = None
+    warning_badge = _metrics_warning_badge(metrics)
     if algorithm.key == "mt5" and config.MT5_EXPERIMENTAL:
         is_experimental = True
         warning_badge = "Experimental Baseline"
@@ -290,11 +284,13 @@ def _evaluate_result(
             "rougeLsum": metrics["rougeLsum"],
         },
         "bleu": metrics["bleu"],
-        "bertscore": metrics["bertscore"],
+        "bertscore": bertscore_detail(metrics),
         "semantic_similarity": metrics["semantic_similarity"],
         "compression_ratio": metrics["compression_ratio"],
         "time_seconds": metrics["processing_time"],
         "processing_time": metrics["processing_time"],
+        "bertscore_status": metrics.get("bertscore_status"),
+        "bertscore_error": metrics.get("bertscore_error"),
         "explainability": explainability,
         "experimental": is_experimental,
         "warning_badge": warning_badge,
@@ -307,6 +303,126 @@ def _evaluate_result(
         "source_sentences": split_sentences(text)[:200],
         "error": error,
     }
+
+
+def _group_hybrid_by_backbone(hybrid_keys: list[str]) -> dict[str, list[str]]:
+    """Nhóm hybrid keys theo backbone abstractive (vit5, mt5, bartpho)."""
+    groups: dict[str, list[str]] = {}
+    for key in hybrid_keys:
+        if key not in HYBRID_ALGORITHMS:
+            continue
+        backbone = key.split("-", 1)[1]
+        groups.setdefault(backbone, []).append(key)
+    return groups
+
+
+def _evaluate_hybrid_shared(
+    text: str,
+    reference: str,
+    hybrid_keys: list[str],
+    max_output_length: int,
+    target_words: int | None,
+    source_words: int | None,
+    compression_ratio: float = 0.35,
+) -> list[dict]:
+    """Chạy nhóm hybrid cùng backbone: extractive song song, 1 load model abstractive."""
+    from pipeline.hybrid_summarizer import HybridSummarizer
+
+    if not hybrid_keys:
+        return []
+
+    backbone = hybrid_keys[0].split("-", 1)[1]
+    hybrid_engine = HybridSummarizer(abstractive_model_key=backbone)
+    condensed_by_key: dict[str, str] = {}
+
+    with ThreadPoolExecutor(
+        max_workers=min(len(hybrid_keys), config.EXTRACTIVE_WORKERS),
+        thread_name_prefix="hyb_ext",
+    ) as ext_pool:
+        futures = {
+            ext_pool.submit(
+                hybrid_engine.build_condensed_context,
+                text,
+                key.split("-", 1)[0],
+                compression_ratio,
+            ): key
+            for key in hybrid_keys
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                condensed_by_key[key] = future.result()
+            except Exception as exc:
+                logger.error("Hybrid condensed [%s] failed: %s", key, exc)
+                condensed_by_key[key] = ""
+
+    results: list[dict] = []
+    for key in hybrid_keys:
+        algorithm = resolve_algorithm(key)
+        ext_algo, abs_algo = key.split("-", 1)
+        start = time.perf_counter()
+        error: str | None = None
+        try:
+            with _GPU_LOCK:
+                summary = hybrid_engine.summarize_from_condensed(
+                    condensed_by_key.get(key, ""),
+                    max_target_tokens=max_output_length,
+                )
+            if target_words and summary:
+                from src.length_control import trim_summary_to_word_budget
+                summary = trim_summary_to_word_budget(summary, target_words)
+            explainability = {
+                "hybrid": True,
+                "extractive_algo": ext_algo,
+                "abstractive_algo": abs_algo,
+                "shared_backbone": True,
+            }
+            training_quality = {"is_poor_training": False, "reason": None}
+        except Exception as exc:
+            logger.exception("Hybrid shared [%s] failed", key)
+            error = str(exc)
+            summary = _fallback_summary(text, 5)
+            explainability = {"error": error, "fallback_used": True, "shared_backbone": True}
+            training_quality = {"is_poor_training": False, "reason": None}
+
+        duration = time.perf_counter() - start
+        metrics = evaluate_compare_metrics(summary, reference, text, duration)
+        metrics["combined_score"] = _combined_score(metrics)
+        src_w = source_words or count_words(text)
+        from src.length_control import length_ratio_percent
+        actual_length_ratio = length_ratio_percent(count_words(summary), src_w)
+        results.append({
+            "key": algorithm.key,
+            "algorithm": algorithm.name,
+            "group": algorithm.group,
+            "summary": summary,
+            "word_count": count_words(summary),
+            "length_ratio_percent": actual_length_ratio,
+            "target_words": target_words,
+            "metrics": metrics,
+            "rouge": {
+                "rouge1": metrics["rouge1"],
+                "rouge2": metrics["rouge2"],
+                "rougeL": metrics["rougeL"],
+                "rougeLsum": metrics["rougeLsum"],
+            },
+            "bleu": metrics["bleu"],
+            "bertscore": bertscore_detail(metrics),
+            "semantic_similarity": metrics["semantic_similarity"],
+            "compression_ratio": metrics["compression_ratio"],
+            "time_seconds": metrics["processing_time"],
+            "processing_time": metrics["processing_time"],
+            "bertscore_status": metrics.get("bertscore_status"),
+            "bertscore_error": metrics.get("bertscore_error"),
+            "explainability": explainability,
+            "experimental": False,
+            "warning_badge": _metrics_warning_badge(metrics),
+            "training_quality": training_quality,
+            "details": explainability,
+            "source_sentences": split_sentences(text)[:200],
+            "error": error,
+        })
+    return results
 
 
 def _run_all_parallel(
@@ -350,27 +466,68 @@ def _run_all_parallel(
                     logger.error("Extractive eval [%s] failed: %s", key, exc)
 
     if abstractive_keys:
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="abs_gpu") as abs_pool:
-            abs_futures = {
-                abs_pool.submit(
-                    _evaluate_result,
-                    key,
-                    text,
-                    reference,
-                    sentence_count,
-                    max_output_length,
-                    target_words,
-                    source_words,
-                    summary_length,
-                ): key
-                for key in abstractive_keys
-            }
-            for future in as_completed(abs_futures):
-                key = abs_futures[future]
-                try:
-                    results[key] = future.result()
-                except Exception as exc:
-                    logger.error("Abstractive eval [%s] failed: %s", key, exc)
+        use_shared_hybrid = os.environ.get("COMPARE_PIPELINE_V2", "1") != "0"
+        pure_abs = [k for k in abstractive_keys if k in ABSTRACTIVE_ALGORITHMS]
+        hybrid_keys = [k for k in abstractive_keys if k in HYBRID_ALGORITHMS]
+
+        if pure_abs:
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="abs_gpu") as abs_pool:
+                abs_futures = {
+                    abs_pool.submit(
+                        _evaluate_result,
+                        key,
+                        text,
+                        reference,
+                        sentence_count,
+                        max_output_length,
+                        target_words,
+                        source_words,
+                        summary_length,
+                    ): key
+                    for key in pure_abs
+                }
+                for future in as_completed(abs_futures):
+                    key = abs_futures[future]
+                    try:
+                        results[key] = future.result()
+                    except Exception as exc:
+                        logger.error("Abstractive eval [%s] failed: %s", key, exc)
+
+        if hybrid_keys:
+            if use_shared_hybrid:
+                for backbone, group_keys in _group_hybrid_by_backbone(hybrid_keys).items():
+                    logger.info("Hybrid shared backbone batch: %s (%d algos)", backbone, len(group_keys))
+                    for row in _evaluate_hybrid_shared(
+                        text,
+                        reference,
+                        group_keys,
+                        max_output_length,
+                        target_words,
+                        source_words,
+                    ):
+                        results[row["key"]] = row
+            else:
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="hyb_gpu") as hyb_pool:
+                    hyb_futures = {
+                        hyb_pool.submit(
+                            _evaluate_result,
+                            key,
+                            text,
+                            reference,
+                            sentence_count,
+                            max_output_length,
+                            target_words,
+                            source_words,
+                            summary_length,
+                        ): key
+                        for key in hybrid_keys
+                    }
+                    for future in as_completed(hyb_futures):
+                        key = hyb_futures[future]
+                        try:
+                            results[key] = future.result()
+                        except Exception as exc:
+                            logger.error("Hybrid eval [%s] failed: %s", key, exc)
 
     ordered = []
     for key in extractive_keys + abstractive_keys:

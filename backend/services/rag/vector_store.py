@@ -203,7 +203,7 @@ class VectorStoreManager:
                     query_filter=q_filter,
                     limit=max(top_k, 1),
                     with_payload=True,
-                    with_vectors=True
+                    with_vectors=False,
                 )
 
                 hits = []

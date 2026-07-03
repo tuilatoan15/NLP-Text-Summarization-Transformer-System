@@ -18,7 +18,10 @@ from .rag_config import (
     SUMMARIZE_PROMPT_TEMPLATE,
     QA_PROMPT_TEMPLATE,
     GenerationProfile,
+    resolve_generation_profile,
+    RAG_SUMMARIZE_BATCH_SIZE,
 )
+from .context_compression import CompressedContext
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +65,7 @@ def _pick_available_model() -> str | None:
     Ưu tiên theo PREFERRED_SUMMARIZER_ORDER = [bartpho, vit5, mt5].
     """
     try:
-        from ai_models.model_loader import _registry  # type: ignore
+        from src.model_loader import _registry  # type: ignore
 
         for key in PREFERRED_SUMMARIZER_ORDER:
             if _registry.is_loaded(key):
@@ -124,7 +127,7 @@ def _run_transformer_generate(
             max_length=config.MAX_INPUT_TOKENS,
             padding=False,
         )
-        encoded = {k: v.to(device) for k, v in encoded.items()}
+        encoded = {k: v.to(device, non_blocking=device.type == "cuda") for k, v in encoded.items()}
         gen_kwargs = _build_gen_kwargs(profile)
 
         with torch.inference_mode():
@@ -159,10 +162,136 @@ def _run_transformer_generate(
         return ""
 
 
+def _run_transformer_generate_batch(
+    model_key: str,
+    input_texts: list[str],
+    profile: GenerationProfile,
+) -> list[str]:
+    """Batch inference cho nhiều prompt — giảm overhead tokenizer/GPU."""
+    if not input_texts:
+        return []
+    if len(input_texts) == 1:
+        return [_run_transformer_generate(model_key, input_texts[0], profile)]
+
+    try:
+        import torch
+        from src.model_loader import get_loaded_model
+        from src import config
+
+        loaded = get_loaded_model(model_key)
+        model = loaded.model
+        tokenizer = loaded.tokenizer
+        device = loaded.device
+        use_fp16 = loaded.fp16
+
+        prepared = []
+        for text in input_texts:
+            if model_key in {"vit5", "mt5"}:
+                prepared.append(f"summarize: {text}")
+            else:
+                prepared.append(text)
+
+        encoded = tokenizer(
+            prepared,
+            return_tensors="pt",
+            truncation=True,
+            max_length=config.MAX_INPUT_TOKENS,
+            padding=True,
+        )
+        encoded = {k: v.to(device, non_blocking=device.type == "cuda") for k, v in encoded.items()}
+        gen_kwargs = _build_gen_kwargs(profile)
+
+        with torch.inference_mode():
+            if use_fp16 and device.type == "cuda":
+                import torch.amp
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    output_ids = model.generate(**encoded, **gen_kwargs)
+            else:
+                output_ids = model.generate(**encoded, **gen_kwargs)
+
+        is_t5 = model_key in {"vit5", "mt5"}
+        decoded = tokenizer.batch_decode(
+            output_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=is_t5,
+        )
+        results: list[str] = []
+        for raw in decoded:
+            raw = unicodedata.normalize("NFC", raw or "")
+            for prefix in ("summarize:", "summarize :", "tóm tắt:"):
+                if raw.lower().startswith(prefix):
+                    raw = raw[len(prefix):].strip()
+            results.append(_clean_incomplete_sentence(raw.strip()))
+        return results
+
+    except Exception as exc:
+        logger.warning("Batch generate thất bại [%s]: %s — fallback tuần tự", model_key, exc)
+        return [_run_transformer_generate(model_key, t, profile) for t in input_texts]
+
+
+def _run_transformer_generate_stream(
+    model_key: str,
+    input_text: str,
+    profile: GenerationProfile,
+):
+    """Yield token từ TextIteratorStreamer (local transformer)."""
+    try:
+        import torch
+        from threading import Thread
+        from transformers import TextIteratorStreamer
+        from src.model_loader import get_loaded_model
+        from src import config
+
+        loaded = get_loaded_model(model_key)
+        model = loaded.model
+        tokenizer = loaded.tokenizer
+        device = loaded.device
+        use_fp16 = loaded.fp16
+
+        if model_key in {"vit5", "mt5"}:
+            input_text = f"summarize: {input_text}"
+
+        encoded = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=config.MAX_INPUT_TOKENS,
+            padding=False,
+        )
+        encoded = {k: v.to(device, non_blocking=device.type == "cuda") for k, v in encoded.items()}
+        gen_kwargs = _build_gen_kwargs(profile)
+        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+        gen_kwargs["streamer"] = streamer
+
+        def _generate():
+            with torch.inference_mode():
+                if use_fp16 and device.type == "cuda":
+                    import torch.amp
+                    with torch.amp.autocast("cuda", dtype=torch.float16):
+                        model.generate(**encoded, **gen_kwargs)
+                else:
+                    model.generate(**encoded, **gen_kwargs)
+
+        thread = Thread(target=_generate, daemon=True)
+        thread.start()
+        for token in streamer:
+            if token:
+                yield token
+        thread.join(timeout=120)
+    except Exception as exc:
+        logger.error("❌ Transformer stream [%s] lỗi: %s", model_key, exc)
+
+
 def _run_llm_api(prompt: str, generator_type: str) -> str:
     """Gọi LLM API tương ứng để sinh văn bản (có retry + rate-limit throttling và fallback)."""
     from .agent import _execute_llm_request
     return _execute_llm_request(prompt, generator_type, temperature=0.2, max_tokens=800)
+
+
+def _run_llm_api_stream(prompt: str, generator_type: str):
+    """Stream token từ LLM API."""
+    from .agent import _execute_llm_request_stream
+    yield from _execute_llm_request_stream(prompt, generator_type, temperature=0.2, max_tokens=800)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +368,7 @@ class RAGTransformerSummarizer:
         if not summary:
             model_key = _pick_available_model()
             if model_key:
-                profile = GENERATION_PROFILES[model_key]
+                profile = resolve_generation_profile(model_key)
                 summary = _run_transformer_generate(model_key, full_context, profile)
 
         if not summary or len(summary.split()) < 10:
@@ -265,9 +394,10 @@ class RAGTransformerSummarizer:
         chat_history: list[dict[str, Any]] | None = None,
         max_context_chars: int = 3000,
         general_chat: bool = False,
+        compressed_context: CompressedContext | None = None,
     ) -> dict[str, Any]:
         """
-        Trả lời câu hỏi dựa trên context đã retrieve và lịch sử trò chuyện.
+        Trả lời câu hỏi dựa trên context đã retrieve hoặc CompressedContext.
 
         Returns:
             dict gồm: answer, confidence, grounded, model_used, fallback_used
@@ -289,8 +419,15 @@ class RAGTransformerSummarizer:
                 f"CÂU HỎI HIỆN TẠI: {question}\n\n"
                 "TRẢ LỜI:"
             )
+            effective_contexts = contexts
         else:
-            if not contexts:
+            use_compression = compressed_context is not None and compressed_context.enabled
+            effective_contexts = (
+                compressed_context.top_original_chunks
+                if use_compression
+                else contexts
+            )
+            if not effective_contexts and not use_compression:
                 return {
                     "answer": "Không tìm thấy thông tin trong tài liệu.",
                     "confidence": 0.0,
@@ -299,27 +436,19 @@ class RAGTransformerSummarizer:
                     "fallback_used": True,
                 }
 
-            # Ghép context
-            context_parts = []
-            for i, chunk in enumerate(contexts, start=1):
-                filename = chunk.get("filename", "?")
-                context_parts.append(f"[{i}] {chunk['text']}")
-            full_context = "\n\n".join(context_parts)
+            from .generator import GroundedGenerator
 
+            prompt = GroundedGenerator().compose_prompt(
+                question,
+                contexts,
+                chat_history=chat_history,
+                compressed_context=compressed_context,
+            )
+            full_context = compressed_context.effective_context_text() if use_compression else "\n\n".join(
+                f"[{i}] {chunk['text']}" for i, chunk in enumerate(contexts, start=1)
+            )
             if len(full_context) > max_context_chars:
                 full_context = full_context[:max_context_chars] + "..."
-
-            # Định dạng chat_history
-            history_text = "Không có"
-            if chat_history:
-                history_lines = []
-                for msg in chat_history[-4:]:  # Lấy tối đa 4 tin nhắn gần nhất (2 lượt hỏi-đáp)
-                    role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-                    history_lines.append(f"{role}: {msg.get('content', '')}")
-                if history_lines:
-                    history_text = "\n".join(history_lines)
-
-            prompt = QA_PROMPT_TEMPLATE.format(context=full_context, chat_history=history_text, question=question)
 
         from .rag_config import RAG_GENERATOR_TYPE
         answer = ""
@@ -337,7 +466,7 @@ class RAGTransformerSummarizer:
         if not answer:
             model_key = _pick_available_model()
             if model_key:
-                profile = GENERATION_PROFILES[model_key]
+                profile = resolve_generation_profile(model_key)
                 # Tối giản prompt cho local model (BARTPho/ViT5/mT5) để tránh lỗi lặp lại system instructions
                 local_prompt = (
                     f"Ngữ cảnh:\n{full_context}\n\n"
@@ -348,13 +477,15 @@ class RAGTransformerSummarizer:
 
         if not answer or len(answer.split()) < 3:
             # Fallback: trả về câu liên quan nhất từ context
-            answer = self._sentence_fallback(question, contexts)
+            fallback_ctx = effective_contexts if not general_chat else contexts
+            answer = self._sentence_fallback(question, fallback_ctx)
             fallback_used = True
             model_key = "extractive_fallback"
 
-        confidence = min(0.99, contexts[0]["combined_score"]) if contexts else 0.0
-        if contexts and contexts[0].get("rerank_score") is not None:
-            confidence = min(0.99, contexts[0]["rerank_score"])
+        confidence_source = effective_contexts if not general_chat else contexts
+        confidence = min(0.99, confidence_source[0]["combined_score"]) if confidence_source else 0.0
+        if confidence_source and confidence_source[0].get("rerank_score") is not None:
+            confidence = min(0.99, confidence_source[0]["rerank_score"])
 
         return {
             "answer": answer,
@@ -363,6 +494,95 @@ class RAGTransformerSummarizer:
             "model_used": model_key,
             "fallback_used": fallback_used,
         }
+
+    def stream_answer_tokens(
+        self,
+        question: str,
+        contexts: list[dict[str, Any]],
+        *,
+        chat_history: list[dict[str, Any]] | None = None,
+        max_context_chars: int = 3000,
+        general_chat: bool = False,
+        compressed_context: CompressedContext | None = None,
+    ):
+        """Generator token thật cho streaming SSE."""
+        from .rag_config import RAG_GENERATOR_TYPE
+
+        if general_chat:
+            history_text = "Không có"
+            if chat_history:
+                history_lines = []
+                for msg in chat_history[-4:]:
+                    role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+                    history_lines.append(f"{role}: {msg.get('content', '')}")
+                if history_lines:
+                    history_text = "\n".join(history_lines)
+            prompt = (
+                "Bạn là trợ lý ảo AI tiếng Việt thông minh và thân thiện.\n"
+                "Hãy trò chuyện hoặc trả lời câu hỏi dưới đây một cách lịch sự, tự nhiên và hữu ích.\n"
+                "Hãy tham khảo LỊCH SỬ HỘI THOẠI (nếu có) để cuộc trò chuyện được tiếp tục mạch lạc.\n\n"
+                f"LỊCH SỬ HỘI THOẠI:\n{history_text}\n\n"
+                f"CÂU HỎI HIỆN TẠI: {question}\n\n"
+                "TRẢ LỜI:"
+            )
+            full_context = ""
+        else:
+            use_compression = compressed_context is not None and compressed_context.enabled
+            effective_contexts = (
+                compressed_context.top_original_chunks
+                if use_compression
+                else contexts
+            )
+            if not effective_contexts and not use_compression:
+                yield "Không tìm thấy thông tin trong tài liệu."
+                return
+            from .generator import GroundedGenerator
+
+            prompt = GroundedGenerator().compose_prompt(
+                question,
+                contexts,
+                chat_history=chat_history,
+                compressed_context=compressed_context,
+            )
+            full_context = (
+                compressed_context.effective_context_text()
+                if use_compression
+                else "\n\n".join(
+                    f"[{i}] {chunk['text']}" for i, chunk in enumerate(contexts, start=1)
+                )
+            )
+            if len(full_context) > max_context_chars:
+                full_context = full_context[:max_context_chars] + "..."
+
+        if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+            yielded = False
+            for token in _run_llm_api_stream(prompt, RAG_GENERATOR_TYPE):
+                yielded = True
+                yield token
+            if yielded:
+                return
+
+        model_key = _pick_available_model()
+        if model_key:
+            profile = resolve_generation_profile(model_key)
+            if general_chat:
+                stream_input = prompt
+            else:
+                stream_input = (
+                    f"Ngữ cảnh:\n{full_context}\n\n"
+                    f"Hãy trích xuất và tóm tắt thông tin từ ngữ cảnh trên để trả lời câu hỏi: {question}\n"
+                    "Trả lời:"
+                )
+            for token in _run_transformer_generate_stream(model_key, stream_input, profile):
+                yield token
+            return
+
+        fallback_ctx = effective_contexts if not general_chat else contexts
+        yield (
+            self._sentence_fallback(question, fallback_ctx)
+            if fallback_ctx
+            else "Xin lỗi, tôi không thể trả lời lúc này."
+        )
 
     # ─────────────────────────── Fallback methods ───────────────────────────
 

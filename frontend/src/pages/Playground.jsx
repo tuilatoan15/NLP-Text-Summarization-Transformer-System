@@ -19,12 +19,63 @@ const STATUS = {
   error: 'error',
 };
 
-function pct(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
+function fmt4(value, unavailable = false) {
+  if (unavailable) return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return '—';
+  return n.toFixed(4);
 }
 
-function metric(row, key) {
-  return Number(row?.metrics?.[key] ?? row?.[key] ?? 0);
+function resolveMetrics(row) {
+  const nested = row?.metrics;
+  if (nested && typeof nested === 'object' && Object.keys(nested).length > 0) return nested;
+  return row ?? {};
+}
+
+function bertscoreUnavailable(row) {
+  const m = resolveMetrics(row);
+  const status = m?.bertscore_status ?? row?.bertscore_status;
+  return status === 'timeout' || status === 'error';
+}
+
+function extractBertComponent(row, part) {
+  const m = resolveMetrics(row);
+  const top = row?.bertscore;
+  const nested = m?.bertscore;
+
+  if (part === 'f1') {
+    if (typeof nested === 'number' && !Number.isNaN(nested)) return nested;
+    if (m?.bertscore_f1 != null) return Number(m.bertscore_f1);
+    if (m?.bert_f1 != null) return Number(m.bert_f1);
+    if (nested && typeof nested === 'object') return Number(nested.f1 ?? 0);
+    if (top && typeof top === 'object') return Number(top.f1 ?? 0);
+    if (typeof top === 'number') return top;
+    return 0;
+  }
+
+  const flatKey = part === 'p' ? 'bert_p' : 'bert_r';
+  const objKey = part === 'p' ? 'precision' : 'recall';
+  if (m?.[flatKey] != null) return Number(m[flatKey]);
+  if (nested && typeof nested === 'object' && nested[objKey] != null) return Number(nested[objKey]);
+  if (top && typeof top === 'object' && top[objKey] != null) return Number(top[objKey]);
+  return 0;
+}
+
+function compareMetric(row, key) {
+  const metrics = resolveMetrics(row);
+  switch (key) {
+    case 'bertscore':
+    case 'bert_f1':
+      return extractBertComponent(row, 'f1');
+    case 'latency':
+      return Number(metrics?.latency ?? row?.processing_time ?? row?.time_seconds ?? 0);
+    case 'bert_p':
+      return extractBertComponent(row, 'p');
+    case 'bert_r':
+      return extractBertComponent(row, 'r');
+    default:
+      return Number(metrics?.[key] ?? row?.[key] ?? row?.rouge?.[key] ?? 0);
+  }
 }
 
 function byKey(key) {
@@ -127,19 +178,13 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
           <div className="flex flex-wrap gap-1.5 text-[10px] font-bold pt-2 border-t border-[var(--border)]/60">
             <span className="px-2 py-1 rounded-lg bg-[var(--bg-muted)] text-[var(--text-muted)] flex items-center gap-1">
               <Clock size={11} className="text-sky-500" />
-              {(row.processing_time ?? row.time_seconds ?? 0).toFixed(2)}s
+              {compareMetric(row, 'latency').toFixed(4)}s
             </span>
             <span className="px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/10 text-emerald-600 dark:text-emerald-400 border border-emerald-250/20">
-              ROUGE-L {pct(metric(row, 'rougeL'))}
+              R-L {fmt4(compareMetric(row, 'rougeL'))}
             </span>
             <span className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/10 text-sky-600 dark:text-sky-400 border border-sky-250/20">
-              BERTScore {pct(metric(row, 'bertscore_f1'))}
-            </span>
-            <span className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/10 text-teal-600 dark:text-teal-400 border border-teal-250/20">
-              Faith {pct(metric(row, 'faithfulness'))}
-            </span>
-            <span className="px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/10 text-rose-600 dark:text-rose-400 border border-rose-250/20">
-              Bịa đặt {pct(metric(row, 'hallucination'))}
+              BS F1 {fmt4(compareMetric(row, 'bertscore'), bertscoreUnavailable(row))}
             </span>
             <span className="px-2 py-1 rounded-lg bg-[var(--bg-muted)] text-[var(--text-muted)]">
               {t('pgWords', { count: row.word_count ?? 0 })} từ
@@ -192,45 +237,22 @@ const RunProgress = ({ runningKey, completed, total, loading }) => {
 
 const ComparisonTable = ({ rows }) => {
   const { t } = useApp();
-  const [sortConfig, setSortConfig] = useState({ key: 'composite_score', direction: 'desc' }); // Mặc định xếp composite giảm dần
+  const [sortConfig, setSortConfig] = useState({ key: 'latency', direction: 'asc' });
 
   if (!rows.length) return null;
 
   const handleSort = (columnKey) => {
-    let direction = 'desc';
-    if (sortConfig.key === columnKey && sortConfig.direction === 'desc') {
-      direction = 'asc';
+    const defaultDesc = columnKey !== 'latency' && columnKey !== 'algorithm';
+    let direction = defaultDesc ? 'desc' : 'asc';
+    if (sortConfig.key === columnKey) {
+      direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
     }
     setSortConfig({ key: columnKey, direction });
   };
 
   const getSortValue = (row, key) => {
-    switch (key) {
-      case 'algorithm':
-        return row.algorithm || '';
-      case 'group':
-        return byKey(row.key).group || '';
-      case 'rouge1':
-        return metric(row, 'rouge1');
-      case 'rougeL':
-        return metric(row, 'rougeL');
-      case 'bleu':
-        return metric(row, 'bleu');
-      case 'bertscore_f1':
-        return metric(row, 'bertscore_f1');
-      case 'semantic_similarity':
-        return metric(row, 'semantic_similarity');
-      case 'faithfulness':
-        return metric(row, 'faithfulness');
-      case 'hallucination':
-        return metric(row, 'hallucination');
-      case 'processing_time':
-        return row.processing_time ?? 0;
-      case 'composite_score':
-        return metric(row, 'composite_score') || metric(row, 'combined_score') || 0;
-      default:
-        return 0;
-    }
+    if (key === 'algorithm') return row.algorithm || '';
+    return compareMetric(row, key);
   };
 
   const sortedRows = [...rows].sort((a, b) => {
@@ -246,6 +268,18 @@ const ComparisonTable = ({ rows }) => {
     return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
   });
 
+  const columns = [
+    { key: 'algorithm', label: 'Phương pháp', align: 'left' },
+    { key: 'rouge1', label: 'ROUGE-1' },
+    { key: 'rouge2', label: 'ROUGE-2' },
+    { key: 'rougeL', label: 'ROUGE-L' },
+    { key: 'rougeLsum', label: 'ROUGE-LSum' },
+    { key: 'bert_p', label: 'BERT P' },
+    { key: 'bert_r', label: 'BERT R' },
+    { key: 'bertscore', label: 'BERT F1' },
+    { key: 'latency', label: 'Latency (s)', highlight: true },
+  ];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
@@ -260,73 +294,42 @@ const ComparisonTable = ({ rows }) => {
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="ui-table-head border-b">
-            <tr>
-              <th onClick={() => handleSort('algorithm')} className="px-4 py-3 text-left cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center">Mô hình</span>
-              </th>
-              <th onClick={() => handleSort('group')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">Nhóm</span>
-              </th>
-              <th onClick={() => handleSort('rouge1')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">ROUGE-1</span>
-              </th>
-              <th onClick={() => handleSort('rougeL')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">ROUGE-L</span>
-              </th>
-              <th onClick={() => handleSort('bleu')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">BLEU</span>
-              </th>
-              <th onClick={() => handleSort('bertscore_f1')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">BERTScore</span>
-              </th>
-              <th onClick={() => handleSort('semantic_similarity')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">Semantic</span>
-              </th>
-              <th onClick={() => handleSort('faithfulness')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">Faithfulness</span>
-              </th>
-              <th onClick={() => handleSort('hallucination')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">Hallucination</span>
-              </th>
-              <th onClick={() => handleSort('processing_time')} className="px-4 py-3 text-center cursor-pointer hover:bg-[var(--bg-muted)]/40 select-none group transition-all">
-                <span className="inline-flex items-center justify-center">Độ trễ</span>
-              </th>
-              <th onClick={() => handleSort('composite_score')} className="px-4 py-3 text-center cursor-pointer bg-sky-500/5 hover:bg-sky-500/10 select-none group transition-all text-sky-600 dark:text-sky-400 font-bold">
-                <span className="inline-flex items-center justify-center">Composite</span>
-              </th>
+            <tr className="divide-x divide-[var(--border)]/20">
+              {columns.map(col => (
+                <th
+                  key={col.key}
+                  onClick={() => handleSort(col.key)}
+                  className={`px-4 py-3 cursor-pointer hover:bg-[var(--bg-muted)] select-none transition-all ${
+                    col.align === 'left' ? 'text-left' : 'text-center'
+                  } ${col.highlight ? 'bg-sky-500/5 text-sky-600 dark:text-sky-400' : ''}`}
+                >
+                  {col.label}
+                </th>
+              ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--border-subtle)] font-medium">
+          <tbody className="divide-y divide-[var(--border-subtle)] font-medium text-[var(--text-secondary)]">
             {sortedRows.map(row => (
-              <tr key={row.key} className="ui-table-row">
+              <tr key={row.key} className="ui-table-row hover:bg-[var(--bg-muted)]/40 divide-x divide-[var(--border)]/10">
                 <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">
                   <span className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ background: byKey(row.key).color }} />
                     {row.algorithm}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-center">
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                    byKey(row.key).group === 'hybrid'
-                      ? 'bg-purple-50 dark:bg-purple-950/20 text-purple-600 dark:text-purple-400 border border-purple-200/20'
-                      : byKey(row.key).group === 'abstractive'
-                        ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-200/20'
-                        : 'bg-teal-50 dark:bg-teal-950/20 text-teal-600 dark:text-teal-400 border border-teal-200/20'
-                  }`}>
-                    {byKey(row.key).group}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rouge1'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'rougeL'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'bleu'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'bertscore_f1'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'semantic_similarity'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">{pct(metric(row, 'faithfulness'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono" style={{ color: metric(row, 'hallucination') > 0.05 ? '#ef4444' : metric(row, 'hallucination') > 0.02 ? '#f59e0b' : '#10b981' }}>{pct(metric(row, 'hallucination'))}</td>
-                <td className="px-4 py-3 text-center text-[var(--text-secondary)] font-mono">
-                  {(row.processing_time ?? 0).toFixed(3)}s
-                </td>
-                <td className="px-4 py-3 text-center text-sky-700 dark:text-sky-300 font-mono font-bold bg-sky-500/5">{pct(metric(row, 'composite_score') || metric(row, 'combined_score'))}</td>
+                {columns.slice(1).map(col => (
+                  <td
+                    key={col.key}
+                    className={`px-4 py-3 text-center font-mono ${
+                      col.highlight ? 'bg-sky-500/5 text-sky-700 dark:text-sky-300 font-bold' : ''
+                    }`}
+                  >
+                    {fmt4(
+                      compareMetric(row, col.key),
+                      (col.key === 'bertscore' || col.key === 'bert_p' || col.key === 'bert_r') && bertscoreUnavailable(row),
+                    )}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -535,28 +538,35 @@ export default function Playground() {
     }
   };
 
-  // Compute leaderboard ranks
+  // Rank by latency (fastest = rank 1)
   const rankedAlgorithms = useMemo(() => {
     const completed = selectedAlgorithms
       .map(key => ({ key, result: runStates[key]?.result }))
       .filter(item => item.result);
-    completed.sort((a, b) => {
-      const scoreA = metric(a.result, 'composite_score') || metric(a.result, 'combined_score') || 0;
-      const scoreB = metric(b.result, 'composite_score') || metric(b.result, 'combined_score') || 0;
-      return scoreB - scoreA;
-    });
+    completed.sort((a, b) => compareMetric(a.result, 'latency') - compareMetric(b.result, 'latency'));
     return Object.fromEntries(completed.map((item, idx) => [item.key, idx + 1]));
   }, [selectedAlgorithms, runStates]);
 
+  const orderedAlgorithms = useMemo(() => {
+    const done = selectedAlgorithms.filter(
+      key => runStates[key]?.status === STATUS.done && runStates[key]?.result,
+    );
+    const pending = selectedAlgorithms.filter(key => !done.includes(key));
+    const sortedDone = [...done].sort(
+      (a, b) => compareMetric(runStates[a]?.result, 'latency') - compareMetric(runStates[b]?.result, 'latency'),
+    );
+    return [...sortedDone, ...pending];
+  }, [selectedAlgorithms, runStates]);
+
   const tableRows = useMemo(() => {
-    return selectedAlgorithms
+    return orderedAlgorithms
       .map(key => {
         const state = runStates[key];
         if (state?.status !== STATUS.done || !state.result) return null;
         return { key, algorithm: byKey(key).name, ...state.result };
       })
       .filter(Boolean);
-  }, [selectedAlgorithms, runStates]);
+  }, [orderedAlgorithms, runStates]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -839,6 +849,15 @@ export default function Playground() {
 
         {/* Results Grid */}
         <div className="space-y-4">
+          {!refInput.trim() && completedCount > 0 && (
+            <div className="rounded-xl border border-amber-200/50 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/15 px-4 py-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2 font-medium">
+              <AlertCircle size={14} className="shrink-0 text-amber-500 mt-0.5" />
+              <span>
+                Chưa nhập tóm tắt tham chiếu — ROUGE sẽ = 0. BERTScore vẫn được tính so với văn bản gốc;
+                nhập reference để đo lường chính xác hơn.
+              </span>
+            </div>
+          )}
           <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] flex items-center gap-1.5">
             <BookOpen size={14} className="text-sky-500" />
             Kết quả tóm tắt & Phân tích
@@ -852,7 +871,7 @@ export default function Playground() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {selectedAlgorithms.map(key => (
+              {orderedAlgorithms.map(key => (
                 <AlgorithmCard
                   key={key}
                   algoKey={key}

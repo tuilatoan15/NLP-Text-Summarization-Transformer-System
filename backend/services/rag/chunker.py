@@ -35,6 +35,8 @@ class ChunkingPipeline:
             embedding_service = EmbeddingService()
 
         try:
+            vectors = embedding_service.embed_sentences_cached(raw_sentences, embedding_model)
+        except AttributeError:
             vectors = embedding_service.embed_documents(raw_sentences, embedding_model)
         except Exception as e:
             # Fallback về split theo từ/paragraph cũ nếu không gọi được model

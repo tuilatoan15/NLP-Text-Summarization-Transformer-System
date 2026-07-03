@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 scripts/evaluate_rag_system.py
-Đánh giá chất lượng hệ thống RAG (NDCG, Recall@5, Faithfulness, Context Recall)
-trên bộ test gồm 50 câu hỏi thực tế từ các tài liệu được tải lên.
+Đánh giá chất lượng hệ thống RAG (NDCG, Recall@5, Precision@k, MRR, Hit Rate@5,
+Faithfulness, Context Recall) trên bộ test 50 câu hỏi thực tế.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -15,14 +16,14 @@ from pathlib import Path
 from statistics import mean
 import numpy as np
 
-# Add project root to python path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import config
 from backend.services.rag import RAGChatService
-from sentence_transformers import SentenceTransformer, util
 from src.utils import logger
+
+RESULTS_JSON = PROJECT_ROOT / "storage" / "results" / "rag_eval_baseline.json"
 
 # Định nghĩa bộ test 50 câu hỏi thực tế dựa trên nội dung 2 tài liệu:
 # 1. Báo cáo thực tập của Nguyễn Hữu Toàn (ĐH Giao thông Vận tải)
@@ -104,27 +105,78 @@ def calculate_recall_at_k(retrieved_relevance: list[int], total_relevant: int) -
         return 0.0
     return float(sum(retrieved_relevance) / total_relevant)
 
-def main():
+
+def calculate_precision_at_k(retrieved_relevance: list[int], k: int) -> float:
+    """Precision@k = relevant_in_top_k / k."""
+    if k <= 0:
+        return 0.0
+    top = retrieved_relevance[:k]
+    return float(sum(top) / k)
+
+
+def calculate_mrr(retrieved_relevance: list[int]) -> float:
+    """MRR từ danh sách relevance nhị phân (1=relevant)."""
+    for rank, rel in enumerate(retrieved_relevance, start=1):
+        if rel:
+            return 1.0 / rank
+    return 0.0
+
+
+def calculate_hit_rate_at_k(retrieved_relevance: list[int], k: int) -> float:
+    """Hit Rate@k = 1 nếu có ít nhất 1 relevant trong top-k."""
+    return 1.0 if any(retrieved_relevance[:k]) else 0.0
+
+
+def _keyword_faithfulness(answer: str, chunks: list[dict], keywords: list[str]) -> float:
+    """Proxy faithfulness khi không load được SentenceTransformer."""
+    if not answer or not chunks:
+        return 0.0
+    answer_lower = answer.lower()
+    chunk_hits = sum(
+        1 for c in chunks
+        if any(kw in c.get("text", "").lower() for kw in keywords)
+    )
+    answer_kw_hits = sum(1 for kw in keywords if kw in answer_lower)
+    overlap = min(1.0, (chunk_hits + answer_kw_hits) / max(len(keywords), 1))
+    return round(overlap, 4)
+
+
+def _load_eval_model():
+    """Lazy-load SentenceTransformer; trả None nếu môi trường thiếu tf-keras."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        return SentenceTransformer("keepitreal/vietnamese-sbert")
+    except Exception as exc:
+        logger.warning("SentenceTransformer unavailable (%s) — dùng keyword proxy.", exc)
+        return None
+
+
+def run_evaluation(*, limit: int | None = None, output_json: Path | None = None) -> dict:
     logger.info("🧪 Bắt đầu chạy tiến trình đánh giá hệ thống RAG...")
-    
-    # Khởi động RAG service
+    os.environ.setdefault("RAG_RESPONSE_CACHE", "0")
+    os.environ.setdefault("RAG_RETRIEVAL_CACHE", "0")
+
     service = RAGChatService()
-    
-    # Tải SentenceTransformer để tính toán Faithfulness & Context Recall
-    logger.info("Loading SentenceTransformer model to compute Semantic Metrics...")
-    device = "cuda" if config.VECTOR_BACKEND == "qdrant" else "cpu"
-    # Dùng model gọn nhẹ để đánh giá
-    eval_model = SentenceTransformer("keepitreal/vietnamese-sbert")
-    
-    ndcg_scores = []
-    recall_at_5_scores = []
-    faithfulness_scores = []
-    context_recall_scores = []
-    latencies = []
-    
-    total_questions = len(RAG_TEST_SUITE)
-    
-    for idx, test_case in enumerate(RAG_TEST_SUITE):
+    eval_model = _load_eval_model()
+    if eval_model is not None:
+        from sentence_transformers import util
+    else:
+        util = None
+
+    ndcg_scores: list[float] = []
+    recall_at_5_scores: list[float] = []
+    precision_at_5_scores: list[float] = []
+    mrr_scores: list[float] = []
+    hit_at_5_scores: list[float] = []
+    faithfulness_scores: list[float] = []
+    context_recall_scores: list[float] = []
+    latencies: list[float] = []
+
+    suite = RAG_TEST_SUITE[:limit] if limit else RAG_TEST_SUITE
+    total_questions = len(suite)
+    k = 5
+
+    for idx, test_case in enumerate(suite):
         query = test_case["query"]
         keywords = test_case["ground_truth_keywords"]
         gt_answer = test_case["ground_truth_answer"]
@@ -165,46 +217,75 @@ def main():
         
         ndcg = calculate_ndcg(retrieved_relevance, ideal_relevance)
         recall_at_5 = calculate_recall_at_k(retrieved_relevance, total_relevant=2)
-        
+        precision_at_5 = calculate_precision_at_k(retrieved_relevance, k)
+        mrr = calculate_mrr(retrieved_relevance)
+        hit_at_5 = calculate_hit_rate_at_k(retrieved_relevance, k)
+
         ndcg_scores.append(ndcg)
         recall_at_5_scores.append(recall_at_5)
-        
-        # 2. Đánh giá Generation (Faithfulness)
-        # Tính cosine similarity giữa answer sinh ra với các chunk retrieved
-        if answer and retrieved_context:
+        precision_at_5_scores.append(precision_at_5)
+        mrr_scores.append(mrr)
+        hit_at_5_scores.append(hit_at_5)
+
+        if answer and retrieved_context and eval_model is not None:
             context_embeddings = eval_model.encode([c["text"] for c in retrieved_context], convert_to_tensor=True)
             answer_embedding = eval_model.encode([answer], convert_to_tensor=True)[0]
-            
             sims = util.cos_sim(answer_embedding, context_embeddings)[0]
             max_sim = float(sims.max().item())
-            # Chuẩn hóa về [0, 1]
             faithfulness = round(max(0.0, (max_sim + 1.0) / 2.0), 4)
         else:
-            faithfulness = 0.0
-            
+            faithfulness = _keyword_faithfulness(answer, retrieved_context, keywords)
+
         faithfulness_scores.append(faithfulness)
-        
-        # 3. Đánh giá Context Recall
-        # Đo độ tương đồng giữa Ground Truth answer và các chunk retrieved
-        if retrieved_context:
+
+        if retrieved_context and eval_model is not None:
             gt_embedding = eval_model.encode([gt_answer], convert_to_tensor=True)[0]
             sims_gt = util.cos_sim(gt_embedding, context_embeddings)[0]
             max_sim_gt = float(sims_gt.max().item())
             context_recall = round(max(0.0, (max_sim_gt + 1.0) / 2.0), 4)
         else:
-            context_recall = 0.0
-            
+            context_recall = _keyword_faithfulness(gt_answer, retrieved_context, keywords)
+
         context_recall_scores.append(context_recall)
         
         if (idx + 1) % 10 == 0:
             logger.info(f"Evaluated {idx+1}/{total_questions} questions...")
             
-    # Tính các chỉ số trung bình
-    mean_ndcg = mean(ndcg_scores)
-    mean_recall = mean(recall_at_5_scores)
-    mean_faithfulness = mean(faithfulness_scores)
-    mean_context_recall = mean(context_recall_scores)
-    mean_latency = mean(latencies)
+    def _pct(vals: list[float]) -> float:
+        return round(mean(vals) * 100, 2) if vals else 0.0
+
+    def _p50(vals: list[float]) -> float:
+        return round(float(np.percentile(vals, 50)), 4) if vals else 0.0
+
+    def _p95(vals: list[float]) -> float:
+        return round(float(np.percentile(vals, 95)), 4) if vals else 0.0
+
+    summary = {
+        "timestamp": int(time.time()),
+        "questions_evaluated": total_questions,
+        "eval_model": "keepitreal/vietnamese-sbert" if eval_model else "keyword_proxy",
+        "metrics": {
+            "ndcg_at_5_pct": _pct(ndcg_scores),
+            "recall_at_5_pct": _pct(recall_at_5_scores),
+            "precision_at_5_pct": _pct(precision_at_5_scores),
+            "mrr": round(mean(mrr_scores), 4) if mrr_scores else 0.0,
+            "hit_rate_at_5_pct": _pct(hit_at_5_scores),
+            "faithfulness_pct": _pct(faithfulness_scores),
+            "context_recall_pct": _pct(context_recall_scores),
+            "avg_latency_s": round(mean(latencies), 4) if latencies else 0.0,
+            "p50_latency_s": _p50(latencies),
+            "p95_latency_s": _p95(latencies),
+        },
+    }
+
+    mean_ndcg = mean(ndcg_scores) if ndcg_scores else 0.0
+    mean_recall = mean(recall_at_5_scores) if recall_at_5_scores else 0.0
+    mean_precision = mean(precision_at_5_scores) if precision_at_5_scores else 0.0
+    mean_mrr = mean(mrr_scores) if mrr_scores else 0.0
+    mean_hit = mean(hit_at_5_scores) if hit_at_5_scores else 0.0
+    mean_faithfulness = mean(faithfulness_scores) if faithfulness_scores else 0.0
+    mean_context_recall = mean(context_recall_scores) if context_recall_scores else 0.0
+    mean_latency = mean(latencies) if latencies else 0.0
     
     # Xuất báo cáo chẩn đoán
     report_content = f"""# Báo cáo đánh giá chất lượng hệ thống RAG (RAG Diagnostic Report)
@@ -218,6 +299,9 @@ Báo cáo chi tiết chẩn đoán chất lượng hệ thống RAG của AI Doc
 * **Hiệu suất truy xuất (Retrieval Performance):**
   * **NDCG@5 (Độ xếp hạng chính xác):** {mean_ndcg * 100:.2f}%
   * **Recall@5 (Tỷ lệ tìm thấy thông tin):** {mean_recall * 100:.2f}%
+  * **Precision@5:** {mean_precision * 100:.2f}%
+  * **MRR (Mean Reciprocal Rank):** {mean_mrr:.4f}
+  * **Hit Rate@5:** {mean_hit * 100:.2f}%
 * **Hiệu suất sinh câu trả lời (Generation Performance):**
   * **Faithfulness (Độ trung thực, chống bịa đặt):** {mean_faithfulness * 100:.2f}%
   * **Context Recall (Độ phủ ngữ cảnh):** {mean_context_recall * 100:.2f}%
@@ -265,22 +349,41 @@ Báo cáo chi tiết chẩn đoán chất lượng hệ thống RAG của AI Doc
 3. **Tiếp tục theo dõi hiệu năng:** Chạy bộ test định kỳ để giám sát điểm Faithfulness và ngăn ngừa hiện tượng bịa đặt (hallucination).
 """
     
-    # Lưu báo cáo vào kết quả
     report_path = PROJECT_ROOT / "storage" / "results" / "rag_diagnostic_report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
-        
+
+    json_path = output_json or RESULTS_JSON
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("Saved RAG eval JSON to %s", json_path)
     logger.info(f"Saved RAG diagnostic report to {report_path}")
-    
-    # In ra terminal
+
     print("=========================================================")
     print("🎉 KẾT QUẢ ĐÁNH GIÁ CHẤT LƯỢNG HỆ THỐNG RAG")
     print(f"   - NDCG@5: {mean_ndcg * 100:.2f}%")
     print(f"   - Recall@5: {mean_recall * 100:.2f}%")
+    print(f"   - Precision@5: {mean_precision * 100:.2f}%")
+    print(f"   - MRR: {mean_mrr:.4f}")
+    print(f"   - Hit Rate@5: {mean_hit * 100:.2f}%")
     print(f"   - Faithfulness: {mean_faithfulness * 100:.2f}%")
     print(f"   - Context Recall: {mean_context_recall * 100:.2f}%")
     print(f"   - Avg Latency: {mean_latency:.3f} s")
+    print(f"   - P50 Latency: {_p50(latencies):.3f} s")
+    print(f"   - P95 Latency: {_p95(latencies):.3f} s")
     print("=========================================================")
+    return summary
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Đánh giá chất lượng RAG")
+    parser.add_argument("--limit", type=int, default=None, help="Giới hạn số câu hỏi")
+    parser.add_argument("--output", type=str, default=None, help="Đường dẫn JSON output")
+    args = parser.parse_args()
+    out = Path(args.output) if args.output else None
+    run_evaluation(limit=args.limit, output_json=out)
+
 
 if __name__ == "__main__":
     main()

@@ -129,7 +129,7 @@ class ChunkingConfig:
 class EmbeddingConfig:
     model_name: str = "BAAI/bge-m3"
     batch_size: int = 16
-    device: str | None = "cpu"
+    device: str | None = None  # None = auto-detect CUDA khi có
     normalize_embeddings: bool = True
     trust_remote_code: bool = True
     max_seq_length: int = 8192

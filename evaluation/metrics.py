@@ -26,7 +26,13 @@ _ROUGE_SCORER = rouge_scorer.RougeScorer(
 _HEAVY_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="heavy_metrics")
 
 _NULL_BERTSCORE = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-_NULL_HEAVY: dict = {"bertscore": _NULL_BERTSCORE, "bertscore_f1": 0.0, "semantic_similarity": 0.0}
+_NULL_HEAVY: dict = {
+    "bertscore": _NULL_BERTSCORE,
+    "bertscore_f1": 0.0,
+    "semantic_similarity": 0.0,
+    "bertscore_status": "error",
+    "bertscore_error": "BERTScore unavailable",
+}
 
 
 @lru_cache(maxsize=256)
@@ -228,6 +234,8 @@ def _compute_heavy(prediction: str, reference: str) -> dict:
         "bertscore": bertscore,
         "bertscore_f1": bertscore["f1"],
         "semantic_similarity": semantic,
+        "bertscore_status": "ok",
+        "bertscore_error": None,
     }
 
 
@@ -277,13 +285,21 @@ def evaluate_summary(
         heavy = future.result(timeout=timeout)
     except FutureTimeoutError:
         logger.warning(
-            "Heavy metrics timed out after %.1f s — returning zeros for BERTScore/Semantic",
+            "Heavy metrics timed out after %.1f s — BERTScore/Semantic unavailable",
             timeout,
         )
-        heavy = _NULL_HEAVY.copy()
+        heavy = {
+            **_NULL_HEAVY,
+            "bertscore_status": "timeout",
+            "bertscore_error": f"BERTScore timed out after {timeout:.0f}s",
+        }
     except Exception as exc:
         logger.warning("Heavy metrics error: %s", exc)
-        heavy = _NULL_HEAVY.copy()
+        heavy = {
+            **_NULL_HEAVY,
+            "bertscore_status": "error",
+            "bertscore_error": str(exc),
+        }
 
     from evaluation.readability import readability_scores
 
@@ -324,6 +340,8 @@ def evaluate_summary(
         "bertscore": heavy["bertscore"],
         "bertscore_f1": heavy["bertscore_f1"],
         "semantic_similarity": heavy["semantic_similarity"],
+        "bertscore_status": heavy.get("bertscore_status", "ok"),
+        "bertscore_error": heavy.get("bertscore_error"),
         "compression_ratio": comp_ratio,
         "compression_details": compression_details,
         "processing_time": round(processing_time, 4),

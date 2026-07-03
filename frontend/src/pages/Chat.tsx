@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import * as ragApi from '../services/ragApi';
 import { useApp } from '../context/AppContext';
-import { RAGDocument, RAGMessage, RAGCitation, RAGChatRequest } from '../types/rag';
+import { RAGDocument, RAGMessage, RAGCitation, RAGChatRequest, PipelineStageId } from '../types/rag';
+import PipelineVisualization, { type AdaptiveContextMetrics } from '../components/PipelineVisualization';
 
 const formatModelName = (name: string | null | undefined) => {
   if (!name) return "";
@@ -58,7 +59,7 @@ export default function Chat() {
 
   // RAG defaults (không hiển thị cho người dùng sửa)
   const ragModel = 'intfloat/multilingual-e5-large';
-  const topK = 3;
+  const topK = 10;
   const threshold = 0.35;
   const retrievalMode = 'hybrid';
   const useReranking = true;
@@ -79,6 +80,8 @@ export default function Chat() {
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [pipelineStage, setPipelineStage] = useState<PipelineStageId | null>(null);
+  const [contextMetrics, setContextMetrics] = useState<AdaptiveContextMetrics>({});
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
@@ -290,6 +293,8 @@ export default function Chat() {
     setChatLoading(true);
     setErrorMessage(null);
     isStreamingRef.current = true;
+    setPipelineStage('question');
+    setContextMetrics({});
 
     const userMsg: RAGMessage = {
       role: 'user',
@@ -318,7 +323,9 @@ export default function Chat() {
         temperature
       };
 
-      const finalResult = await ragApi.streamRagChat(requestPayload, (streamingText, conversationId) => {
+      const finalResult = await ragApi.streamRagChat(
+        requestPayload,
+        (streamingText, conversationId) => {
         setMessages(prev => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
@@ -335,7 +342,28 @@ export default function Chat() {
         if (!activeConversationId && conversationId) {
           setActiveConversationId(conversationId);
         }
-      });
+      },
+        (stage, status) => {
+          if (status === 'active' || status === 'done') {
+            setPipelineStage(stage as PipelineStageId);
+          }
+        },
+      );
+
+      const cc = finalResult.context_compression;
+      const details = finalResult.context_details;
+      const latency = finalResult.latency_details;
+      if (cc || details) {
+        setContextMetrics({
+          adaptiveMode: cc?.mode === 'adaptive' || latency?.adaptive_mode,
+          compressionRatio: cc?.compression_ratio ?? latency?.compression_ratio ?? null,
+          tokenReduction: details?.token_reduction ?? latency?.token_reduction ?? null,
+          chunksKept: details?.chunks_kept ?? cc?.top_original_count ?? latency?.chunks_kept ?? null,
+          summaryTokens: details?.summary_tokens ?? cc?.summary_tokens ?? latency?.summary_tokens ?? null,
+          latencySavingS: details?.latency_saving_estimate_s ?? latency?.latency_saving_estimate_s ?? null,
+          compressionTier: cc?.compression_tier ?? details?.compression_tier ?? null,
+        });
+      }
 
       setMessages(prev => {
         const updated = [...prev];
@@ -368,6 +396,7 @@ export default function Chat() {
     } finally {
       setChatLoading(false);
       isStreamingRef.current = false;
+      setPipelineStage(null);
     }
   };
 
@@ -729,6 +758,15 @@ export default function Chat() {
             {showRightPanel ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </button>
         </header>
+
+        {chatLoading && pipelineStage && (
+          <div className="px-5 pt-3 shrink-0">
+            <PipelineVisualization
+              activeStage={pipelineStage}
+              metrics={contextMetrics}
+            />
+          </div>
+        )}
 
         {/* Message List */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6 scroll-smooth">

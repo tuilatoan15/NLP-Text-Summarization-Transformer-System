@@ -44,7 +44,7 @@ from src.file_parser import SUPPORTED_EXTENSIONS, extract_text_from_file
 from src.model_loader import preload_all_models, registry_status
 from src.model_registry import DEFAULT_ALGORITHMS, list_algorithms, resolve_algorithm
 from src.preprocess import clean_text
-from src.utils import get_device_info, log_device_info, logger
+from src.utils import get_device_info, log_device_info, log_all_model_devices, logger
 from api.document_chat import router as document_chat_router
 from api.chat import router as chat_router
 from api.document_intelligence import router as document_intelligence_router
@@ -133,9 +133,13 @@ async def lifespan(app: FastAPI):
     log_device_info()
 
     if config.PRELOAD_MODELS:
-        logger.info("🔄 PRELOAD_MODELS=1 — loading all Transformer models now …")
+        preload_keys = config.PRELOAD_MODELS_LIST or None
+        logger.info(
+            "🔄 PRELOAD_MODELS=1 — loading %s …",
+            preload_keys if preload_keys else "all abstractive models",
+        )
         try:
-            preload_all_models()
+            preload_all_models(preload_keys)
         except Exception as exc:
             # Do NOT crash the server if one model fails to load.
             # The per-request fallback in abstractive.py will handle it.
@@ -143,15 +147,27 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("ℹ️  PRELOAD_MODELS=0 — models will load lazily on first request")
 
-    # Pre-compute analytics dashboard cache for all time ranges
-    logger.info("📊 Pre-computing analytics dashboard cache...")
+    if config.WARM_ANALYTICS_CACHE:
+        logger.info("📊 Pre-computing analytics dashboard cache...")
+        try:
+            from backend.services.analytics_service import get_dashboard_payload
+            for tr in ["7d", "30d", "90d", "all"]:
+                get_dashboard_payload(time_range=tr, history_limit=15)
+            logger.info("✅ Analytics dashboard cache warmed up successfully.")
+        except Exception as exc:
+            logger.warning("Failed to pre-compute analytics cache: %s", exc)
+    else:
+        logger.info("ℹ️  WARM_ANALYTICS_CACHE=0 — analytics cache warmed on first request")
+
     try:
-        from backend.services.analytics_service import get_dashboard_payload
-        for tr in ["7d", "30d", "90d", "all"]:
-            get_dashboard_payload(time_range=tr, history_limit=15)
-        logger.info("✅ Analytics dashboard cache warmed up successfully.")
+        from backend.services.rag.warmup import preload_rag_models
+        rag_timings = preload_rag_models()
+        if rag_timings:
+            logger.info("🔥 RAG preload timings: %s", rag_timings)
     except Exception as exc:
-        logger.warning("Failed to pre-compute analytics cache: %s", exc)
+        logger.warning("RAG model preload skipped: %s", exc)
+
+    log_all_model_devices()
 
     logger.info("🚀 API ready — listening on %s:%s", config.API_HOST, config.API_PORT)
     yield

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 import numpy as np
 
@@ -138,28 +138,34 @@ class SentenceTransformerEmbedder:
                 normalized=self.config.normalize_embeddings,
                 provider=self._provider,
             )
-        finally:
-            self._clear_cuda_cache()
+        except Exception:
+            raise
 
     _model_cache: dict[str, Any] = {}
+
+    def _cache_key(self) -> str:
+        device = self.config.device or "auto"
+        return f"{self.config.model_name}@{device}"
 
     def _load_model(self):
         if self.config.model_name.lower() in {"hash", "hash-fallback", "offline"}:
             return None
         if self._model is not None:
             return self._model
-            
-        model_name = self.config.model_name
-        if model_name in self._model_cache:
-            self._model = self._model_cache[model_name]
+
+        cache_key = self._cache_key()
+        if cache_key in self._model_cache:
+            self._model = self._model_cache[cache_key]
             return self._model
+
+        model_name = self.config.model_name
 
         try:
             from sentence_transformers import SentenceTransformer
+            from src.utils import resolve_torch_device_str, get_model_device_str
 
-            kwargs = {"trust_remote_code": self.config.trust_remote_code}
-            if self.config.device:
-                kwargs["device"] = self.config.device
+            device = self.config.device or resolve_torch_device_str()
+            kwargs: dict[str, Any] = {"trust_remote_code": self.config.trust_remote_code, "device": device}
             model = SentenceTransformer(self.config.model_name, **kwargs)
             try:
                 model.max_seq_length = self.config.max_seq_length
@@ -169,7 +175,14 @@ class SentenceTransformerEmbedder:
             if self.config.use_fp16:
                 self._try_half_precision()
                 
-            self._model_cache[model_name] = self._model
+            self._model_cache[cache_key] = self._model
+            logger.info(
+                "Embedding model %s loaded on %s (fp16=%s, batch=%d)",
+                model_name,
+                get_model_device_str(self._model),
+                self.config.use_fp16,
+                self.config.batch_size,
+            )
             return self._model
         except Exception as exc:
             if not self.config.fallback_to_hashing:
@@ -184,8 +197,9 @@ class SentenceTransformerEmbedder:
     def _try_half_precision(self) -> None:
         try:
             import torch
+            from src.utils import cuda_is_usable
 
-            if torch.cuda.is_available() and self._model is not None:
+            if cuda_is_usable() and self._model is not None:
                 self._model = self._model.half()
         except Exception as exc:
             logger.debug("Could not enable fp16 for embeddings: %s", exc)

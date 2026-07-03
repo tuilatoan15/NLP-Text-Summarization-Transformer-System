@@ -26,8 +26,8 @@ _worker_rag_service = None
 def _get_rag_service():
     global _worker_rag_service
     if _worker_rag_service is None:
-        from backend.services.rag.service import RAGChatService
-        _worker_rag_service = RAGChatService()
+        from backend.services.rag import get_rag_service
+        _worker_rag_service = get_rag_service()
     return _worker_rag_service
 
 
@@ -146,4 +146,35 @@ def ingest_document_task(self, file_path_str: str, filename: str, settings: Dict
             "status": "failed",
             "task_id": self.request.id,
             "error": str(exc)
+        }
+
+
+@celery_app.task(bind=True, name="workers.tasks.build_raptor_task")
+def build_raptor_task(self, document_id: str, embedding_model: str) -> Dict[str, Any]:
+    """
+    Dựng cây RAPTOR phân cấp nền sau khi upload — không chặn hot-path ingest.
+    """
+    logger.info(
+        "🌲 [TASK] build_raptor_task (ID: %s) doc=%s model=%s",
+        self.request.id, document_id, embedding_model,
+    )
+    t_start = time.perf_counter()
+    try:
+        rag_service = _get_rag_service()
+        rag_service.build_raptor_from_db(document_id, embedding_model)
+        elapsed = time.perf_counter() - t_start
+        return {
+            "status": "success",
+            "task_id": self.request.id,
+            "document_id": document_id,
+            "raptor_status": "ready",
+            "processing_time_s": round(elapsed, 3),
+        }
+    except Exception as exc:
+        logger.error("❌ [TASK ERROR] build_raptor_task thất bại: %s", exc)
+        return {
+            "status": "failed",
+            "task_id": self.request.id,
+            "document_id": document_id,
+            "error": str(exc),
         }

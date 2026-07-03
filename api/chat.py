@@ -4,10 +4,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from backend.services.rag import RAGChatService
+from backend.services.rag import get_rag_service
 
 router = APIRouter(prefix="/api/chat", tags=["Chat History"])
-service = RAGChatService()
+service = get_rag_service()
 
 
 class CreateConversationRequest(BaseModel):

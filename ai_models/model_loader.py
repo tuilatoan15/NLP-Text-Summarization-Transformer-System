@@ -18,11 +18,11 @@ import torch
 
 from src import config
 from src.model_registry import ABSTRACTIVE_ALGORITHMS, AlgorithmConfig, resolve_model_path
-from src.utils import MODEL_LOAD_LOCK, clear_gpu_cache, log_device_info, log_vram_usage, logger
+from src.utils import MODEL_LOAD_LOCK, clear_gpu_cache, cuda_is_usable, log_device_info, log_vram_usage, logger
 
 
 def _resolve_device() -> torch.device:
-    if torch.cuda.is_available():
+    if cuda_is_usable():
         return torch.device("cuda:0")
     return torch.device("cpu")
 
@@ -340,14 +340,21 @@ class ModelRegistry:
             self._loaded[key] = loaded
             return loaded
 
-    def preload_all(self) -> None:
+    def preload_all(self, model_keys: list[str] | None = None) -> None:
         if self._preloaded:
             return
         log_device_info()
-        logger.info("🔄 Preloading %d abstractive models …", len(ABSTRACTIVE_ALGORITHMS))
+        if model_keys:
+            keys = [k for k in model_keys if k in ABSTRACTIVE_ALGORITHMS]
+            missing = [k for k in model_keys if k not in ABSTRACTIVE_ALGORITHMS]
+            if missing:
+                logger.warning("Bỏ qua preload — model không tồn tại: %s", missing)
+        else:
+            keys = list(ABSTRACTIVE_ALGORITHMS)
+        logger.info("🔄 Preloading %d abstractive model(s) …", len(keys))
         t_total = time.perf_counter()
 
-        for key in ABSTRACTIVE_ALGORITHMS:
+        for key in keys:
             try:
                 self.ensure_loaded(key)
                 clear_gpu_cache()
@@ -355,7 +362,7 @@ class ModelRegistry:
                 logger.error("❌ Failed to preload [%s]: %s", key, exc, exc_info=True)
 
         elapsed = time.perf_counter() - t_total
-        logger.info("🏁 All models preloaded in %.2f s", elapsed)
+        logger.info("🏁 Model preload finished in %.2f s (%d model(s))", elapsed, len(keys))
         self._preloaded = True
 
     def get(self, key: str) -> LoadedModel:
@@ -365,20 +372,26 @@ class ModelRegistry:
         return key in self._loaded
 
     def status(self) -> dict:
-        from src.utils import get_device_info
+        from src.utils import get_device_info, get_model_device_str
+        models_status = {}
+        for key, m in self._loaded.items():
+            try:
+                actual_dev = get_model_device_str(m.model)
+            except Exception:
+                actual_dev = "unknown"
+            models_status[key] = {
+                "loaded": True,
+                "device": actual_dev,
+                "fp16": m.fp16,
+                "load_time_s": m.load_time_s,
+                "model_path": m.model_path,
+            }
         return {
             "device": str(self.device),
             "fp16": self.fp16,
             "torch_compile": config.USE_TORCH_COMPILE,
             "preloaded": self._preloaded,
-            "models": {
-                key: {
-                    "loaded": True,
-                    "load_time_s": m.load_time_s,
-                    "model_path": m.model_path,
-                }
-                for key, m in self._loaded.items()
-            },
+            "models": models_status,
             "gpu_info": get_device_info(),
         }
 
@@ -386,8 +399,11 @@ class ModelRegistry:
 _registry = ModelRegistry()
 
 
-def preload_all_models() -> None:
-    _registry.preload_all()
+def preload_all_models(model_keys: list[str] | None = None) -> None:
+    keys = model_keys
+    if keys is None and config.PRELOAD_MODELS_LIST:
+        keys = config.PRELOAD_MODELS_LIST
+    _registry.preload_all(keys)
 
 
 def get_loaded_model(key: str) -> LoadedModel:

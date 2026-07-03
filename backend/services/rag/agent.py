@@ -13,13 +13,20 @@ import requests
 
 from .rag_config import (
     RAG_GENERATOR_TYPE,
+    RAG_USE_LLM_INTENT,
+    RAG_USE_LLM_JUDGE,
+    RAG_USE_LLM_QUERY_EXPANSION,
+    RAG_SKIP_JUDGE_MIN_RERANK,
+    RAG_EXPANSION_MIN_WORDS,
     GEMINI_API_KEY,
     OPENAI_API_KEY,
     GEMINI_MODEL,
     OPENAI_MODEL,
     OLLAMA_API_URL,
     OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
 )
+from .cache import get_cached_expansion, set_cached_expansion
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +124,7 @@ def _execute_llm_request(
                         "stream": False,
                         "options": {"temperature": temperature}
                     }
-                    res = requests.post(url, json=payload, headers=headers, timeout=35)
+                    res = requests.post(url, json=payload, headers=headers, timeout=OLLAMA_TIMEOUT)
                     res.raise_for_status()
                     return res.json()["response"].strip()
 
@@ -147,6 +154,78 @@ def _execute_llm_request(
     return ""
 
 
+def _execute_llm_request_stream(
+    prompt: str,
+    generator_type: str,
+    temperature: float = 0.2,
+    max_tokens: int = 800,
+):
+    """Generator streaming token từ Gemini / OpenAI / Ollama."""
+    provider = generator_type.lower()
+    if provider == "gemini" and GEMINI_API_KEY:
+        _wait_for_rate_limit()
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={GEMINI_API_KEY}"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+        }
+        with requests.post(url, json=payload, headers={"Content-Type": "application/json"}, stream=True, timeout=60) as res:
+            res.raise_for_status()
+            for line in res.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if not chunk or chunk == "[DONE]":
+                    continue
+                try:
+                    import json as _json
+                    data = _json.loads(chunk)
+                    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    text = parts[0].get("text", "") if parts else ""
+                    if text:
+                        yield text
+                except Exception:
+                    continue
+        return
+
+    if provider == "openai" and OPENAI_API_KEY:
+        _wait_for_rate_limit()
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"}
+        payload = {
+            "model": OPENAI_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        with requests.post(url, json=payload, headers=headers, stream=True, timeout=60) as res:
+            res.raise_for_status()
+            for line in res.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    import json as _json
+                    delta = _json.loads(chunk)["choices"][0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        yield text
+                except Exception:
+                    continue
+        return
+
+    # Fallback: sinh toàn bộ rồi yield từng đoạn nhỏ (local / ollama non-stream)
+    full = _execute_llm_request(prompt, provider, temperature=temperature, max_tokens=max_tokens)
+    if full:
+        yield full
+
+
 def _call_llm(prompt: str) -> str:
     """Gọi LLM API theo cấu hình hiện tại thông qua _execute_llm_request."""
     return _execute_llm_request(
@@ -168,12 +247,19 @@ def classify_intent(query: str, document_ids: list[str] | None = None) -> str:
     if not query_clean:
         return "GENERAL"
 
+    from .cache import get_cached_intent, set_cached_intent
+    cached = get_cached_intent(query_clean)
+    if cached:
+        if cached == "SUMMARIZE" and not document_ids:
+            return "DOCUMENT_QA"
+        return cached
+
     # 1. Rule-based checks trước tiên
     # Kiểm tra ý định tóm tắt
     summarize_keywords = ["tóm tắt", "summarize", "tóm lược", "khái quát", "bản tóm tắt"]
     is_asking_summary = any(kw in query_clean.lower() for kw in summarize_keywords)
     if is_asking_summary and document_ids:
-        # Nếu hỏi tóm tắt và có chọn tài liệu -> Chuyển sang tóm tắt
+        set_cached_intent(query_clean, "SUMMARIZE")
         return "SUMMARIZE"
 
     # Kiểm tra ý định xã giao / trò chuyện thông thường
@@ -188,10 +274,11 @@ def classify_intent(query: str, document_ids: list[str] | None = None) -> str:
     ]
     is_general = any(re.search(pat, query_clean.lower()) for pat in general_patterns)
     if is_general and not (document_ids and len(document_ids) > 0):
+        set_cached_intent(query_clean, "GENERAL")
         return "GENERAL"
 
-    # 2. Gọi LLM để phân loại (nếu cấu hình API key đầy đủ)
-    if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
+    # 2. Gọi LLM chỉ khi bật RAG_USE_LLM_INTENT=1
+    if RAG_USE_LLM_INTENT and RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
         prompt = f"""Bạn là một bộ định tuyến ý định câu hỏi (Intent Router).
 Nhiệm vụ của bạn là phân loại câu hỏi của người dùng vào 1 trong 3 nhóm duy nhất:
 1. "GENERAL": Chào hỏi, cảm ơn, tạm biệt hoặc trò chuyện xã giao không liên quan đến dữ liệu tài liệu cụ thể.
@@ -208,10 +295,13 @@ Phân loại:"""
             if val in llm_response.upper():
                 # Nếu là SUMMARIZE nhưng người dùng không chọn tài liệu nào, chuyển về GENERAL hoặc DOCUMENT_QA
                 if val == "SUMMARIZE" and not document_ids:
+                    set_cached_intent(query_clean, "DOCUMENT_QA")
                     return "DOCUMENT_QA"
+                set_cached_intent(query_clean, val)
                 return val
 
-    # 3. Fallback mặc định: Nếu không phải trò chuyện xã giao, mặc định là hỏi đáp tài liệu
+    # 3. Fallback mặc định
+    set_cached_intent(query_clean, "DOCUMENT_QA")
     return "DOCUMENT_QA"
 
 
@@ -224,7 +314,20 @@ def expand_query(query: str) -> list[str]:
     if not query_clean:
         return []
 
-    # 1. Gọi LLM để sinh các câu hỏi tương đương
+    word_count = len(re.findall(r"\w+", query_clean))
+    if word_count < RAG_EXPANSION_MIN_WORDS:
+        return []
+
+    cached = get_cached_expansion(query_clean)
+    if cached is not None:
+        return cached
+
+    if not RAG_USE_LLM_QUERY_EXPANSION:
+        result = _heuristic_expand_query(query_clean)
+        set_cached_expansion(query_clean, result)
+        return result
+
+    # 1. Gọi LLM để sinh các câu hỏi tương đương (nếu có API)
     if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
         prompt = f"""Bạn là chuyên gia viết lại câu hỏi để tối ưu hóa tìm kiếm (Query Expansion).
 Dựa trên câu hỏi hiện tại, hãy viết lại thành tối đa 2 câu hỏi tương đương bằng tiếng Việt để tìm từ khóa tốt hơn.
@@ -245,10 +348,57 @@ Các câu hỏi mở rộng:"""
                 if line_clean and line_clean.lower() != query_clean.lower():
                     expanded.append(line_clean)
             if expanded:
-                return expanded[:2]
+                result = expanded[:2]
+                set_cached_expansion(query_clean, result)
+                return result
 
-    # 2. Heuristic fallback: Tách cụm từ khóa hoặc trả về rỗng nếu không gọi được LLM
-    return []
+    result = _heuristic_expand_query(query_clean)
+    set_cached_expansion(query_clean, result)
+    return result
+
+
+def _heuristic_expand_query(query: str) -> list[str]:
+    """Mở rộng truy vấn bằng heuristic — không gọi LLM."""
+    q = query.strip()
+    lower = q.lower()
+    variants: list[str] = []
+
+    replacements = [
+        ("là gì", "được định nghĩa như thế nào"),
+        ("bao nhiêu", "số liệu"),
+        ("tại sao", "nguyên nhân"),
+        ("khi nào", "thời gian"),
+        ("ai là", "vai trò"),
+        ("khác nhau", "so sánh điểm khác biệt"),
+        ("giống nhau", "điểm tương đồng"),
+        ("ưu điểm", "lợi ích"),
+        ("nhược điểm", "hạn chế"),
+        ("mục tiêu", "mục đích"),
+    ]
+    for src, dst in replacements:
+        if src in lower:
+            variants.append(lower.replace(src, dst, 1))
+            break
+
+    # Thêm biến thể không dấu hỏi cho câu ngắn
+    if q.endswith("?"):
+        variants.append(q.rstrip("?").strip())
+
+    # Biến thể từ khóa cốt lõi (câu dài > 6 từ)
+    words = re.findall(r"\w+", q)
+    if len(words) >= 6 and not variants:
+        core = " ".join(words[-4:])
+        if core.lower() != lower:
+            variants.append(core)
+
+    deduped: list[str] = []
+    seen = {q.lower()}
+    for v in variants:
+        v_clean = v.strip()
+        if v_clean and v_clean.lower() not in seen:
+            deduped.append(v_clean)
+            seen.add(v_clean.lower())
+    return deduped[:2]
 
 
 def rewrite_query(original_query: str, missing_info_feedback: str) -> str:
@@ -268,11 +418,37 @@ def rewrite_query(original_query: str, missing_info_feedback: str) -> str:
     return res.strip() if res else original_query
 
 
-def evaluate_answer(query: str, context: str, answer: str) -> dict[str, Any]:
+def evaluate_answer(
+    query: str,
+    context: str,
+    answer: str,
+    *,
+    top_rerank_score: float | None = None,
+    retrieved_count: int = 0,
+) -> dict[str, Any]:
     """
-    Gọi LLM Judge đánh giá tính chân thực (faithfulness), tính liên quan (relevance)
-    và tính đầy đủ (sufficiency) của câu trả lời dựa trên ngữ cảnh.
+    Đánh giá faithfulness / relevance / sufficiency.
+    Bỏ qua LLM Judge khi rerank score cao (early exit).
     """
+    if not retrieved_count:
+        return {
+            "faithfulness": "yes",
+            "relevance": "no",
+            "sufficiency": "no",
+            "feedback": "Không tìm thấy bất kỳ phân đoạn tài liệu phù hợp nào.",
+        }
+
+    if top_rerank_score is not None and top_rerank_score >= RAG_SKIP_JUDGE_MIN_RERANK:
+        return {
+            "faithfulness": "yes",
+            "relevance": "yes",
+            "sufficiency": "yes",
+            "feedback": f"Early exit: rerank_score={top_rerank_score:.3f} >= {RAG_SKIP_JUDGE_MIN_RERANK}",
+        }
+
+    if not RAG_USE_LLM_JUDGE or RAG_GENERATOR_TYPE not in {"gemini", "openai", "ollama"}:
+        return _heuristic_judge(query, context, answer)
+
     import json
     prompt = f"""Bạn là một Thẩm phán AI (LLM Judge) đánh giá chất lượng hệ thống Hỏi đáp.
 Nhiệm vụ của bạn là phân tích ba yếu tố sau và trả về kết quả đánh giá dưới dạng JSON:
@@ -316,4 +492,34 @@ KẾT QUẢ ĐÁNH GIÁ (JSON):"""
         "relevance": "yes",
         "sufficiency": "yes",
         "feedback": "Default pass due to parsing error"
+    }
+
+
+def _heuristic_judge(query: str, context: str, answer: str) -> dict[str, Any]:
+    """Đánh giá nhanh bằng overlap từ — không gọi LLM."""
+    import re
+
+    if not answer or "không tìm thấy" in answer.lower():
+        return {
+            "faithfulness": "yes",
+            "relevance": "no",
+            "sufficiency": "no",
+            "feedback": "Câu trả lời báo không có thông tin.",
+        }
+
+    q_terms = set(re.findall(r"\w+", query.lower()))
+    a_terms = set(re.findall(r"\w+", answer.lower()))
+    c_terms = set(re.findall(r"\w+", context.lower()))
+    overlap_q = len(q_terms & a_terms) / max(len(q_terms), 1)
+    grounded = len(a_terms & c_terms) / max(len(a_terms), 1)
+
+    relevance = "yes" if overlap_q >= 0.15 else "no"
+    faithfulness = "yes" if grounded >= 0.25 else "no"
+    sufficiency = "yes" if grounded >= 0.2 and len(context) > 80 else "no"
+
+    return {
+        "faithfulness": faithfulness,
+        "relevance": relevance,
+        "sufficiency": sufficiency,
+        "feedback": f"Heuristic judge: overlap_q={overlap_q:.2f}, grounded={grounded:.2f}",
     }
