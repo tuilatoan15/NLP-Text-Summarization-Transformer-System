@@ -30,11 +30,14 @@ export interface RAGMessage {
   created_at?: string;
   model_used?: string | null;
   evaluation?: {
+    faithfulness?: number;
     consistency_score: number;
     grounding_coverage: number;
     semantic_coverage: number;
     hallucination_risk: string;
   } | null;
+  faithfulness?: number | null;
+  retrieval_confidence?: number | null;
 }
 
 export interface RAGChatRequest {
@@ -72,12 +75,15 @@ export interface RAGChatResponse {
   conversation_id: string;
   answer: string;
   confidence: number;
+  faithfulness?: number;
+  retrieval_confidence?: number;
   grounded: boolean;
   retrieved_context: RAGCitation[];
   retrieval_threshold: number;
   prompt_template: string;
   model_used?: string | null;
   evaluation?: {
+    faithfulness?: number;
     consistency_score: number;
     grounding_coverage: number;
     semantic_coverage: number;

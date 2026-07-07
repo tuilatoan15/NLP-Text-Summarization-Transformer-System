@@ -56,10 +56,16 @@ def _combined_score(metrics: dict) -> float:
     return round(score, 4)
 
 
-def _run_extractive(text: str, key: str, sentence_count: int) -> tuple[str, dict]:
+def _run_extractive(
+    text: str,
+    key: str,
+    sentence_count: int,
+    details: dict | None = None,
+) -> tuple[str, dict]:
     from src.explainability import build_extractive_explanations, build_sentence_ranking_graph
 
-    details = summarize_extractive_algorithm(text, key, sentence_count=sentence_count)
+    if details is None:
+        details = summarize_extractive_algorithm(text, key, sentence_count=sentence_count)
     summary = details.get("summary", "")
     ranking_graph = build_sentence_ranking_graph(text, algorithm=key)
     evidence = build_extractive_explanations(text, summary)
@@ -180,6 +186,9 @@ def _evaluate_result(
     target_words: int | None = None,
     source_words: int | None = None,
     summary_length: str = "auto",
+    *,
+    extractive_details: dict | None = None,
+    source_sentences: list[str] | None = None,
 ) -> dict:
     algorithm = resolve_algorithm(key)
     start = time.perf_counter()
@@ -198,7 +207,12 @@ def _evaluate_result(
             training_quality = {"is_poor_training": False, "reason": None}
         else:
             if algorithm.group == "extractive":
-                summary, explainability = _run_extractive(text, algorithm.key, sentence_count)
+                summary, explainability = _run_extractive(
+                    text,
+                    algorithm.key,
+                    sentence_count,
+                    details=extractive_details,
+                )
                 training_quality = {"is_poor_training": False, "reason": None}
             elif algorithm.group == "abstractive":
                 from src.length_control import SummaryLengthManager
@@ -300,7 +314,7 @@ def _evaluate_result(
             or explainability.get("abstractive")
             or explainability
         ),
-        "source_sentences": split_sentences(text)[:200],
+        "source_sentences": source_sentences if source_sentences is not None else split_sentences(text)[:200],
         "error": error,
     }
 
@@ -324,6 +338,7 @@ def _evaluate_hybrid_shared(
     target_words: int | None,
     source_words: int | None,
     compression_ratio: float = 0.35,
+    source_sentences: list[str] | None = None,
 ) -> list[dict]:
     """Chạy nhóm hybrid cùng backbone: extractive song song, 1 load model abstractive."""
     from pipeline.hybrid_summarizer import HybridSummarizer
@@ -419,10 +434,22 @@ def _evaluate_hybrid_shared(
             "warning_badge": _metrics_warning_badge(metrics),
             "training_quality": training_quality,
             "details": explainability,
-            "source_sentences": split_sentences(text)[:200],
+            "source_sentences": source_sentences if source_sentences is not None else split_sentences(text)[:200],
             "error": error,
         })
     return results
+
+
+def _shared_source_sentences(
+    text: str,
+    ext_parallel: dict[str, dict] | None = None,
+) -> list[str]:
+    if ext_parallel:
+        for details in ext_parallel.values():
+            sentences = details.get("source_sentences")
+            if sentences:
+                return list(sentences)[:200]
+    return split_sentences(text)[:200]
 
 
 def _run_all_parallel(
@@ -437,9 +464,12 @@ def _run_all_parallel(
     summary_length: str = "auto",
 ) -> list[dict]:
     results: dict[str, dict] = {}
+    shared_source_sentences = _shared_source_sentences(text)
+    ext_parallel: dict[str, dict] = {}
 
     if extractive_keys:
         ext_parallel = summarize_extractive_parallel(text, extractive_keys, sentence_count)
+        shared_source_sentences = _shared_source_sentences(text, ext_parallel)
         with ThreadPoolExecutor(
             max_workers=min(len(extractive_keys), config.EXTRACTIVE_WORKERS),
             thread_name_prefix="ext_eval",
@@ -455,6 +485,8 @@ def _run_all_parallel(
                     target_words,
                     source_words,
                     summary_length,
+                    extractive_details=ext_parallel.get(key),
+                    source_sentences=shared_source_sentences,
                 ): key
                 for key in extractive_keys
             }
@@ -483,6 +515,7 @@ def _run_all_parallel(
                         target_words,
                         source_words,
                         summary_length,
+                        source_sentences=shared_source_sentences,
                     ): key
                     for key in pure_abs
                 }
@@ -504,6 +537,7 @@ def _run_all_parallel(
                         max_output_length,
                         target_words,
                         source_words,
+                        source_sentences=shared_source_sentences,
                     ):
                         results[row["key"]] = row
             else:
@@ -812,6 +846,9 @@ def summarize_all(
     )
 
     source_words = count_words(cleaned)
+    from evaluation.metrics import warmup_compare_evaluation
+
+    warmup_compare_evaluation(reference_text, cleaned)
     t_total = time.perf_counter()
     results = _run_all_parallel(
         cleaned,
@@ -892,14 +929,21 @@ def stream_compare(
         return
 
     source_words = count_words(cleaned)
+    from evaluation.metrics import warmup_compare_evaluation
+
+    warmup_compare_evaluation(reference_text, cleaned)
     execution_order = extractive_keys + abstractive_keys
     yield _sse("start", algorithms=execution_order, total=len(execution_order))
 
     results_by_key: dict[str, dict] = {}
     t_total = time.perf_counter()
+    shared_source_sentences = _shared_source_sentences(cleaned)
+    ext_parallel: dict[str, dict] = {}
 
     try:
         if extractive_keys:
+            ext_parallel = summarize_extractive_parallel(cleaned, extractive_keys, sentence_count)
+            shared_source_sentences = _shared_source_sentences(cleaned, ext_parallel)
             with ThreadPoolExecutor(
                 max_workers=min(len(extractive_keys), config.EXTRACTIVE_WORKERS),
                 thread_name_prefix="ext_stream",
@@ -915,6 +959,8 @@ def stream_compare(
                         target_words,
                         source_words,
                         summary_length,
+                        extractive_details=ext_parallel.get(key),
+                        source_sentences=shared_source_sentences,
                     ): key
                     for key in extractive_keys
                 }
@@ -926,7 +972,11 @@ def stream_compare(
                     results_by_key[key] = row
                     yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
 
-        for key in abstractive_keys:
+        use_shared_hybrid = os.environ.get("COMPARE_PIPELINE_V2", "1") != "0"
+        pure_abs = [k for k in abstractive_keys if k in ABSTRACTIVE_ALGORITHMS]
+        hybrid_keys = [k for k in abstractive_keys if k in HYBRID_ALGORITHMS]
+
+        for key in pure_abs:
             yield _sse("running", algorithm=key, index=execution_order.index(key) + 1, total=len(execution_order))
             row = _evaluate_result(
                 key,
@@ -937,9 +987,55 @@ def stream_compare(
                 target_words,
                 source_words,
                 summary_length,
+                source_sentences=shared_source_sentences,
             )
             results_by_key[key] = row
             yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
+
+        if hybrid_keys:
+            if use_shared_hybrid:
+                for backbone, group_keys in _group_hybrid_by_backbone(hybrid_keys).items():
+                    logger.info("Hybrid shared backbone batch (stream): %s (%d algos)", backbone, len(group_keys))
+                    for key in group_keys:
+                        yield _sse(
+                            "running",
+                            algorithm=key,
+                            index=execution_order.index(key) + 1,
+                            total=len(execution_order),
+                        )
+                    for row in _evaluate_hybrid_shared(
+                        cleaned,
+                        reference_text,
+                        group_keys,
+                        max_output_length,
+                        target_words,
+                        source_words,
+                        source_sentences=shared_source_sentences,
+                    ):
+                        results_by_key[row["key"]] = row
+                        yield _sse(
+                            "done",
+                            algorithm=row["key"],
+                            result=row,
+                            completed=len(results_by_key),
+                            total=len(execution_order),
+                        )
+            else:
+                for key in hybrid_keys:
+                    yield _sse("running", algorithm=key, index=execution_order.index(key) + 1, total=len(execution_order))
+                    row = _evaluate_result(
+                        key,
+                        cleaned,
+                        reference_text,
+                        sentence_count,
+                        max_output_length,
+                        target_words,
+                        source_words,
+                        summary_length,
+                        source_sentences=shared_source_sentences,
+                    )
+                    results_by_key[key] = row
+                    yield _sse("done", algorithm=key, result=row, completed=len(results_by_key), total=len(execution_order))
 
         ordered = [results_by_key[k] for k in execution_order if k in results_by_key]
         total_wall = time.perf_counter() - t_total

@@ -1,12 +1,15 @@
-import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import React, { memo } from 'react';
+import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  LayoutDashboard, FileText, PlaySquare, MessageSquare,
-  LineChart, BarChart3, Settings, Activity, Sparkles,
-  Search, GitCompareArrows, PanelLeftClose, PanelLeftOpen, Cpu, User, HardDrive
+  LayoutDashboard, MessageSquare,
+  BarChart3, Settings, Sparkles,
+  GitCompareArrows, PanelLeftClose, PanelLeftOpen, Cpu, Database
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useSidebarSystemQueries } from '../hooks/useApiQueries';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import BrandLogo from '../components/BrandLogo';
 
 const navGroups = [
   {
@@ -26,6 +29,7 @@ const navGroups = [
     items: [
       { nameKey: 'navCompare', path: '/compare', icon: GitCompareArrows, labelVie: 'So sánh Mô hình', labelEng: 'Model Comparison' },
       { nameKey: 'navAnalytics', path: '/analytics', icon: BarChart3, labelVie: 'Phân tích hiệu năng', labelEng: 'Analytics' },
+      { nameKey: 'navDatasetAnalytics', path: '/dataset-analytics', icon: Database, labelVie: 'Dataset Analytics', labelEng: 'Dataset Analytics' },
     ],
   },
   {
@@ -33,14 +37,13 @@ const navGroups = [
     labelVie: 'QUẢN TRỊ HỆ THỐNG',
     labelEng: 'SYSTEM & DATA',
     items: [
-      // { nameKey: 'navDocuments', path: '/documents', icon: FileText, labelVie: 'Phân tích tài liệu', labelEng: 'Datasets' },
       { nameKey: 'navBenchmark', path: '/benchmark', icon: Cpu, labelVie: 'Kết quả Benchmark', labelEng: 'Models' },
       { nameKey: 'navSettings', path: '/settings', icon: Settings, labelVie: 'Cấu hình hệ thống', labelEng: 'Settings' },
     ],
   },
 ];
 
-const NavItem = ({ item, collapsed }) => {
+const NavItem = memo(({ item, collapsed }) => {
   const { locale } = useApp();
   const Icon = item.icon;
   const displayName = locale === 'vie' ? item.labelVie : item.labelEng;
@@ -61,28 +64,37 @@ const NavItem = ({ item, collapsed }) => {
       )}
     </NavLink>
   );
-};
+});
 
 const Sidebar = () => {
   const { locale, sidebarCollapsed, toggleSidebar } = useApp();
+  const reducedMotion = usePrefersReducedMotion();
+  const { gpu: gpuQuery, node: nodeQuery } = useSidebarSystemQueries();
+  const gpu = gpuQuery.data;
+  const node = nodeQuery.data;
+
+  const gpuLabel = gpu?.available ? (gpu.gpu_name || 'GPU') : 'Unavailable';
+  const gpuUtil = gpu?.gpu_utilization_percent;
+  const nodeStatus = node?.status || 'offline';
+  const statusColor = nodeStatus === 'healthy' ? 'bg-emerald-500' : nodeStatus === 'busy' ? 'bg-amber-500' : 'bg-red-500';
+  const sidebarWidth = sidebarCollapsed ? 68 : 260;
 
   return (
-    <motion.aside
-      animate={{ width: sidebarCollapsed ? 68 : 260 }}
-      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-      className="bg-[var(--bg-elevated)] border-r border-[var(--border)] flex flex-col h-screen fixed left-0 top-0 z-30 overflow-hidden"
+    <aside
+      className="bg-[var(--bg-elevated)] border-r border-[var(--border)] flex flex-col h-screen fixed left-0 top-0 z-30 overflow-hidden gpu-layer"
+      style={{
+        width: sidebarWidth,
+        transition: reducedMotion ? 'none' : 'width 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+      }}
     >
-      {/* Logo Header */}
       <div className={`flex items-center gap-3 h-15 border-b border-[var(--border)] shrink-0 ${sidebarCollapsed ? 'justify-center px-2' : 'px-4'}`}>
-        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-400 via-sky-600 to-blue-700 flex items-center justify-center shrink-0 shadow-sm">
-          <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
-        </div>
+        <BrandLogo size="md" />
         <AnimatePresence>
           {!sidebarCollapsed && (
             <motion.div
-              initial={{ opacity: 0, x: -10 }}
+              initial={reducedMotion ? false : { opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
+              exit={reducedMotion ? undefined : { opacity: 0, x: -10 }}
               transition={{ duration: 0.15 }}
               className="overflow-hidden whitespace-nowrap"
             >
@@ -93,7 +105,6 @@ const Sidebar = () => {
         </AnimatePresence>
       </div>
 
-      {/* Navigation Menu */}
       <div className="flex-1 overflow-y-auto py-4 px-3 space-y-5 scrollbar-none">
         {navGroups.map((group) => (
           <div key={group.labelKey} className="space-y-1.5">
@@ -113,44 +124,44 @@ const Sidebar = () => {
         ))}
       </div>
 
-      {/* Footer Section */}
       <div className="border-t border-[var(--border)] bg-[var(--bg-subtle)] p-3 shrink-0 space-y-3">
-        {/* System Health Indicator */}
         {!sidebarCollapsed && (
           <div className="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] space-y-1.5">
             <div className="flex items-center justify-between text-[10px] font-semibold text-[var(--text-muted)]">
               <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className={`w-1.5 h-1.5 rounded-full ${statusColor} ${reducedMotion ? '' : 'animate-pulse'}`} />
                 Live Node
               </span>
-              <span>RTX 4090 vVRAM</span>
+              <span className="truncate max-w-[100px]" title={gpuLabel}>{gpuLabel}</span>
             </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-[9px] text-[var(--text-faint)]">
-                <span>GPU Usage</span>
-                <span>24%</span>
+            {gpu?.available && gpuUtil != null ? (
+              <div className="space-y-1">
+                <div className="flex justify-between text-[9px] text-[var(--text-faint)]">
+                  <span>GPU Usage</span>
+                  <span>{gpuUtil}%</span>
+                </div>
+                <div className="h-1 rounded-full bg-[var(--bg-inset)] overflow-hidden">
+                  <div
+                    className="h-full bg-sky-500 rounded-full gpu-bar-fill"
+                    style={{
+                      width: `${Math.min(100, gpuUtil)}%`,
+                      transition: reducedMotion ? 'none' : 'width 500ms ease-out',
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-1 rounded-full bg-[var(--bg-inset)] overflow-hidden">
-                <div className="h-full bg-sky-500 rounded-full" style={{ width: '24%' }} />
-              </div>
-            </div>
+            ) : (
+              <p className="text-[9px] text-[var(--text-faint)]">GPU: Unavailable</p>
+            )}
           </div>
         )}
 
-        {/* User Profile */}
-        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-1`}>
-          <div className="w-8 h-8 rounded-full bg-sky-100 dark:bg-sky-950 flex items-center justify-center text-sky-600 dark:text-sky-400 font-bold shrink-0 border border-sky-200 dark:border-sky-800">
-            AR
+        {!sidebarCollapsed && (
+          <div className="px-1 text-[10px] text-[var(--text-faint)] truncate">
+            {node?.node_id || 'local-node'}
           </div>
-          {!sidebarCollapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-[var(--text-primary)] truncate">AI Researcher</p>
-              <p className="text-[10px] text-[var(--text-faint)] truncate">hub-admin@hub.ai</p>
-            </div>
-          )}
-        </div>
+        )}
 
-        {/* Collapse Sidebar Button */}
         <button
           onClick={toggleSidebar}
           className="ui-btn-ghost w-full justify-center gap-2 py-1.5 text-xs border border-[var(--border)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-muted)] text-[var(--text-secondary)] shadow-sm"
@@ -166,8 +177,8 @@ const Sidebar = () => {
           )}
         </button>
       </div>
-    </motion.aside>
+    </aside>
   );
 };
 
-export default Sidebar;
+export default memo(Sidebar);

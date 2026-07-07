@@ -14,8 +14,12 @@ export default defineConfig({
         manualChunks: {
           charts: ['recharts'],
           icons: ['lucide-react'],
+          motion: ['framer-motion'],
+          router: ['react-router', 'react-router-dom'],
+          query: ['@tanstack/react-query', '@tanstack/react-query-persist-client', '@tanstack/query-sync-storage-persister'],
         },
       },
     },
+    chunkSizeWarningLimit: 600,
   },
 });

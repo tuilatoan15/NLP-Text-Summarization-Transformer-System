@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, memo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { BENCHMARK_SAMPLE_SIZE } from '../lib/benchmarkConfig';
 import { motion } from 'framer-motion';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis,
@@ -55,7 +56,7 @@ const Compare = () => {
 
   const SAMPLES_PER_PAGE = 10;
 
-  const [benchmarkSize, setBenchmarkSize] = useState(1000);
+  const benchmarkSize = BENCHMARK_SAMPLE_SIZE;
 
   const leaderboardQuery = useResearchLeaderboardQuery(leaderboardCategory, benchmarkSize, true);
   const hybridQuery = useResearchHybridStudyQuery('vie', benchmarkSize, true);
@@ -389,18 +390,9 @@ const Compare = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-bold text-[var(--text-secondary)]">{locale === 'vie' ? 'Quy mô:' : 'Size:'}</label>
-            <select
-              value={benchmarkSize}
-              onChange={(e) => setBenchmarkSize(Number(e.target.value))}
-              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] focus:border-sky-500 outline-none transition-all cursor-pointer shadow-sm"
-            >
-              <option value={1000}>{locale === 'vie' ? '1.000 mẫu' : '1,000 samples'}</option>
-              <option value={2500}>{locale === 'vie' ? '2.500 mẫu (2 ngày)' : '2,500 samples'}</option>
-              <option value={5000}>{locale === 'vie' ? '5.000 mẫu' : '5,000 samples'}</option>
-            </select>
-          </div>
+          <span className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-sm">
+            {locale === 'vie' ? '5.000 mẫu (benchmark thực nghiệm)' : '5,000 samples (research benchmark)'}
+          </span>
           
           {/* Ẩn nút kích hoạt benchmark tự động theo yêu cầu của người dùng để tránh bấm nhầm gây treo máy */}
           {/* <button

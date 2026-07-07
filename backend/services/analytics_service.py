@@ -123,6 +123,7 @@ def compute_dashboard_metrics(time_range: str = "30d") -> dict:
             "total_runs": 0,
             "total_algorithm_outputs": 0,
             "total_processing_time_seconds": 0.0,
+            "avg_processing_time_seconds": 0.0,
             "avg_target_length_ratio": 0.0,
             "avg_actual_length_ratio": 0.0,
             "top_models": [],
@@ -169,6 +170,7 @@ def compute_dashboard_metrics(time_range: str = "30d") -> dict:
         "total_runs": len(items),
         "total_algorithm_outputs": total_outputs,
         "total_processing_time_seconds": round(sum(processing_times), 2),
+        "avg_processing_time_seconds": round(avg(processing_times), 3),
         "avg_target_length_ratio": round(avg(target_ratios), 1),
         "avg_actual_length_ratio": round(avg(actual_ratios), 1),
         "top_models": [
@@ -271,25 +273,103 @@ def get_visualization_data(time_range: str = "30d") -> dict:
     }
 
 
+def get_recent_activity(limit: int = 15) -> list[dict]:
+    """Merged activity feed: compare runs, chat sessions, RAG uploads."""
+    activities: list[dict] = []
+
+    for run in list_recent_results(limit=limit):
+        activities.append(
+            {
+                "type": "compare",
+                "id": run.get("result_id"),
+                "title": run.get("best_algorithm") or "So sánh mô hình",
+                "detail": run.get("text_preview", ""),
+                "meta": {
+                    "algorithm_count": run.get("algorithm_count"),
+                    "target_length_ratio": run.get("target_length_ratio"),
+                },
+                "created_at": run.get("created_at"),
+                "link": f"/summarize?result={run.get('result_id')}",
+            }
+        )
+
+    try:
+        from backend.services.rag import get_rag_service
+
+        for doc in get_rag_service().list_documents()[:limit]:
+            activities.append(
+                {
+                    "type": "upload",
+                    "id": doc.get("document_id"),
+                    "title": doc.get("filename") or "Tài liệu RAG",
+                    "detail": f"{doc.get('chunk_count', 0)} chunks indexed",
+                    "meta": {},
+                    "created_at": doc.get("created_at") or doc.get("uploaded_at"),
+                    "link": "/chat",
+                }
+            )
+    except Exception:
+        pass
+
+    try:
+        from backend.services.rag import get_rag_service
+
+        for conv in get_rag_service().repository.list_conversations(limit=limit, offset=0):
+            activities.append(
+                {
+                    "type": "chat",
+                    "id": conv.get("id") or conv.get("conversation_id"),
+                    "title": conv.get("title") or "Cuộc trò chuyện",
+                    "detail": f"{len(conv.get('messages') or [])} messages",
+                    "meta": {},
+                    "created_at": conv.get("updated_at") or conv.get("created_at"),
+                    "link": "/chat",
+                }
+            )
+    except Exception:
+        pass
+
+    def _sort_key(item: dict) -> str:
+        return str(item.get("created_at") or "")
+
+    activities.sort(key=_sort_key, reverse=True)
+    return activities[:limit]
+
+
 def get_dashboard_payload(time_range: str = "30d", history_limit: int = 15) -> dict:
     cache_path = RESULT_DIR / f"cached_dashboard_{time_range}.json"
     if cache_path.exists():
         try:
             cached_data = json.loads(cache_path.read_text(encoding="utf-8"))
-            # Slice the pre-cached recent_runs to the requested history_limit dynamically
-            cached_data["recent_runs"] = cached_data["recent_runs"][:history_limit]
+            cached_data["recent_runs"] = cached_data.get("recent_runs", [])[:history_limit]
+            if "recent_activity" not in cached_data:
+                cached_data["recent_activity"] = get_recent_activity(limit=history_limit)
+            else:
+                cached_data["recent_activity"] = cached_data["recent_activity"][:history_limit]
+            if "overview" not in cached_data:
+                from backend.services.system_service import get_overview_aggregates
+                cached_data["overview"] = get_overview_aggregates(cached_data.get("metrics"))
             return cached_data
-        except Exception as exc:
+        except Exception:
             pass
 
     # Cache miss: compute full dashboard payload
+    metrics = compute_dashboard_metrics(time_range)
     payload = {
-        "metrics": compute_dashboard_metrics(time_range),
+        "metrics": metrics,
         "visualization": get_visualization_data(time_range),
         # Cache a larger history window (50 items) so we can slice dynamically on client requests
         "recent_runs": list_recent_results(limit=50),
+        "recent_activity": get_recent_activity(limit=50),
         "time_range": time_range,
     }
+
+    try:
+        from backend.services.system_service import get_overview_aggregates
+
+        payload["overview"] = get_overview_aggregates(metrics)
+    except Exception:
+        payload["overview"] = {}
 
     try:
         RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -299,6 +379,7 @@ def get_dashboard_payload(time_range: str = "30d", history_limit: int = 15) -> d
 
     # Slice recent_runs for current response
     payload["recent_runs"] = payload["recent_runs"][:history_limit]
+    payload["recent_activity"] = payload.get("recent_activity", [])[:history_limit]
     return payload
 
 

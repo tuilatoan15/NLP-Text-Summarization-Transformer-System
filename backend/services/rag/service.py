@@ -27,7 +27,6 @@ from .rag_config import (
     RETRIEVAL_FINAL_TOP_K,
     RETRIEVAL_INITIAL_TOP_K,
     RETRIEVAL_THRESHOLD,
-    RAG_EVALUATE_HALLUCINATION,
     RAG_RESPONSE_CACHE,
     RAG_USE_LLM_QUERY_EXPANSION,
     RAG_USE_RAPTOR,
@@ -45,6 +44,7 @@ from .cache import (
 )
 from .perf import StageTimer, compute_dynamic_top_k
 from .context_compression import build_retrieved_context, CompressedContext
+from .faithfulness import compute_chat_faithfulness, compute_retrieval_confidence
 from .rag_config import RAG_ADAPTIVE_CONTEXT
 from .repository import RAGRepository
 from .retriever import HybridRetriever
@@ -134,6 +134,150 @@ class RAGChatService:
             return EMBEDDING_MODEL
         model = self.repository.get_document_embedding_model(document_ids[0])
         return model or EMBEDDING_MODEL
+
+    def _resolve_selected_filenames(self, document_ids: list[str] | None) -> list[str] | None:
+        """Map document_ids đã chọn sang tên file (cho multi-doc prompt)."""
+        if not document_ids or len(document_ids) <= 1:
+            return None
+        doc_map = {d["id"]: d["filename"] for d in self.repository.list_documents()}
+        return [doc_map.get(doc_id, doc_id) for doc_id in document_ids]
+
+    def _warn_missing_doc_coverage(
+        self,
+        document_ids: list[str] | None,
+        retrieved: list[dict[str, Any]],
+    ) -> None:
+        if not document_ids or len(document_ids) <= 1:
+            return
+        covered = {str(c.get("document_id", "")) for c in retrieved}
+        missing = [doc_id for doc_id in document_ids if doc_id not in covered]
+        if missing:
+            logger.warning(
+                "⚠️ Multi-doc: %d tài liệu đã chọn không có chunk sau backfill: %s",
+                len(missing),
+                missing,
+            )
+
+    def _gather_retrieval_candidates(
+        self,
+        *,
+        query_vector: list[float],
+        document_ids: list[str] | None,
+        intent: str,
+        embedding_model: str,
+        current_query: str,
+        retries: int,
+        use_expansion: bool,
+    ) -> list[dict[str, Any]]:
+        """Thu thập candidates — per-doc khi chọn nhiều tài liệu."""
+        if intent == "DOCUMENT_QA":
+            if document_ids and len(document_ids) > 1:
+                per_doc_k = max(5, RETRIEVAL_INITIAL_TOP_K // len(document_ids))
+                candidates: list[dict[str, Any]] = []
+                seen_ids: set[str] = set()
+                for doc_id in document_ids:
+                    doc_hits = self.vector_store.query(
+                        query_vector=query_vector,
+                        top_k=per_doc_k,
+                        document_ids=[doc_id],
+                    )
+                    for hit in doc_hits:
+                        if hit["id"] not in seen_ids:
+                            candidates.append(hit)
+                            seen_ids.add(hit["id"])
+            else:
+                candidates = self.vector_store.query(
+                    query_vector=query_vector,
+                    top_k=RETRIEVAL_INITIAL_TOP_K,
+                    document_ids=document_ids or None,
+                )
+
+            if retries == 0 and use_expansion:
+                from .agent import expand_query
+
+                expanded = expand_query(current_query)
+                if expanded:
+                    seen_ids = {c["id"] for c in candidates}
+                    eq_vectors = self.embedding_service.embed_queries_batch(
+                        expanded, embedding_model
+                    )
+                    for eq, eq_vector in zip(expanded, eq_vectors):
+                        if document_ids and len(document_ids) > 1:
+                            for doc_id in document_ids:
+                                eq_candidates = self.vector_store.query(
+                                    query_vector=eq_vector,
+                                    top_k=3,
+                                    document_ids=[doc_id],
+                                )
+                                for eq_c in eq_candidates:
+                                    if eq_c["id"] not in seen_ids:
+                                        candidates.append(eq_c)
+                                        seen_ids.add(eq_c["id"])
+                        else:
+                            eq_candidates = self.vector_store.query(
+                                query_vector=eq_vector,
+                                top_k=5,
+                                document_ids=document_ids or None,
+                            )
+                            for eq_c in eq_candidates:
+                                if eq_c["id"] not in seen_ids:
+                                    candidates.append(eq_c)
+                                    seen_ids.add(eq_c["id"])
+            return candidates
+
+        if not document_ids:
+            return self.vector_store.query(
+                query_vector=query_vector,
+                top_k=RETRIEVAL_INITIAL_TOP_K,
+                document_ids=None,
+            )
+
+        if len(document_ids) > 1:
+            per_doc_k = max(5, RETRIEVAL_INITIAL_TOP_K // len(document_ids))
+            merged: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for doc_id in document_ids:
+                for hit in self.vector_store.query(
+                    query_vector=query_vector,
+                    top_k=per_doc_k,
+                    document_ids=[doc_id],
+                ):
+                    if hit["id"] not in seen:
+                        merged.append(hit)
+                        seen.add(hit["id"])
+            candidates = merged
+        else:
+            candidates = self.vector_store.query(
+                query_vector=query_vector,
+                top_k=RETRIEVAL_INITIAL_TOP_K,
+                document_ids=document_ids,
+            )
+
+        summary_candidates = [
+            c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"
+        ]
+        if summary_candidates:
+            return summary_candidates
+        return candidates
+
+    def _compute_answer_metrics(
+        self,
+        *,
+        answer: str,
+        retrieved: list[dict[str, Any]],
+        compressed: CompressedContext | None,
+    ) -> tuple[float, float, dict[str, Any] | None]:
+        retrieval_confidence = compute_retrieval_confidence(retrieved)
+        eval_metrics = None
+        if retrieved and answer:
+            source_text = (
+                compressed.effective_context_text()
+                if compressed and compressed.enabled
+                else "\n\n".join(c["text"] for c in retrieved)
+            )
+            eval_metrics = compute_chat_faithfulness(answer, source_text, retrieved)
+        faithfulness = float(eval_metrics.get("faithfulness", 0.0)) if eval_metrics else 0.0
+        return faithfulness, retrieval_confidence, eval_metrics
 
     def _trigger_auto_title(self, conv_id: str) -> None:
         def run():
@@ -378,9 +522,11 @@ class RAGChatService:
         self.repository.append_message(conv_id, "user", query)
 
         # Classify intent
-        from .agent import classify_intent, expand_query
+        from .agent import classify_intent
         timer.start("intent")
         intent = classify_intent(query, document_ids)
+        if intent == "SUMMARIZE" and not document_ids:
+            intent = "DOCUMENT_QA"
         timer.stop("intent")
 
         top_k = compute_dynamic_top_k(
@@ -451,6 +597,9 @@ class RAGChatService:
         max_retries = int(os.getenv("RAG_AGENT_MAX_RETRIES", "2"))
         current_threshold = threshold
         current_top_k = top_k
+        if document_ids and len(document_ids) > 1:
+            current_threshold = min(threshold, 0.25)
+        selected_filenames = self._resolve_selected_filenames(document_ids)
 
         ret_key = retrieval_cache_key(
             current_query, document_ids, embedding_model,
@@ -475,50 +624,15 @@ class RAGChatService:
                 retrieved = cached_retrieved
                 logger.debug("⚡ Retrieval cache hit")
             else:
-                # Lấy candidates dựa trên intent
-                if intent == "DOCUMENT_QA":
-                    candidates = self.vector_store.query(
-                        query_vector=query_vector,
-                        top_k=RETRIEVAL_INITIAL_TOP_K,
-                        document_ids=document_ids or None,
-                    )
-                    use_expansion = RAG_USE_LLM_QUERY_EXPANSION
-                    if retries == 0 and use_expansion:
-                        expanded = expand_query(current_query)
-                        if expanded:
-                            seen_ids = {c["id"] for c in candidates}
-                            eq_vectors = self.embedding_service.embed_queries_batch(
-                                expanded, embedding_model
-                            )
-                            for eq, eq_vector in zip(expanded, eq_vectors):
-                                eq_candidates = self.vector_store.query(
-                                    query_vector=eq_vector,
-                                    top_k=5,
-                                    document_ids=document_ids or None,
-                                )
-                                for eq_c in eq_candidates:
-                                    if eq_c["id"] not in seen_ids:
-                                        candidates.append(eq_c)
-                                        seen_ids.add(eq_c["id"])
-                else:
-                    if not document_ids:
-                        intent = "DOCUMENT_QA"
-                        candidates = self.vector_store.query(
-                            query_vector=query_vector,
-                            top_k=RETRIEVAL_INITIAL_TOP_K,
-                            document_ids=None,
-                        )
-                    else:
-                        candidates = self.vector_store.query(
-                            query_vector=query_vector,
-                            top_k=RETRIEVAL_INITIAL_TOP_K,
-                            document_ids=document_ids,
-                        )
-                        summary_candidates = [
-                            c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"
-                        ]
-                        if summary_candidates:
-                            candidates = summary_candidates
+                candidates = self._gather_retrieval_candidates(
+                    query_vector=query_vector,
+                    document_ids=document_ids,
+                    intent=intent,
+                    embedding_model=embedding_model,
+                    current_query=current_query,
+                    retries=retries,
+                    use_expansion=RAG_USE_LLM_QUERY_EXPANSION,
+                )
 
                 if not candidates:
                     candidates = self.repository.list_chunks(document_ids=document_ids)
@@ -536,10 +650,12 @@ class RAGChatService:
                     threshold=current_threshold,
                     retrieval_mode=retrieval_mode,
                     use_reranking=use_reranking,
+                    document_ids=document_ids,
                 )
                 timer.stop("reranking")
                 if retries == 0:
                     set_cached_retrieval(ret_key, retrieved)
+                self._warn_missing_doc_coverage(document_ids, retrieved)
 
             # Sinh câu trả lời bằng Generator (sau Hybrid Context Compression)
             timer.start("context_compression")
@@ -554,6 +670,8 @@ class RAGChatService:
                 retrieved,
                 chat_history=chat_history,
                 compressed_context=compressed if compressed.enabled else None,
+                selected_document_ids=document_ids,
+                selected_filenames=selected_filenames,
             )
             timer.stop("prompt_build")
 
@@ -565,6 +683,8 @@ class RAGChatService:
                 chat_history=chat_history,
                 temperature=temperature,
                 compressed_context=compressed if compressed.enabled else None,
+                selected_document_ids=document_ids,
+                selected_filenames=selected_filenames,
             )
             generation_time = time.perf_counter() - t_gen_loop
             timer.stop("generation")
@@ -628,28 +748,15 @@ class RAGChatService:
             retrieved,
             chat_history=chat_history,
             compressed_context=compressed if compressed.enabled else None,
+            selected_document_ids=document_ids,
+            selected_filenames=selected_filenames,
         )
 
-        # Đánh giá chất lượng câu trả lời (Fact-checking/Hallucination risk) bằng NLI audit
-        eval_metrics = None
-        if retrieved and RAG_EVALUATE_HALLUCINATION:
-            try:
-                from evaluation.hallucination import audit_summary
-                source_text = (
-                    compressed.effective_context_text()
-                    if compressed.enabled
-                    else "\n\n".join(c["text"] for c in retrieved)
-                )
-                formatted_chunks = [{"chunk_id": c.get("chunk_id") or c.get("id"), "text": c["text"]} for c in retrieved]
-                audit_res = audit_summary(generation["answer"], source_text, chunks=formatted_chunks, mode="fast")
-                eval_metrics = {
-                    "consistency_score": float(audit_res.get("consistency_score", 0.0)),
-                    "grounding_coverage": float(audit_res.get("grounding_coverage", 0.0)),
-                    "semantic_coverage": float(audit_res.get("semantic_coverage", 0.0)),
-                    "hallucination_risk": str(audit_res.get("hallucination_risk", "low")),
-                }
-            except Exception as exc:
-                logger.error("Failed to run hallucination audit on chat response: %s", exc)
+        faithfulness, retrieval_confidence, eval_metrics = self._compute_answer_metrics(
+            answer=generation["answer"],
+            retrieved=retrieved,
+            compressed=compressed if compressed.enabled else None,
+        )
 
         total_time = time.perf_counter() - t_total_start
 
@@ -675,7 +782,9 @@ class RAGChatService:
         response: dict[str, Any] = {
             "conversation_id": conv_id,
             "answer": generation["answer"],
-            "confidence": generation["confidence"],
+            "confidence": retrieval_confidence,
+            "retrieval_confidence": retrieval_confidence,
+            "faithfulness": faithfulness,
             "grounded": generation["grounded"],
             "model_used": generation.get("model_used"),
             "fallback_used": generation.get("fallback_used", False),
@@ -884,6 +993,8 @@ class RAGChatService:
                     temperature=prepare.get("temperature", 0.2),
                     general_chat=prepare.get("general_chat", False),
                     compressed_context=prepare.get("compressed_context"),
+                    selected_document_ids=prepare.get("selected_document_ids"),
+                    selected_filenames=prepare.get("selected_filenames"),
                 ):
                     loop.call_soon_threadsafe(token_queue.put_nowait, token)
             finally:
@@ -953,6 +1064,9 @@ class RAGChatService:
                 "stage_events": stage_events,
             }
 
+        selected_filenames = self._resolve_selected_filenames(document_ids)
+        stream_threshold = min(threshold, 0.25) if document_ids and len(document_ids) > 1 else threshold
+
         _emit_stage("question", "done")
         _emit_stage("embedding", "active")
         timer.start("embedding")
@@ -962,21 +1076,15 @@ class RAGChatService:
 
         _emit_stage("retrieval", "active")
         timer.start("retrieval")
-        if intent == "DOCUMENT_QA":
-            candidates = self.vector_store.query(
-                query_vector=query_vector,
-                top_k=RETRIEVAL_INITIAL_TOP_K,
-                document_ids=document_ids or None,
-            )
-        else:
-            candidates = self.vector_store.query(
-                query_vector=query_vector,
-                top_k=RETRIEVAL_INITIAL_TOP_K,
-                document_ids=document_ids,
-            )
-            summary_candidates = [c for c in candidates if c.get("metadata", {}).get("chunk_type") == "summary"]
-            if summary_candidates:
-                candidates = summary_candidates
+        candidates = self._gather_retrieval_candidates(
+            query_vector=query_vector,
+            document_ids=document_ids,
+            intent=intent,
+            embedding_model=embedding_model,
+            current_query=query,
+            retries=0,
+            use_expansion=False,
+        )
 
         _emit_stage("retrieval", "done")
         _emit_stage("crossencoder", "active")
@@ -986,14 +1094,16 @@ class RAGChatService:
             query_vector=query_vector,
             chunks=candidates,
             top_k=top_k,
-            threshold=threshold,
+            threshold=stream_threshold,
             retrieval_mode=retrieval_mode,
             use_reranking=use_reranking,
+            document_ids=document_ids,
         )
         timer.stop("reranking")
         timer.stop("retrieval")
         _emit_stage("crossencoder", "done")
         _emit_stage("top_k", "done")
+        self._warn_missing_doc_coverage(document_ids, retrieved)
 
         def _acb_stage(name: str, status: str) -> None:
             _emit_stage(name, status)
@@ -1020,6 +1130,8 @@ class RAGChatService:
             retrieved,
             chat_history=chat_history,
             compressed_context=compressed if compressed.enabled else None,
+            selected_document_ids=document_ids,
+            selected_filenames=selected_filenames,
         )
         timer.stop("prompt_build")
         _emit_stage("prompt", "done")
@@ -1055,6 +1167,8 @@ class RAGChatService:
             "top_k": top_k,
             "stage_events": stage_events,
             "latency_timer": timer,
+            "selected_document_ids": document_ids,
+            "selected_filenames": selected_filenames,
         }
 
     def _finalize_stream_chat(self, prepare: dict[str, Any], answer: str) -> dict[str, Any]:
@@ -1063,11 +1177,13 @@ class RAGChatService:
         retrieved = prepare.get("retrieved", [])
         threshold = prepare.get("threshold", RETRIEVAL_THRESHOLD)
         compression_meta = prepare.get("compression_meta", {})
+        compressed_ctx = prepare.get("compressed_context")
 
-        confidence = 1.0 if prepare.get("general_chat") else 0.0
-        if retrieved:
-            confidence = retrieved[0].get("rerank_score") or retrieved[0].get("combined_score", 0.0)
-            confidence = min(0.99, float(confidence))
+        faithfulness, retrieval_confidence, eval_metrics = self._compute_answer_metrics(
+            answer=answer,
+            retrieved=retrieved,
+            compressed=compressed_ctx,
+        )
 
         timer: StageTimer | None = prepare.get("latency_timer")
         latency_details = None
@@ -1086,10 +1202,13 @@ class RAGChatService:
         response = {
             "conversation_id": conv_id,
             "answer": answer,
-            "confidence": confidence,
+            "confidence": retrieval_confidence if not prepare.get("general_chat") else 1.0,
+            "retrieval_confidence": retrieval_confidence if not prepare.get("general_chat") else 1.0,
+            "faithfulness": faithfulness if not prepare.get("general_chat") else 1.0,
             "grounded": not prepare.get("general_chat"),
             "retrieved_context": retrieved,
             "intent": prepare.get("intent", "document_qa"),
+            "evaluation": eval_metrics,
             "context_compression": compression_meta,
             "context_details": prepare.get("context_details"),
             "latency_details": latency_details,
@@ -1100,8 +1219,9 @@ class RAGChatService:
             "assistant",
             answer,
             citations=retrieved,
-            confidence=confidence,
+            confidence=response["confidence"],
             retrieval_threshold=threshold,
+            evaluation=eval_metrics,
         )
         self._trigger_auto_title(conv_id)
         return response

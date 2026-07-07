@@ -1,5 +1,5 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { memo } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 
 type MetricColor = 'sky' | 'emerald' | 'amber' | 'violet' | 'rose';
 
@@ -18,9 +18,10 @@ interface MetricBadgeProps {
 }
 
 export default function MetricBadge({ label, value, color = 'sky' }: MetricBadgeProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.span
-      initial={{ opacity: 0, y: 4 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${COLOR_MAP[color]}`}
     >

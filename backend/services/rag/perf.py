@@ -66,11 +66,14 @@ def compute_dynamic_top_k(
         k -= 1
     elif word_count >= 20:
         k += 1
+    effective_max_k = 15 if document_ids and len(document_ids) >= 3 else max_k
     if document_ids:
         if len(document_ids) >= 3:
+            k += 2
+        elif len(document_ids) >= 2:
             k += 1
         elif len(document_ids) == 1:
             k = max(min_k, k - 1)
     if intent == "SUMMARIZE":
         k += 1
-    return max(min_k, min(max_k, k))
+    return max(min_k, min(effective_max_k, k))

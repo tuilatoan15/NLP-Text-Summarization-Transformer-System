@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { BENCHMARK_SAMPLE_SIZE } from '../lib/benchmarkConfig';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -211,7 +212,7 @@ const Benchmark = () => {
     };
   };
 
-  const [benchmarkSize, setBenchmarkSize] = useState(1000);
+  const benchmarkSize = BENCHMARK_SAMPLE_SIZE;
 
   const leaderboardQuery = useResearchLeaderboardQuery('All', benchmarkSize, true);
   const { data, isLoading, isError, refetch } = leaderboardQuery;
@@ -322,18 +323,9 @@ const Benchmark = () => {
             {t('subtitle')} — {metadata.total_samples?.toLocaleString() || '?'} {t('totalSamples').toLowerCase()} ({metadata.dataset_name || ''})
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-bold text-[var(--text-secondary)]">{lang === 'vie' ? 'Quy mô dữ liệu:' : 'Dataset size:'}</label>
-          <select
-            value={benchmarkSize}
-            onChange={(e) => setBenchmarkSize(Number(e.target.value))}
-            className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-primary)] focus:border-sky-500 outline-none transition-all cursor-pointer shadow-sm"
-          >
-            <option value={1000}>{lang === 'vie' ? '1.000 mẫu (Tiêu chuẩn)' : '1,000 samples (Standard)'}</option>
-            <option value={2500}>{lang === 'vie' ? '2.500 mẫu (Quy mô vừa - 2 ngày)' : '2,500 samples (Medium-scale)'}</option>
-            <option value={5000}>{lang === 'vie' ? '5.000 mẫu (Quy mô lớn)' : '5,000 samples (Large-scale)'}</option>
-          </select>
-        </div>
+        <span className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-sm">
+          {lang === 'vie' ? '5.000 mẫu (benchmark thực nghiệm)' : '5,000 samples (research benchmark)'}
+        </span>
       </div>
 
 

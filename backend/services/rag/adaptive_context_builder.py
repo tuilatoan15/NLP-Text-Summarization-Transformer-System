@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import defaultdict
 from typing import Any, Callable
 
 from .context_compression import (
@@ -113,10 +114,12 @@ def select_dynamic_chunks(
     *,
     ratio: float = RAG_DYNAMIC_CHUNK_RATIO,
     min_score: float = RAG_MIN_RERANK_SCORE,
+    document_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Chọn chunks động: score >= ratio * max_score AND score >= min_score.
     Luôn giữ ít nhất 1 chunk nếu có dữ liệu.
+    Đa tài liệu: reserve top-2 chunk/doc trước ratio filter, đảm bảo ≥1 chunk/doc.
     """
     if not chunks:
         return []
@@ -125,10 +128,62 @@ def select_dynamic_chunks(
     max_score = max(s for _, s in scored)
     threshold = max(min_score, ratio * max_score)
 
-    selected = [c for c, s in scored if s >= threshold]
+    def _chunk_key(chunk: dict[str, Any]) -> str:
+        return str(chunk.get("chunk_id") or chunk.get("id") or "")
+
+    multi_doc = bool(document_ids and len(document_ids) > 1)
+    selected: list[dict[str, Any]] = []
+    selected_keys: set[str] = set()
+
+    if multi_doc:
+        by_doc: dict[str, list[tuple[dict[str, Any], float]]] = defaultdict(list)
+        for c, s in scored:
+            by_doc[str(c.get("document_id", ""))].append((c, s))
+        for doc_chunks in by_doc.values():
+            doc_chunks.sort(key=lambda x: x[1], reverse=True)
+
+        remainder: list[tuple[dict[str, Any], float]] = []
+        for doc_id in document_ids:
+            for c, _ in by_doc.get(doc_id, [])[:2]:
+                ck = _chunk_key(c)
+                if ck and ck not in selected_keys:
+                    selected.append(c)
+                    selected_keys.add(ck)
+
+        for c, s in scored:
+            ck = _chunk_key(c)
+            if ck and ck in selected_keys:
+                continue
+            remainder.append((c, s))
+
+        selected.extend(c for c, s in remainder if s >= threshold)
+    else:
+        selected = [c for c, s in scored if s >= threshold]
+
     if not selected:
         ranked = sorted(scored, key=lambda x: x[1], reverse=True)
         selected = [ranked[0][0]]
+        selected_keys = {_chunk_key(selected[0])}
+
+    if multi_doc:
+        covered = {str(c.get("document_id", "")) for c in selected}
+        by_doc_all: dict[str, list[tuple[dict[str, Any], float]]] = defaultdict(list)
+        for c, s in scored:
+            by_doc_all[str(c.get("document_id", ""))].append((c, s))
+        for doc_chunks in by_doc_all.values():
+            doc_chunks.sort(key=lambda x: x[1], reverse=True)
+
+        for doc_id in document_ids:
+            if doc_id in covered:
+                continue
+            for c, _ in by_doc_all.get(doc_id, [])[:1]:
+                ck = _chunk_key(c)
+                if ck and ck not in selected_keys:
+                    selected.append(c)
+                    selected_keys.add(ck)
+                    covered.add(doc_id)
+                    break
+
     return sorted(selected, key=_chunk_score, reverse=True)
 
 
@@ -309,7 +364,7 @@ def build_adaptive_context(
     _stage("acb_chunks", "active")
     if timer:
         timer.start("acb_chunks")
-    dynamic_chunks = select_dynamic_chunks(retrieved)
+    dynamic_chunks = select_dynamic_chunks(retrieved, document_ids=document_ids)
     facts = extract_facts_from_chunks(retrieved)
     dynamic_chunks = merge_fact_chunks(dynamic_chunks, retrieved, facts)
     if timer:

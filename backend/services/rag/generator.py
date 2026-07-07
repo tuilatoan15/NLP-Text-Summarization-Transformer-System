@@ -14,9 +14,11 @@ import logging
 from typing import Any
 
 from .context_compression import CompressedContext
+from .faithfulness import is_comparison_query
 from .rag_config import (
     ADAPTIVE_QA_PROMPT_TEMPLATE,
     COMPRESSED_QA_PROMPT_TEMPLATE,
+    MULTI_DOC_QA_HINT,
     QA_PROMPT_TEMPLATE,
     SUMMARIZE_PROMPT_TEMPLATE,
 )
@@ -42,6 +44,8 @@ class GroundedGenerator:
         temperature: float = 0.2,
         general_chat: bool = False,
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Sinh câu trả lời cho query dựa trên contexts đã retrieve + rerank
@@ -65,6 +69,8 @@ class GroundedGenerator:
             chat_history=chat_history,
             general_chat=general_chat,
             compressed_context=compressed_context,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
         )
 
         return {
@@ -85,6 +91,8 @@ class GroundedGenerator:
         temperature: float = 0.2,
         general_chat: bool = False,
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ):
         """Stream token thật từ summarizer."""
         if not contexts and not general_chat and not (
@@ -98,6 +106,8 @@ class GroundedGenerator:
             chat_history=chat_history,
             general_chat=general_chat,
             compressed_context=compressed_context,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
         )
 
     # ─────────────────────────── Document Summary ─────────────────────────────
@@ -110,6 +120,91 @@ class GroundedGenerator:
         return self._summarizer.summarize_context(contexts)
 
     # ─────────────────────────── Prompt composer ──────────────────────────────
+
+    @staticmethod
+    def _passage_score(chunk: dict[str, Any]) -> float:
+        rerank = chunk.get("rerank_score")
+        if rerank is not None:
+            return float(rerank)
+        return float(chunk.get("combined_score", 0) or 0)
+
+    @staticmethod
+    def format_context_by_document(
+        contexts: list[dict[str, Any]],
+        document_ids: list[str],
+        filenames: list[str],
+    ) -> str:
+        """Nhóm passages theo tài liệu, thứ tự theo document_ids đã chọn."""
+        by_doc: dict[str, list[dict[str, Any]]] = {}
+        for c in contexts:
+            doc_id = str(c.get("document_id", ""))
+            by_doc.setdefault(doc_id, []).append(c)
+
+        id_to_name = dict(zip(document_ids, filenames))
+        blocks: list[str] = []
+        for doc_id in document_ids:
+            filename = id_to_name.get(doc_id) or doc_id
+            doc_chunks = sorted(
+                by_doc.get(doc_id, []),
+                key=GroundedGenerator._passage_score,
+                reverse=True,
+            )
+            header = f"=== TÀI LIỆU: {filename} ==="
+            if not doc_chunks:
+                blocks.append(f"{header}\n(Không có đoạn nào được truy vấn)")
+                continue
+            passage_blocks: list[str] = []
+            for idx, c in enumerate(doc_chunks, start=1):
+                page = c.get("page")
+                score_info = (
+                    f"rerank={c['rerank_score']:.3f}"
+                    if c.get("rerank_score") is not None
+                    else f"score={c.get('combined_score', 0):.3f}"
+                )
+                passage_blocks.append(
+                    f"[Đoạn {idx}"
+                    + (f" trang {page}" if page else "")
+                    + f" | {score_info}]\n{c.get('text', '')}"
+                )
+            blocks.append(f"{header}\n" + "\n\n".join(passage_blocks))
+        return "\n\n".join(blocks) if blocks else "(Không có đoạn gốc bổ sung)"
+
+    @staticmethod
+    def _resolve_multi_doc_filenames(
+        contexts: list[dict[str, Any]],
+        selected_document_ids: list[str] | None,
+        selected_filenames: list[str] | None,
+    ) -> tuple[list[str], list[str]] | None:
+        if not selected_document_ids or len(selected_document_ids) <= 1:
+            return None
+        n_docs = len(selected_document_ids)
+        if selected_filenames and len(selected_filenames) == n_docs:
+            filenames = list(selected_filenames)
+        else:
+            id_to_name = {
+                str(c.get("document_id", "")): str(c.get("filename", ""))
+                for c in contexts
+                if c.get("filename")
+            }
+            filenames = [
+                id_to_name.get(doc_id) or doc_id for doc_id in selected_document_ids
+            ]
+        return list(selected_document_ids), filenames
+
+    @staticmethod
+    def format_passages_for_prompt(
+        contexts: list[dict[str, Any]],
+        *,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
+    ) -> str:
+        multi = GroundedGenerator._resolve_multi_doc_filenames(
+            contexts, selected_document_ids, selected_filenames,
+        )
+        if multi:
+            doc_ids, filenames = multi
+            return GroundedGenerator.format_context_by_document(contexts, doc_ids, filenames)
+        return GroundedGenerator.format_original_passages(contexts)
 
     @staticmethod
     def format_original_passages(chunks: list[dict[str, Any]]) -> str:
@@ -131,6 +226,43 @@ class GroundedGenerator:
         return "\n\n".join(blocks) if blocks else "(Không có đoạn gốc bổ sung)"
 
     @staticmethod
+    def _multi_doc_instruction(
+        contexts: list[dict[str, Any]],
+        question: str,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
+    ) -> str:
+        if selected_document_ids and len(selected_document_ids) > 1:
+            n_docs = len(selected_document_ids)
+            if selected_filenames and len(selected_filenames) == n_docs:
+                filenames = list(selected_filenames)
+            else:
+                id_to_name = {
+                    str(c.get("document_id", "")): str(c.get("filename", ""))
+                    for c in contexts
+                    if c.get("filename")
+                }
+                filenames = [
+                    id_to_name.get(doc_id) or doc_id for doc_id in selected_document_ids
+                ]
+        else:
+            filenames = sorted({str(c.get("filename", "")) for c in contexts if c.get("filename")})
+            if len(filenames) <= 1:
+                return ""
+            n_docs = len(filenames)
+
+        hint = MULTI_DOC_QA_HINT.format(
+            doc_count=n_docs,
+            filenames=", ".join(filenames),
+        )
+        if is_comparison_query(question):
+            hint += (
+                "\n- Câu hỏi có vẻ yêu cầu SO SÁNH hoặc TỔNG HỢP: "
+                "hãy dùng thông tin từ TẤT CẢ các tài liệu và nêu rõ nguồn (tên file) khi trả lời."
+            )
+        return hint
+
+    @staticmethod
     def format_chat_history(chat_history: list[dict[str, Any]] | None) -> str:
         if not chat_history:
             return "Không có"
@@ -146,8 +278,20 @@ class GroundedGenerator:
         compressed_context: CompressedContext,
         *,
         history_text: str,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ) -> str:
-        passages = self.format_original_passages(compressed_context.top_original_chunks)
+        passages = self.format_passages_for_prompt(
+            compressed_context.top_original_chunks,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
+        )
+        multi_doc_hint = self._multi_doc_instruction(
+            compressed_context.top_original_chunks,
+            question,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
+        )
         if compressed_context.mode == "adaptive":
             return ADAPTIVE_QA_PROMPT_TEMPLATE.format(
                 query_focus=compressed_context.query_focus or question,
@@ -158,12 +302,14 @@ class GroundedGenerator:
                 original_passages=passages,
                 chat_history=history_text,
                 question=question,
+                multi_doc_hint=multi_doc_hint,
             )
         return COMPRESSED_QA_PROMPT_TEMPLATE.format(
             document_summary=compressed_context.hybrid_summary,
             original_passages=passages,
             chat_history=history_text,
             question=question,
+            multi_doc_hint=multi_doc_hint,
         )
 
     def compose_prompt(
@@ -173,35 +319,55 @@ class GroundedGenerator:
         *,
         chat_history: list[dict[str, Any]] | None = None,
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ) -> str:
         """Prompt Composer — chọn template theo compression state."""
         history_text = self.format_chat_history(chat_history)
 
         if compressed_context and compressed_context.enabled:
             return self._render_compressed_prompt(
-                question, compressed_context, history_text=history_text,
+                question,
+                compressed_context,
+                history_text=history_text,
+                selected_document_ids=selected_document_ids,
+                selected_filenames=selected_filenames,
             )
 
-        blocks = []
-        for idx, c in enumerate(contexts, start=1):
-            filename = c.get("filename", "?")
-            page = c.get("page")
-            rerank = c.get("rerank_score")
-            score_info = (
-                f"rerank={rerank:.3f}"
-                if rerank is not None
-                else f"score={c.get('combined_score', 0):.3f}"
-            )
-            blocks.append(
-                f"[Nguồn {idx} — {filename}"
-                + (f" trang {page}" if page else "")
-                + f" | {score_info}]\n{c['text']}"
-            )
-        context_text = "\n\n".join(blocks)
+        multi = self._resolve_multi_doc_filenames(
+            contexts, selected_document_ids, selected_filenames,
+        )
+        if multi:
+            doc_ids, filenames = multi
+            context_text = self.format_context_by_document(contexts, doc_ids, filenames)
+        else:
+            blocks = []
+            for idx, c in enumerate(contexts, start=1):
+                filename = c.get("filename", "?")
+                page = c.get("page")
+                rerank = c.get("rerank_score")
+                score_info = (
+                    f"rerank={rerank:.3f}"
+                    if rerank is not None
+                    else f"score={c.get('combined_score', 0):.3f}"
+                )
+                blocks.append(
+                    f"[Nguồn {idx} — {filename}"
+                    + (f" trang {page}" if page else "")
+                    + f" | {score_info}]\n{c['text']}"
+                )
+            context_text = "\n\n".join(blocks)
+        multi_doc_hint = self._multi_doc_instruction(
+            contexts,
+            question,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
+        )
         return QA_PROMPT_TEMPLATE.format(
             context=context_text,
             chat_history=history_text,
             question=question,
+            multi_doc_hint=multi_doc_hint,
         )
 
     def prompt_template(
@@ -210,30 +376,52 @@ class GroundedGenerator:
         question: str,
         chat_history: str = "Không có",
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ) -> str:
         """Render prompt template tiếng Việt chuẩn (dùng để debug/log)."""
         if compressed_context and compressed_context.enabled:
             return self._render_compressed_prompt(
-                question, compressed_context, history_text=chat_history,
+                question,
+                compressed_context,
+                history_text=chat_history,
+                selected_document_ids=selected_document_ids,
+                selected_filenames=selected_filenames,
             )
-        blocks = []
-        for idx, c in enumerate(contexts, start=1):
-            filename = c.get("filename", "?")
-            page = c.get("page")
-            rerank = c.get("rerank_score")
-            score_info = (
-                f"rerank={rerank:.3f}"
-                if rerank is not None
-                else f"score={c.get('combined_score', 0):.3f}"
-            )
-            blocks.append(
-                f"[Nguồn {idx} — {filename}"
-                + (f" trang {page}" if page else "")
-                + f" | {score_info}]\n{c['text']}"
-            )
-        context_text = "\n\n".join(blocks)
+        multi = self._resolve_multi_doc_filenames(
+            contexts, selected_document_ids, selected_filenames,
+        )
+        if multi:
+            doc_ids, filenames = multi
+            context_text = self.format_context_by_document(contexts, doc_ids, filenames)
+        else:
+            blocks = []
+            for idx, c in enumerate(contexts, start=1):
+                filename = c.get("filename", "?")
+                page = c.get("page")
+                rerank = c.get("rerank_score")
+                score_info = (
+                    f"rerank={rerank:.3f}"
+                    if rerank is not None
+                    else f"score={c.get('combined_score', 0):.3f}"
+                )
+                blocks.append(
+                    f"[Nguồn {idx} — {filename}"
+                    + (f" trang {page}" if page else "")
+                    + f" | {score_info}]\n{c['text']}"
+                )
+            context_text = "\n\n".join(blocks)
+        multi_doc_hint = self._multi_doc_instruction(
+            contexts,
+            question,
+            selected_document_ids=selected_document_ids,
+            selected_filenames=selected_filenames,
+        )
         return QA_PROMPT_TEMPLATE.format(
-            context=context_text, chat_history=chat_history, question=question
+            context=context_text,
+            chat_history=chat_history,
+            question=question,
+            multi_doc_hint=multi_doc_hint,
         )
 
     def summarize_prompt_template(self, contexts: list[dict[str, Any]]) -> str:

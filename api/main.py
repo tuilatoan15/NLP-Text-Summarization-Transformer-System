@@ -33,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from starlette.middleware.gzip import GZipMiddleware
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 from src import config
@@ -202,6 +203,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Cache-Control cho JSON analytics tĩnh (đọc từ disk cache)
+_ANALYTICS_CACHE_PATHS = frozenset({
+    "/analytics/dataset",
+    "/analytics/charts",
+    "/analytics/overview",
+    "/analytics/statistics",
+    "/analytics/quality",
+    "/analytics/compression",
+    "/analytics/vocabulary",
+    "/analytics/correlation",
+})
+_ANALYTICS_CACHE_MAX_AGE = "300"
+_CHART_CACHE_MAX_AGE = "3600"
 
 app.include_router(document_intelligence_router)
 app.include_router(document_chat_router)
@@ -216,9 +232,14 @@ async def log_requests(request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
     elapsed = time.perf_counter() - start
+    path = request.url.path
+    if path in _ANALYTICS_CACHE_PATHS:
+        response.headers.setdefault("Cache-Control", f"public, max-age={_ANALYTICS_CACHE_MAX_AGE}")
+    elif path.startswith("/analytics/charts/file/"):
+        response.headers.setdefault("Cache-Control", f"public, max-age={_CHART_CACHE_MAX_AGE}")
     logger.info(
         "%s %s → %s  (%.3f s)",
-        request.method, request.url.path, response.status_code, elapsed,
+        request.method, path, response.status_code, elapsed,
     )
     return response
 
@@ -406,6 +427,19 @@ async def root():
             "/metrics",
             "/analytics/dashboard",
             "/analytics/history",
+            "/analytics/dataset",
+            "/analytics/statistics",
+            "/analytics/charts",
+            "/analytics/overview",
+            "/analytics/compression",
+            "/analytics/vocabulary",
+            "/analytics/quality",
+            "/analytics/correlation",
+            "/system/gpu",
+            "/system/node",
+            "/system/models",
+            "/config",
+            "/search",
         ],
     }
 
@@ -465,6 +499,122 @@ async def analytics_dashboard(time_range: str = "30d", limit: int = 15):
 @app.get("/analytics/history", tags=["Analytics"])
 async def analytics_history(limit: int = 30):
     return {"items": list_recent_results(limit)}
+
+
+@app.get("/analytics/dataset", tags=["Analytics"])
+async def analytics_dataset(force: bool = False):
+    """Full VietNews dataset analytics bundle (cached JSON). ?force=1 to rebuild."""
+    from backend.services.dataset_analytics_service import get_dataset_analytics_payload
+
+    return get_dataset_analytics_payload(force=force)
+
+
+@app.post("/analytics/dataset/rebuild", tags=["Analytics"])
+async def analytics_dataset_rebuild(force: bool = True):
+    """Trigger dataset analytics rebuild (full or per DATASET_ANALYTICS_LIMIT)."""
+    from backend.services.dataset_analytics_service import rebuild_dataset_analytics
+
+    return rebuild_dataset_analytics(force=force)
+
+
+@app.get("/analytics/dataset/progress", tags=["Analytics"])
+async def analytics_dataset_progress():
+    """Processing progress for long-running dataset analytics."""
+    from backend.services.dataset_analytics_service import get_dataset_progress
+
+    return get_dataset_progress()
+
+
+@app.get("/analytics/overview", tags=["Analytics"])
+async def analytics_dataset_overview():
+    from backend.services.dataset_analytics_service import get_dataset_overview
+
+    return get_dataset_overview()
+
+
+@app.get("/analytics/statistics", tags=["Analytics"])
+async def analytics_dataset_statistics():
+    from backend.services.dataset_analytics_service import get_dataset_statistics
+
+    return get_dataset_statistics()
+
+
+@app.get("/analytics/quality", tags=["Analytics"])
+async def analytics_dataset_quality():
+    from backend.services.dataset_analytics_service import get_dataset_quality
+
+    return get_dataset_quality()
+
+
+@app.get("/analytics/compression", tags=["Analytics"])
+async def analytics_dataset_compression():
+    from backend.services.dataset_analytics_service import get_compression_statistics
+
+    return get_compression_statistics()
+
+
+@app.get("/analytics/vocabulary", tags=["Analytics"])
+async def analytics_dataset_vocabulary():
+    from backend.services.dataset_analytics_service import get_vocabulary_stats
+
+    return get_vocabulary_stats()
+
+
+@app.get("/analytics/correlation", tags=["Analytics"])
+async def analytics_dataset_correlation():
+    from backend.services.dataset_analytics_service import get_correlation_data
+
+    return get_correlation_data()
+
+
+@app.get("/analytics/charts", tags=["Analytics"])
+async def analytics_dataset_charts():
+    from backend.services.dataset_analytics_service import get_charts_index
+
+    return get_charts_index()
+
+
+@app.get("/analytics/charts/file/{filename}", tags=["Analytics"])
+async def analytics_chart_file(filename: str):
+    from backend.services.dataset_analytics_service import get_chart_file
+
+    path = get_chart_file(filename)
+    return FileResponse(path, media_type="image/png", filename=path.name)
+
+
+@app.get("/system/gpu", tags=["System"])
+async def system_gpu():
+    from backend.services.system_service import get_gpu_status
+
+    return get_gpu_status()
+
+
+@app.get("/system/node", tags=["System"])
+async def system_node():
+    from backend.services.system_service import get_node_status
+
+    return get_node_status()
+
+
+@app.get("/system/models", tags=["System"])
+async def system_models():
+    from backend.services.system_service import get_models_status
+
+    return get_models_status()
+
+
+@app.get("/config", tags=["System"])
+async def system_config():
+    from backend.services.system_service import get_system_config
+
+    return get_system_config()
+
+
+@app.get("/search", tags=["System"])
+async def dashboard_search(q: str = "", limit: int = 20):
+    from backend.services.system_service import search_dashboard
+
+    return search_dashboard(q, limit=min(limit, 50))
 
 
 # ─────────────────────────── Summarization endpoints ──────────────────────

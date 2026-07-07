@@ -256,11 +256,25 @@ Ngữ cảnh:
 
 Bản tóm tắt tiếng Việt chuẩn xác:"""
 
+MULTI_DOC_QA_HINT: str = """\
+LƯU Ý ĐA TÀI LIỆU: Người dùng đã chọn {doc_count} tài liệu: {filenames}.
+- Bạn PHẢI trả lời dựa trên TẤT CẢ {doc_count} tài liệu có trong ngữ cảnh.
+
+BẮT BUỘC định dạng trả lời:
+### Tài liệu: [tên file 1]
+(nội dung từ file 1)
+### Tài liệu: [tên file 2]
+...
+- PHẢI có đúng {doc_count} mục, mỗi file một mục
+- Nếu file không liên quan câu hỏi, ghi: "Không có thông tin liên quan trong [tên file]"
+- KHÔNG gộp nội dung nhiều file vào một đoạn chung"""
+
 QA_PROMPT_TEMPLATE: str = """\
 Bạn là trợ lý phân tích tài liệu chuyên nghiệp. Chỉ trả lời dựa trên NGỮ CẢNH bên dưới.
 Hãy tham khảo LỊCH SỬ HỘI THOẠI để hiểu ngữ cảnh các câu hỏi tiếp theo của người dùng (nếu có).
 Nếu không tìm thấy thông tin, hãy trả lời: "Không tìm thấy thông tin trong tài liệu."
 Trả lời bằng tiếng Việt, súc tích và chính xác.
+{multi_doc_hint}
 
 NGỮ CẢNH:
 {context}
@@ -277,6 +291,7 @@ Bạn là trợ lý phân tích tài liệu chuyên nghiệp. Chỉ trả lời 
 Hãy tham khảo LỊCH SỬ HỘI THOẠI để hiểu ngữ cảnh các câu hỏi tiếp theo (nếu có).
 Nếu không tìm thấy thông tin, hãy trả lời: "Không tìm thấy thông tin trong tài liệu."
 Trả lời bằng tiếng Việt, súc tích và chính xác.
+{multi_doc_hint}
 
 ═══ DOCUMENT SUMMARY ═══
 {document_summary}
@@ -302,6 +317,7 @@ Bạn là trợ lý phân tích tài liệu chuyên nghiệp. Chỉ trả lời 
 Hãy tham khảo LỊCH SỬ HỘI THOẠI để hiểu ngữ cảnh các câu hỏi tiếp theo (nếu có).
 Nếu không tìm thấy thông tin, hãy trả lời: "Không tìm thấy thông tin trong tài liệu."
 Trả lời bằng tiếng Việt, súc tích và chính xác.
+{multi_doc_hint}
 
 ═══ QUERY FOCUS ═══
 {query_focus}

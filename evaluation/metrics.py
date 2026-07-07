@@ -169,6 +169,8 @@ def compute_bertscore(
 
 _SBERT_LOAD_LOCK = threading.Lock()
 _SBERT_CACHE: dict[str, object] = {}
+_SOURCE_EMBED_CACHE: dict[tuple[str, str], object] = {}
+_SOURCE_EMBED_LOCK = threading.Lock()
 
 
 def _load_sentence_transformer(model_name: str):
@@ -190,6 +192,103 @@ def _load_sentence_transformer(model_name: str):
             logger.info("Loading SentenceTransformer: %s on %s", model_name, device)
             _SBERT_CACHE[model_name] = SentenceTransformer(model_name, device=device)
     return _SBERT_CACHE[model_name]
+
+
+def _encode_source_sentences(source_text: str, model_name: str):
+    """Encode source sentences once per compare run (shared across algorithms)."""
+    if not source_text or not source_text.strip():
+        return None
+    cache_key = (source_text, model_name)
+    cached = _SOURCE_EMBED_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    with _SOURCE_EMBED_LOCK:
+        cached = _SOURCE_EMBED_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        from src.preprocess import split_sentences
+
+        src_sentences = split_sentences(source_text)
+        if not src_sentences:
+            return None
+        model = _load_sentence_transformer(model_name)
+        embeddings = model.encode(
+            src_sentences[:100],
+            normalize_embeddings=True,
+            convert_to_tensor=True,
+        )
+        if len(_SOURCE_EMBED_CACHE) >= 32:
+            _SOURCE_EMBED_CACHE.pop(next(iter(_SOURCE_EMBED_CACHE)))
+        _SOURCE_EMBED_CACHE[cache_key] = embeddings
+        return embeddings
+
+
+def warmup_compare_evaluation(reference: str, source_text: str) -> None:
+    """Preload SBERT + source embeddings before multi-algorithm compare."""
+    model_name = config.SBERT_MODEL
+    try:
+        _load_sentence_transformer(model_name)
+        _encode_source_sentences(source_text or reference, model_name)
+    except Exception as exc:
+        logger.debug("Compare evaluation warmup skipped: %s", exc)
+
+
+def compute_bertscore_batch(
+    predictions: list[str],
+    references: list[str],
+    lang: str = config.BERTSCORE_LANG,
+    model_type: str = config.BERTSCORE_MODEL,
+) -> list[dict[str, float]]:
+    """Batch BERTScore for multiple hypothesis/reference pairs (same formulas as single)."""
+    null = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    if len(predictions) != len(references):
+        raise ValueError("predictions and references must have equal length")
+    if not predictions:
+        return []
+
+    pairs = [
+        (prediction, reference)
+        for prediction, reference in zip(predictions, references)
+        if prediction and prediction.strip() and reference and reference.strip()
+    ]
+    if not pairs:
+        return [null for _ in predictions]
+
+    try:
+        from bert_score import score as bert_score_fn
+        import torch
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        cands, refs = zip(*pairs)
+        with MODEL_LOAD_LOCK:
+            precision, recall, f1 = bert_score_fn(
+                list(cands),
+                list(refs),
+                lang=lang,
+                model_type=model_type,
+                verbose=False,
+                rescale_with_baseline=False,
+                device=device,
+            )
+        scored: dict[tuple[str, str], dict[str, float]] = {}
+        for pred, ref, p, r, f in zip(cands, refs, precision, recall, f1):
+            scored[(pred, ref)] = {
+                "precision": round(float(p), 4),
+                "recall": round(float(r), 4),
+                "f1": round(float(f), 4),
+            }
+        out: list[dict[str, float]] = []
+        for prediction, reference in zip(predictions, references):
+            if not prediction or not prediction.strip() or not reference or not reference.strip():
+                out.append(null)
+            elif clean_text(prediction) == clean_text(reference):
+                out.append({"precision": 1.0, "recall": 1.0, "f1": 1.0})
+            else:
+                out.append(scored.get((prediction, reference), null))
+        return out
+    except Exception as exc:
+        logger.warning("Batch BERTScore unavailable, using per-pair fallback: %s", exc)
+        return [compute_bertscore(p, r, lang=lang, model_type=model_type) for p, r in zip(predictions, references)]
 
 
 @lru_cache(maxsize=256)
@@ -570,15 +669,12 @@ def _compute_faithfulness_score_cached(
         return 0.0
 
     try:
-        model = _load_sentence_transformer(model_name)
         from sentence_transformers import util
-        import torch
 
-        src_embeddings = model.encode(
-            src_sentences[:100],  # Limit for performance
-            normalize_embeddings=True,
-            convert_to_tensor=True,
-        )
+        src_embeddings = _encode_source_sentences(source_text, model_name)
+        if src_embeddings is None:
+            return 0.0
+        model = _load_sentence_transformer(model_name)
         pred_embeddings = model.encode(
             pred_sentences[:30],
             normalize_embeddings=True,

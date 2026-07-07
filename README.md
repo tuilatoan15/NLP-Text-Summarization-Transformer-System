@@ -21,7 +21,7 @@ Dự án nghiên cứu và triển khai hệ thống **tóm tắt văn bản ti�
 - [2. Tính Năng Chính](#2-tính-năng-chính)
 - [3. Kiến Trúc Hệ Thống](#3-kiến-trúc-hệ-thống)
 - [4. Mô Hình & Thuật Toán Hỗ Trợ](#4-mô-hình--thuật-toán-hỗ-trợ)
-- [5. Chỉ Số Đánh Giá (Evaluation Metrics)](#5-chỉ-số-đánh-giá-evaluation-metrics)
+- [5. Chỉ Số Đánh Giá (Evaluation Metrics)](#5-chỉ-số-đánh-giá-evaluation-metrics) — xem thêm [2.8.5 Đánh giá kết quả](docs/DANH_GIA_KET_QUA.md)
 - [6. Công Thức Composite Score](#6-công-thức-composite-score)
 - [7. Bộ Dữ Liệu (Dataset)](#7-bộ-dữ-liệu-dataset)
 - [8. Kết Quả Benchmark](#8-kết-quả-benchmark)
@@ -168,7 +168,8 @@ Dự án nghiên cứu và triển khai hệ thống **tóm tắt văn bản ti�
 
 ## 5. Chỉ Số Đánh Giá (Evaluation Metrics)
 
-> Nguồn: `evaluation/metrics.py`, `api/research.py` (`/research/metrics/explanation`)
+> Nguồn: `evaluation/metrics.py`, `api/research.py` (`/research/metrics/explanation`)  
+> **Tài liệu luận văn (mục 2.8.5):** [docs/DANH_GIA_KET_QUA.md](docs/DANH_GIA_KET_QUA.md)
 
 | Metric | Ý nghĩa | Phạm vi | Cách hiểu |
 |:---|:---|:---:|:---|
@@ -179,11 +180,12 @@ Dự án nghiên cứu và triển khai hệ thống **tóm tắt văn bản ti�
 | **BLEU** | N-gram precision có brevity penalty | 0–1 ↑ | Đo chất lượng dịch/sinh |
 | **BERTScore F1** | F1 embedding contextual (`xlm-roberta-base`) | 0–1 ↑ | Tương đồng ngữ nghĩa sâu |
 | **Semantic Similarity** | Cosine embedding (`paraphrase-multilingual-MiniLM-L12-v2`), chuẩn hóa [0,1] | 0–1 ↑ | Ý nghĩa tổng thể |
-| **Faithfulness** | Trung bình max cosine giữa câu tóm tắt và câu nguồn | 0–1 ↑ | Mức bám sát nguồn |
+| **Faithfulness** | Trung bình max cosine (SBERT) giữa câu tóm tắt và câu nguồn | 0–1 ↑ | Mức bám sát nguồn (không dùng NLI) |
 | **Coverage** | Tỷ lệ keyword nguồn xuất hiện trong tóm tắt | 0–1 ↑ | Độ phủ thông tin |
 | **Compression Ratio** | `len(summary_words) / len(source_words)` | 0–1 ↓ | Mức nén văn bản |
-| **Fluency** | `1 - redundancy_ratio` (từ readability module) | 0–1 ↑ | Độ trôi chảy |
-| **Hallucination audit** | Kiểm tra alignment câu–nguồn (`evaluation/hallucination.py`) | — | Phát hiện nội dung không grounded |
+| **Fluency** | `1 - redundancy_ratio` (từ `evaluation/readability.py`) | 0–1 ↑ | Độ trôi chảy (heuristic lặp từ; **không** dùng GPT-2 trong API) |
+| **Hallucination audit** | Kiểm tra alignment câu–nguồn (`evaluation/hallucination.py`) | — | Phát hiện nội dung không grounded (RAG, khi bật `RAG_EVALUATE_HALLUCINATION`) |
+| **GPT-2 Perplexity** | `NlpHUST/gpt2-vietnamese` → `exp(-loss/3)` | 0–1 ↑ | ⚠️ Chỉ trong script offline `scripts/run_research_benchmark.py` |
 
 ### Công thức ROUGE (tóm tắt)
 

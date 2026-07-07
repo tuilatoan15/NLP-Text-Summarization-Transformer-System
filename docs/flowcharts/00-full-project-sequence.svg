@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2100" height="740" viewBox="0 0 2100 740" style="background:#fff">
+<style>text{fill:#000;font-family:Arial,sans-serif;font-size:11px}.title{font-size:15px;font-weight:bold}</style>
+<text x="1050.0" y="32" text-anchor="middle" class="title">Sơ đồ tuần tự tổng thể — Hệ thống NLP Tóm tắt văn bản</text>
+<circle cx="60" cy="75" r="14" fill="#fff" stroke="#000"/>
+<line x1="60" y1="89" x2="60" y2="108" stroke="#000"/>
+<line x1="48" y1="96" x2="72" y2="96" stroke="#000"/>
+<text x="60" y="122" text-anchor="middle">Người dùng</text>
+<rect x="255" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="320" y="84" text-anchor="middle" font-weight="bold">Giao diện Web</text>
+<rect x="515" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="580" y="84" text-anchor="middle" font-weight="bold">Máy chủ API</text>
+<rect x="775" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="840" y="84" text-anchor="middle" font-weight="bold">Dịch vụ tóm tắt</text>
+<rect x="1035" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="1100" y="84" text-anchor="middle" font-weight="bold">Dịch vụ RAG</text>
+<rect x="1295" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="1360" y="84" text-anchor="middle" font-weight="bold">Mô hình AI</text>
+<rect x="1555" y="60" width="130" height="40" fill="#fff" stroke="#000"/>
+<text x="1620" y="84" text-anchor="middle" font-weight="bold">Kho lưu trữ</text>
+<line x1="60" y1="120" x2="60" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="320" y1="120" x2="320" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="580" y1="120" x2="580" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="840" y1="120" x2="840" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="1100" y1="120" x2="1100" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="1360" y1="120" x2="1360" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<line x1="1620" y1="120" x2="1620" y2="680" stroke="#000" stroke-dasharray="4,4"/>
+<rect x="55" y="150" width="10" height="460" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="315" y="150" width="10" height="100" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="318" y="270" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="315" y="330" width="10" height="100" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="318" y="450" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="315" y="540" width="10" height="40" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="318" y="600" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="315" y="630" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="120" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="578" y="180" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="210" width="10" height="40" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="300" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="578" y="360" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="390" width="10" height="40" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="480" width="10" height="100" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="575" y="630" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="835" y="210" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="835" y="480" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="1095" y="300" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="1095" y="390" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="1355" y="120" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<rect x="1615" y="510" width="10" height="10" fill="#fff" stroke="#000" opacity="0.6"/>
+<path d="M 580 120 L 580 134 L 1360 134 L 1360 120" fill="none" stroke="#000" marker-end="url(#closed)"/>
+<text x="853.0" y="114">1. Khởi động máy chủ, nạp mô hình AI</text>
+<line x1="60" y1="150" x2="320" y2="150" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="144">2. Nhập văn bản trên Playground</text>
+<line x1="320" y1="180" x2="580" y2="180" stroke="#000" marker-end="url(#closed)"/>
+<text x="411.0" y="174">3. Gửi yêu cầu so sánh tóm tắt</text>
+<line x1="580" y1="210" x2="840" y2="210" stroke="#000" marker-end="url(#closed)"/>
+<text x="671.0" y="204">4. Dịch vụ tóm tắt AI, lưu kho</text>
+<line x1="580" y1="240" x2="320" y2="240" stroke="#000" stroke-dasharray="6,4" marker-end="url(#open)"/>
+<text x="411.0" y="234">5. SSE: kết quả so sánh về giao diện</text>
+<line x1="60" y1="270" x2="320" y2="270" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="264">6. Tải tài liệu lên trang Chat</text>
+<path d="M 580 300 L 580 314 L 1100 314 L 1100 300" fill="none" stroke="#000" marker-end="url(#closed)"/>
+<text x="762.0" y="294">7. Nhúng vector AI và lưu kho</text>
+<line x1="60" y1="330" x2="320" y2="330" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="324">8. Đặt câu hỏi về tài liệu</text>
+<line x1="320" y1="360" x2="580" y2="360" stroke="#000" marker-end="url(#closed)"/>
+<text x="411.0" y="354">9. Gửi câu hỏi hỏi đáp RAG</text>
+<path d="M 580 390 L 580 404 L 1100 404 L 1100 390" fill="none" stroke="#000" marker-end="url(#closed)"/>
+<text x="762.0" y="384">10. Truy xuất ngữ cảnh, sinh trả lời</text>
+<line x1="580" y1="420" x2="320" y2="420" stroke="#000" stroke-dasharray="6,4" marker-end="url(#open)"/>
+<text x="411.0" y="414">11. SSE: luồng token về giao diện</text>
+<line x1="60" y1="450" x2="320" y2="450" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="444">12. Nạp tài liệu Document Intelligence</text>
+<line x1="580" y1="480" x2="840" y2="480" stroke="#000" marker-end="url(#closed)"/>
+<text x="671.0" y="474">13. Tóm tắt phân cấp AI, lưu kho</text>
+<path d="M 580 510 L 580 524 L 1620 524 L 1620 510" fill="none" stroke="#000" marker-end="url(#closed)"/>
+<text x="944.0" y="504">14. Tìm kiếm ngữ nghĩa trên tài liệu</text>
+<line x1="60" y1="540" x2="320" y2="540" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="534">15. Mở trang phân tích bộ dữ liệu</text>
+<line x1="580" y1="570" x2="320" y2="570" stroke="#000" stroke-dasharray="6,4" marker-end="url(#open)"/>
+<text x="411.0" y="564">16. Trả báo cáo thống kê VietNews</text>
+<line x1="60" y1="600" x2="320" y2="600" stroke="#000" marker-end="url(#closed)"/>
+<text x="151.0" y="594">17. Mở Dashboard và Benchmark</text>
+<line x1="580" y1="630" x2="320" y2="630" stroke="#000" stroke-dasharray="6,4" marker-end="url(#open)"/>
+<text x="411.0" y="624">18. Trả dữ liệu tổng quan hệ thống</text>
+<defs>
+<marker id="closed" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<path d="M0,0 L8,3 L0,6 Z" fill="#000"/>
+</marker>
+<marker id="open" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<path d="M0,0 L8,3 L0,6" fill="none" stroke="#000"/>
+</marker>
+</defs>
+</svg>

@@ -64,6 +64,7 @@ class HybridRetriever:
         threshold: float = RETRIEVAL_THRESHOLD,
         retrieval_mode: str = "hybrid",      # Giữ nguyên tương thích ngược
         use_reranking: bool = True,           # Luôn bật reranking
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Thực hiện truy xuất thông tin đa tầng:
@@ -157,11 +158,14 @@ class HybridRetriever:
         # ── Bước 4: Cross-Encoder Reranking ───────────────────────────────
         t_rerank_start = time.perf_counter()
         final_top_k = min(top_k, RETRIEVAL_FINAL_TOP_K)
+        effective_threshold = threshold
+        if document_ids and len(document_ids) > 1:
+            effective_threshold = min(threshold, 0.25)
         reranked = self._reranker.rerank(
             query=query,
             chunks=pre_rerank,
             top_k=final_top_k,
-            threshold=threshold,
+            threshold=effective_threshold,
         )
 
         # Trình fallback nếu threshold rerank quá gắt gây rỗng
@@ -186,6 +190,18 @@ class HybridRetriever:
             "rerank": round(t_rerank, 6)
         }
 
+        if document_ids and len(document_ids) > 1:
+            if reranked:
+                reranked = self._apply_multi_doc_diversity(
+                    reranked, top_k=final_top_k, document_ids=document_ids,
+                )
+            reranked = self._ensure_per_document_coverage(
+                reranked,
+                document_ids=document_ids,
+                backfill_pool=rrf_scored,
+                top_k=final_top_k,
+            )
+
         logger.info(
             "✅ Retrieval hoàn tất: %d → %d chunks (Reranker=%s, bm25=%.4fs, vector_rrf=%.4fs, rerank=%.4fs)",
             len(pre_rerank),
@@ -196,6 +212,137 @@ class HybridRetriever:
             t_rerank,
         )
         return reranked
+
+    @staticmethod
+    def _apply_multi_doc_diversity(
+        chunks: list[dict[str, Any]],
+        *,
+        top_k: int,
+        document_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """
+        Đảm bảo top-k chunks đến từ nhiều tài liệu (max per doc + global fill).
+        """
+        n_docs = len(document_ids)
+        top_k_per_doc = max(3, top_k // n_docs) if n_docs >= 3 else max(2, top_k // n_docs)
+
+        by_doc: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for chunk in chunks:
+            by_doc[str(chunk.get("document_id", ""))].append(chunk)
+
+        selected: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for doc_id in document_ids:
+            for chunk in by_doc.get(doc_id, [])[:top_k_per_doc]:
+                cid = str(chunk.get("chunk_id") or chunk.get("id") or "")
+                if cid and cid not in seen_ids:
+                    selected.append(chunk)
+                    seen_ids.add(cid)
+
+        for chunk in chunks:
+            if len(selected) >= top_k:
+                break
+            cid = str(chunk.get("chunk_id") or chunk.get("id") or "")
+            if cid and cid not in seen_ids:
+                selected.append(chunk)
+                seen_ids.add(cid)
+
+        unique_docs = {str(c.get("document_id", "")) for c in selected}
+        logger.debug(
+            "Multi-doc diversity: %d docs → %d chunks from %d documents",
+            n_docs, len(selected), len(unique_docs),
+        )
+        return selected[:top_k]
+
+    @staticmethod
+    def _ensure_per_document_coverage(
+        chunks: list[dict[str, Any]],
+        *,
+        document_ids: list[str],
+        backfill_pool: list[dict[str, Any]],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Đảm bảo mỗi document_id đã chọn có đủ chunk trong kết quả.
+        Backfill từ pool pre-rerank (RRF) khi reranker loại hết.
+        Với ≥3 docs: backfill/giữ tối đa 2 chunk/doc.
+        """
+        if not document_ids or len(document_ids) <= 1:
+            return chunks[:top_k]
+
+        n_docs = len(document_ids)
+        min_per_doc = 2 if n_docs >= 3 else 1
+
+        def _chunk_key(chunk: dict[str, Any]) -> str:
+            return str(chunk.get("chunk_id") or chunk.get("id") or "")
+
+        def _score(chunk: dict[str, Any]) -> float:
+            return float(chunk.get("rerank_score") or chunk.get("combined_score") or 0.0)
+
+        selected = list(chunks)
+        seen = {_chunk_key(c) for c in selected if _chunk_key(c)}
+
+        by_doc_pool: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for chunk in backfill_pool:
+            by_doc_pool[str(chunk.get("document_id", ""))].append(chunk)
+        for doc_id in by_doc_pool:
+            by_doc_pool[doc_id].sort(key=_score, reverse=True)
+
+        by_doc_selected: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for chunk in selected:
+            by_doc_selected[str(chunk.get("document_id", ""))].append(chunk)
+
+        for doc_id in document_ids:
+            have = len(by_doc_selected.get(doc_id, []))
+            need = max(0, min_per_doc - have)
+            if need == 0:
+                continue
+            added = 0
+            for candidate in by_doc_pool.get(doc_id, []):
+                if added >= need:
+                    break
+                ck = _chunk_key(candidate)
+                if ck and ck not in seen:
+                    entry = dict(candidate)
+                    entry["coverage_backfill"] = True
+                    selected.append(entry)
+                    by_doc_selected[doc_id].append(entry)
+                    seen.add(ck)
+                    added += 1
+                    logger.info(
+                        "📎 Backfill coverage: thêm chunk từ doc %s (score=%.3f)",
+                        doc_id,
+                        _score(entry),
+                    )
+
+        if len(selected) <= top_k:
+            return selected
+
+        by_doc_selected = defaultdict(list)
+        for chunk in selected:
+            by_doc_selected[str(chunk.get("document_id", ""))].append(chunk)
+
+        keep_per_doc = 2 if n_docs >= 3 else 1
+        final: list[dict[str, Any]] = []
+        final_seen: set[str] = set()
+        for doc_id in document_ids:
+            doc_chunks = sorted(by_doc_selected.get(doc_id, []), key=_score, reverse=True)
+            for chunk in doc_chunks[:keep_per_doc]:
+                ck = _chunk_key(chunk)
+                if ck and ck not in final_seen:
+                    final.append(chunk)
+                    final_seen.add(ck)
+
+        for chunk in sorted(selected, key=_score, reverse=True):
+            if len(final) >= top_k:
+                break
+            ck = _chunk_key(chunk)
+            if ck and ck not in final_seen:
+                final.append(chunk)
+                final_seen.add(ck)
+
+        return final[:top_k]
 
     def _dense_scores(
         self, query_vector: list[float], chunks: list[dict[str, Any]]

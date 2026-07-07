@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useCallback, memo } from 'react';
+import React, { useMemo, useState, useCallback, memo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import {
@@ -115,7 +116,7 @@ const itemVariants = {
   }
 };
 
-const AlgorithmCard = ({ algoKey, state, rank }) => {
+const AlgorithmCard = memo(({ algoKey, state, rank }) => {
   const { t } = useApp();
   const meta = byKey(algoKey);
   const row = state.result;
@@ -204,7 +205,7 @@ const AlgorithmCard = ({ algoKey, state, rank }) => {
       )}
     </motion.article>
   );
-};
+});
 
 const RunProgress = ({ runningKey, completed, total, loading }) => {
   const { t } = useApp();
@@ -235,7 +236,7 @@ const RunProgress = ({ runningKey, completed, total, loading }) => {
   );
 };
 
-const ComparisonTable = ({ rows }) => {
+const ComparisonTable = memo(({ rows }) => {
   const { t } = useApp();
   const [sortConfig, setSortConfig] = useState({ key: 'latency', direction: 'asc' });
 
@@ -337,11 +338,13 @@ const ComparisonTable = ({ rows }) => {
       </div>
     </motion.div>
   );
-};
+});
 
 export default function Playground() {
-  const { t } = useApp();
+  const { t, addNotification } = useApp();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const resultsSectionRef = useRef(null);
 
   const textInput = usePlaygroundStore(state => state.text);
   const setTextInput = usePlaygroundStore(state => state.setText);
@@ -457,6 +460,9 @@ export default function Playground() {
       loadFromHistoryRecord(detail);
       setActiveHistoryId(resultId);
       setShowHistory(false);
+      requestAnimationFrame(() => {
+        resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     } catch (err) {
       console.error('Failed to fetch history detail:', err);
       alert('Không thể tải chi tiết lịch sử chạy này. Vui lòng thử lại.');
@@ -464,6 +470,13 @@ export default function Playground() {
       setFetchingDetailId(null);
     }
   };
+
+  useEffect(() => {
+    const resultId = searchParams.get('result');
+    if (!resultId || fetchingDetailId || activeHistoryId === resultId) return;
+    handleSelectHistory(resultId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const deleteMutation = useMutation({
     mutationFn: (resultId) => deleteCompareHistoryRecord(resultId),
@@ -504,6 +517,18 @@ export default function Playground() {
     setRunStates(initialRunState(selectedAlgorithms));
     setActiveHistoryId(null);
 
+    addNotification({
+      title: t('notifyCompareStart'),
+      message: t('notifyCompareStartMsg', { count: selectedAlgorithms.length }),
+      type: 'info',
+      link: '/summarize',
+      showBrowser: false,
+    });
+
+    let doneCount = 0;
+    let bestName = '';
+    let resultLink = '/summarize';
+
     try {
       await streamCompareSummaries({
         text: textInput,
@@ -513,6 +538,43 @@ export default function Playground() {
       }, (event) => {
         const status = event.status || event.event;
         const { algorithm, result, error } = event;
+
+        if (status === 'finished') {
+          const payload = event.data || {};
+          const resultId = payload?.storage?.result_id;
+          if (resultId) {
+            resultLink = `/summarize?result=${resultId}`;
+            setActiveHistoryId(resultId);
+          }
+          const best = payload?.best_model || payload?.ranking?.[0];
+          bestName = best?.name || best?.key || bestName;
+          addNotification({
+            title: t('notifyCompareDone'),
+            message: t('notifyCompareDoneMsg', {
+              count: selectedAlgorithms.length,
+              best: bestName || '—',
+            }),
+            type: 'success',
+            link: resultLink,
+          });
+          requestAnimationFrame(() => {
+            resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+          return;
+        }
+
+        if (status === 'error' && !algorithm) {
+          addNotification({
+            title: t('notifyCompareError'),
+            message: t('notifyCompareErrorMsg'),
+            type: 'error',
+            link: '/summarize',
+          });
+          return;
+        }
+
+        if (!algorithm) return;
+
         setRunStates(prev => ({
           ...prev,
           [algorithm]: {
@@ -524,14 +586,32 @@ export default function Playground() {
 
         if (status === 'running') setRunningKey(algorithm);
         if (status === 'done' || status === 'error') {
-          setCompletedCount(c => c + 1);
+          doneCount += 1;
+          setCompletedCount(doneCount);
           setRunningKey(null);
+          if (status === 'done' && result) {
+            const meta = byKey(algorithm);
+            const latency = compareMetric(result, 'latency');
+            addNotification({
+              title: t('notifyAlgoDone', { name: meta.name }),
+              message: t('notifyAlgoDoneMsg', { time: latency.toFixed(2) }),
+              type: 'success',
+              link: resultLink,
+              showBrowser: false,
+            });
+          }
         }
       });
 
       await invalidateAfterSummarization(queryClient);
     } catch (err) {
       console.error('Comparison stream failed:', err);
+      addNotification({
+        title: t('notifyCompareError'),
+        message: t('notifyCompareErrorMsg'),
+        type: 'error',
+        link: '/summarize',
+      });
     } finally {
       setLoading(false);
       setRunningKey(null);
@@ -848,7 +928,7 @@ export default function Playground() {
         </div>
 
         {/* Results Grid */}
-        <div className="space-y-4">
+        <div className="space-y-4" ref={resultsSectionRef}>
           {!refInput.trim() && completedCount > 0 && (
             <div className="rounded-xl border border-amber-200/50 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/15 px-4 py-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2 font-medium">
               <AlertCircle size={14} className="shrink-0 text-amber-500 mt-0.5" />

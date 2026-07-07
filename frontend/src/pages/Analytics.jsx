@@ -10,9 +10,10 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { useAnalyticsDashboardQuery } from '../hooks/useApiQueries';
+import { useAnalyticsDashboardQuery, useSystemGpuQuery, useSystemNodeQuery } from '../hooks/useApiQueries';
 import { useCacheHitLogger } from '../hooks/useCacheHitLogger';
 import { getChartTheme, dateLocale } from '../theme/chartTheme';
+import GpuMonitor from '../components/GpuMonitor';
 
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#fbbf24', '#f43f5e', '#a855f7'];
 
@@ -73,6 +74,8 @@ const Analytics = () => {
   const { t, locale, isDark } = useApp();
   const [timeRange, setTimeRange] = useState('30d');
   const { data, isLoading, isFetching, error } = useAnalyticsDashboardQuery(timeRange, 20);
+  const { data: gpu } = useSystemGpuQuery();
+  const { data: node } = useSystemNodeQuery();
   useCacheHitLogger(`analytics ${timeRange}`, data, isFetching);
 
   const loading = isLoading && !data;
@@ -134,7 +137,7 @@ const Analytics = () => {
       )}
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title={t('statSavedRuns')}
           value={metrics.total_runs ?? 0}
@@ -167,6 +170,23 @@ const Analytics = () => {
           color="#10b981"
           delay={0.15}
         />
+        <StatCard
+          title="Độ trễ TB"
+          value={(metrics.avg_processing_time_seconds ?? 0) > 0 ? `${(metrics.avg_processing_time_seconds).toFixed(2)}s` : '—'}
+          subtext="Latency inference trung bình"
+          icon={Zap}
+          color="#f43f5e"
+          delay={0.2}
+        />
+      </div>
+
+      {/* Realtime system performance */}
+      <div className="ui-card p-5 bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-4 flex items-center gap-1.5">
+          <Activity size={14} className="text-rose-500" />
+          Hiệu năng hệ thống (realtime)
+        </h3>
+        <GpuMonitor gpu={gpu} node={node} models={null} loading={false} />
       </div>
 
       {metrics.total_runs === 0 ? (

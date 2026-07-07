@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings as SettingsIcon, User, Globe, Palette, Lock, Database, Terminal,
-  Save, RotateCcw, Check, AlertCircle
+  Save, RotateCcw, Check, AlertCircle, Loader2, Cpu
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useSystemConfigQuery } from '../hooks/useApiQueries';
 
 const SettingSection = ({ icon: Icon, title, subtitle, children }) => (
   <motion.div
@@ -72,8 +73,16 @@ const DEFAULT_SETTINGS = {
   }
 };
 
+const ConfigRow = ({ label, value }) => (
+  <div className="flex justify-between items-center py-2 border-b border-[var(--border-subtle)] last:border-0 text-sm">
+    <span className="text-[var(--text-muted)]">{label}</span>
+    <span className="font-mono text-xs font-semibold text-[var(--text-primary)]">{String(value ?? '—')}</span>
+  </div>
+);
+
 const Settings = () => {
   const { t, isDark, toggleTheme, locale, setLanguage } = useApp();
+  const { data: backendConfig, isLoading: configLoading, error: configError } = useSystemConfigQuery();
   const [saved, setSaved] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
@@ -153,6 +162,47 @@ const Settings = () => {
       )}
 
       <div className="space-y-6">
+        {/* Backend system config (read-only) */}
+        <SettingSection
+          icon={Cpu}
+          title="Cấu hình Backend (read-only)"
+          subtitle="Giá trị từ server — CUDA, FP16, RAG, cache, Redis"
+        >
+          {configLoading && (
+            <div className="flex items-center gap-2 text-sm text-[var(--text-muted)] py-4">
+              <Loader2 className="animate-spin w-4 h-4" />
+              Đang tải cấu hình...
+            </div>
+          )}
+          {configError && (
+            <div className="flex items-center gap-2 text-sm text-red-500 py-2">
+              <AlertCircle size={16} />
+              Không tải được /config — {configError.message}
+            </div>
+          )}
+          {backendConfig && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-xs font-bold uppercase text-[var(--text-faint)] mb-2">GPU / Inference</p>
+                <ConfigRow label="FP16" value={backendConfig.gpu?.use_fp16} />
+                <ConfigRow label="torch.compile" value={backendConfig.gpu?.use_torch_compile ? 'on' : 'off'} />
+                <ConfigRow label="Preload models" value={backendConfig.gpu?.preload_models ? 'yes' : 'lazy'} />
+                <ConfigRow label="Max output" value={backendConfig.inference?.max_output_length} />
+                <ConfigRow label="Batch (train)" value={backendConfig.inference?.train_batch_size} />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase text-[var(--text-faint)] mb-2">RAG / Adaptive</p>
+                <ConfigRow label="Generator" value={backendConfig.rag?.generator_type} />
+                <ConfigRow label="Embedding" value={backendConfig.rag?.embedding_model} />
+                <ConfigRow label="Top-K" value={backendConfig.rag?.top_k_default} />
+                <ConfigRow label="Compression" value={backendConfig.rag?.context_compression ? 'on' : 'off'} />
+                <ConfigRow label="Adaptive context" value={backendConfig.rag?.adaptive_context ? 'on' : 'off'} />
+                <ConfigRow label="Redis" value={backendConfig.infra?.redis_configured ? 'configured' : 'off'} />
+              </div>
+            </div>
+          )}
+        </SettingSection>
+
         {/* Profile Settings */}
         <SettingSection
           icon={User}

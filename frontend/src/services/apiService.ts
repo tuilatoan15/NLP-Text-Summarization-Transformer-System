@@ -1,3 +1,5 @@
+import { BENCHMARK_SAMPLE_SIZE } from '../lib/benchmarkConfig';
+
 const API = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 export type DocumentPayload = {
@@ -67,6 +69,57 @@ export async function getAnalyticsDashboard(timeRange = '30d', limit = 15): Prom
 export async function getAnalyticsHistory(limit = 30): Promise<any> {
   const response = await fetch(`${API}/analytics/history?limit=${limit}`);
   return parseJson(response, 'Analytics history');
+}
+
+export async function getDatasetAnalytics(force = false): Promise<any> {
+  const qs = force ? '?force=1' : '';
+  const response = await fetch(`${API}/analytics/dataset${qs}`);
+  return parseJson(response, 'Dataset analytics');
+}
+
+export async function rebuildDatasetAnalytics(): Promise<any> {
+  const response = await fetch(`${API}/analytics/dataset/rebuild?force=1`, { method: 'POST' });
+  return parseJson(response, 'Rebuild dataset analytics');
+}
+
+export async function getDatasetAnalyticsProgress(): Promise<any> {
+  const response = await fetch(`${API}/analytics/dataset/progress`);
+  return parseJson(response, 'Dataset analytics progress');
+}
+
+export async function getDatasetOverview(): Promise<any> {
+  const response = await fetch(`${API}/analytics/overview`);
+  return parseJson(response, 'Dataset overview');
+}
+
+export async function getDatasetStatistics(): Promise<any> {
+  const response = await fetch(`${API}/analytics/statistics`);
+  return parseJson(response, 'Dataset statistics');
+}
+
+export async function getDatasetCharts(): Promise<any> {
+  const response = await fetch(`${API}/analytics/charts`);
+  return parseJson(response, 'Dataset charts');
+}
+
+export async function getDatasetQuality(): Promise<any> {
+  const response = await fetch(`${API}/analytics/quality`);
+  return parseJson(response, 'Dataset quality');
+}
+
+export async function getDatasetCompression(): Promise<any> {
+  const response = await fetch(`${API}/analytics/compression`);
+  return parseJson(response, 'Dataset compression');
+}
+
+export async function getDatasetVocabulary(): Promise<any> {
+  const response = await fetch(`${API}/analytics/vocabulary`);
+  return parseJson(response, 'Dataset vocabulary');
+}
+
+export async function getDatasetCorrelation(): Promise<any> {
+  const response = await fetch(`${API}/analytics/correlation`);
+  return parseJson(response, 'Dataset correlation');
 }
 
 export async function ingestDocument(
@@ -154,7 +207,7 @@ export async function exportPodcastTts(documentId: string): Promise<any> {
   return parseJson(response, 'Podcast TTS');
 }
 
-export async function getResearchLeaderboard(size = 1000): Promise<any> {
+export async function getResearchLeaderboard(size = BENCHMARK_SAMPLE_SIZE): Promise<any> {
   const response = await fetch(`${API}/research/leaderboard?size=${size}&_t=${Date.now()}`);
   return parseJson(response, 'Research leaderboard');
 }
@@ -164,7 +217,7 @@ export async function getResearchBenchmarkSamples(
   limit = 10,
   category = 'All',
   search = '',
-  size = 1000,
+  size = BENCHMARK_SAMPLE_SIZE,
 ): Promise<any> {
   const url = new URL(`${API}/research/benchmark/samples`);
   url.searchParams.append('page', String(page));
@@ -180,7 +233,7 @@ export async function getResearchBenchmarkSamples(
   return parseJson(response, 'Research benchmark samples');
 }
 
-export async function getResearchHybridStudy(locale?: string, size = 1000): Promise<any> {
+export async function getResearchHybridStudy(locale?: string, size = BENCHMARK_SAMPLE_SIZE): Promise<any> {
   const url = new URL(`${API}/research/hybrid-study`);
   url.searchParams.append('size', String(size));
   if (locale) url.searchParams.append('locale', locale);
@@ -188,7 +241,7 @@ export async function getResearchHybridStudy(locale?: string, size = 1000): Prom
   return parseJson(response, 'Research hybrid study');
 }
 
-export async function getResearchReport(locale?: string, size = 1000): Promise<any> {
+export async function getResearchReport(locale?: string, size = BENCHMARK_SAMPLE_SIZE): Promise<any> {
   const url = new URL(`${API}/research/report`);
   url.searchParams.append('size', String(size));
   if (locale) url.searchParams.append('locale', locale);
@@ -201,9 +254,42 @@ export async function runResearchBenchmark(samples = 10000): Promise<any> {
   return parseJson(response, 'Run research benchmark');
 }
 
-export async function getLeaderboardByCategory(category: string, size = 1000): Promise<any> {
+export async function getLeaderboardByCategory(category: string, size = BENCHMARK_SAMPLE_SIZE): Promise<any> {
   const response = await fetch(`${API}/research/leaderboard/by-category?category=${encodeURIComponent(category)}&size=${size}&_t=${Date.now()}`);
   return parseJson(response, 'Leaderboard by category');
+}
+
+export async function getSystemGpu(): Promise<any> {
+  const response = await fetch(`${API}/system/gpu`);
+  return parseJson(response, 'System GPU');
+}
+
+export async function getSystemNode(): Promise<any> {
+  const response = await fetch(`${API}/system/node`);
+  return parseJson(response, 'System node');
+}
+
+export async function getSystemModels(): Promise<any> {
+  const response = await fetch(`${API}/system/models`);
+  return parseJson(response, 'System models');
+}
+
+export async function getSystemConfig(): Promise<any> {
+  const response = await fetch(`${API}/config`);
+  return parseJson(response, 'System config');
+}
+
+export async function searchDashboard(query: string, limit = 20): Promise<any> {
+  const url = new URL(`${API}/search`);
+  url.searchParams.set('q', query);
+  url.searchParams.set('limit', String(limit));
+  const response = await fetch(url.toString());
+  return parseJson(response, 'Dashboard search');
+}
+
+export async function getRagDocuments(): Promise<any> {
+  const response = await fetch(`${API}/rag/documents`);
+  return parseJson(response, 'RAG documents');
 }
 
 

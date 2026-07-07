@@ -1,0 +1,23 @@
+<mxfile host="app.diagrams.net" modified="2026-07-04T00:00:00.000Z" agent="NLP-Flowchart-Gen" version="22.1.0" type="device">
+  <diagram id="diag-19overviewdashboard" name="Overview page aggregated APIs">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="19overviewdashboard-start" value="1. Overview.jsx mount" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;ellipse;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="40" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-p1" value="2. useOverviewBundleQuery()" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="130" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e1" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-start" target="19overviewdashboard-p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-p2" value="3. Promise.all: /health, /metrics, /analytics/dashboard" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="220" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e2" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-p1" target="19overviewdashboard-p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-p3" value="4. Promise.all: /system/gpu, /system/node, /system/models" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="310" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e3" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-p2" target="19overviewdashboard-p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-p4" value="5. Render stats: documents, sessions, latency, ROUGE" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="400" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e4" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-p3" target="19overviewdashboard-p4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-p5" value="6. Prefetch (800ms): leaderboard, hybrid-study, report" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="490" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e5" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-p4" target="19overviewdashboard-p5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-end" value="7. Dashboard UI hiển thị bundle" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;ellipse;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="580" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="19overviewdashboard-e6" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="19overviewdashboard-p5" target="19overviewdashboard-end"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

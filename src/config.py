@@ -26,10 +26,12 @@ MODEL_DIR = PROJECT_ROOT / "models"
 STORAGE_DIR = PROJECT_ROOT / "storage"
 RESULTS_DIR = STORAGE_DIR / "results"
 UPLOAD_DIR = STORAGE_DIR / "uploads"
+ANALYTICS_DIR = STORAGE_DIR / "analytics"
+CHARTS_DIR = STORAGE_DIR / "charts"
 LOG_DIR = PROJECT_ROOT / "logs"
 CONFIG_DIR = PROJECT_ROOT / "configs"
 
-for _path in (DATA_DIR, CACHE_DIR, MODEL_DIR, RESULTS_DIR, UPLOAD_DIR, LOG_DIR, CONFIG_DIR):
+for _path in (DATA_DIR, CACHE_DIR, MODEL_DIR, RESULTS_DIR, UPLOAD_DIR, ANALYTICS_DIR, CHARTS_DIR, LOG_DIR, CONFIG_DIR):
     _path.mkdir(parents=True, exist_ok=True)
 
 
@@ -119,6 +121,8 @@ PRELOAD_MODELS_LIST: list[str] = [
     m.strip() for m in os.getenv("PRELOAD_MODELS_LIST", "vit5").split(",") if m.strip()
 ]
 WARM_ANALYTICS_CACHE = os.getenv("WARM_ANALYTICS_CACHE", "0") == "1"
+DATASET_ANALYTICS_CACHE = os.getenv("DATASET_ANALYTICS_CACHE", "1") == "1"
+DATASET_ANALYTICS_LIMIT = int(os.getenv("DATASET_ANALYTICS_LIMIT", "0"))
 GPU_VRAM_LIMIT_GB = float(os.getenv("GPU_VRAM_LIMIT_GB", "4.0"))
 USE_FP16 = os.getenv("USE_FP16", "auto")   # "auto" | "1" | "0"
 USE_8BIT = os.getenv("USE_8BIT", "0") == "1"
@@ -161,6 +165,9 @@ COMPOSITE_SCORE_WEIGHTS: dict[str, float] = {
     "coverage": float(os.getenv("COMPOSITE_W_COVERAGE", "0.10")),
     "fluency": float(os.getenv("COMPOSITE_W_FLUENCY", "0.05")),
 }
+
+# ─────────────────────────── BENCHMARK DATASET ───────────
+BENCHMARK_SAMPLE_SIZE = int(os.getenv("BENCHMARK_SAMPLE_SIZE", "5000"))
 
 # ─────────────────────────── BENCHMARK CATEGORIES ──────────
 BENCHMARK_DOCUMENT_CATEGORIES: dict[str, tuple[int, int]] = {

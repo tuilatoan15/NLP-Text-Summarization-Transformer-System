@@ -7,13 +7,15 @@ import {
 import {
   Bot, Cpu, Activity, Clock, CheckCircle2,
   Sparkles, MessageSquare, GitCompareArrows, ArrowRight,
-  TrendingUp, TrendingDown, HardDrive, Server, FileText
+  TrendingUp, Server, FileText, BarChart3, AlertCircle
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../context/AppContext';
 import { useOverviewBundleQuery } from '../hooks/useApiQueries';
 import { useCacheHitLogger } from '../hooks/useCacheHitLogger';
+import { queryKeys } from '../lib/queryKeys';
 import { getChartTheme, dateLocale } from '../theme/chartTheme';
+import GpuMonitor from '../components/GpuMonitor';
 
 const Skeleton = memo(({ className = '' }) => (
   <div className={`ui-skeleton ${className}`} />
@@ -27,38 +29,29 @@ const StatSkeleton = memo(() => (
   </div>
 ));
 
-const StatCard = memo(({ title, value, subtext, trend, trendType, icon: Icon, color }) => {
-  const isUp = trendType === 'up';
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -2 }}
-      className="ui-card p-5 relative overflow-hidden bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm hover:shadow-md transition-all duration-200"
-    >
-      <div className="flex justify-between items-start mb-3">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{title}</p>
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center"
-          style={{ backgroundColor: `${color}10`, color }}
-        >
-          <Icon className="w-[18px] h-[18px]" />
-        </div>
+const StatCard = memo(({ title, value, subtext, icon: Icon, color, delay = 0 }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 8 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay }}
+    whileHover={{ y: -2, scale: 1.01 }}
+    className="ui-card p-5 relative overflow-hidden bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm hover:shadow-md transition-all duration-200"
+  >
+    <div className="flex justify-between items-start mb-3">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{title}</p>
+      <div
+        className="w-9 h-9 rounded-lg flex items-center justify-center"
+        style={{ backgroundColor: `${color}10`, color }}
+      >
+        <Icon className="w-[18px] h-[18px]" />
       </div>
-      <div className="flex items-baseline gap-2 mb-1">
-        <h3 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{value}</h3>
-        {trend && (
-          <span className={`text-[10px] font-bold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${isUp ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-            }`}>
-            {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-            {trend}
-          </span>
-        )}
-      </div>
-      {subtext && <p className="text-[11px] text-[var(--text-faint)] font-medium">{subtext}</p>}
-    </motion.div>
-  );
-});
+    </div>
+    <div className="flex items-baseline gap-2 mb-1">
+      <h3 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{value}</h3>
+    </div>
+    {subtext && <p className="text-[11px] text-[var(--text-faint)] font-medium">{subtext}</p>}
+  </motion.div>
+));
 
 const QuickAction = memo(({ icon: Icon, label, description, to, color }) => (
   <Link to={to} className="block">
@@ -82,41 +75,87 @@ const QuickAction = memo(({ icon: Icon, label, description, to, color }) => (
   </Link>
 ));
 
+const ACTIVITY_ICONS = {
+  compare: GitCompareArrows,
+  upload: FileText,
+  chat: MessageSquare,
+};
+
 const Overview = () => {
   const { t, locale, isDark } = useApp();
-  const { data, isLoading, isFetching } = useOverviewBundleQuery();
+  const { data, isLoading, isFetching, error, refetch } = useOverviewBundleQuery();
   useCacheHitLogger('overview bundle', data, isFetching);
   const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    if (!data) return;
+    if (data.gpu) queryClient.setQueryData(queryKeys.systemGpu, data.gpu);
+    if (data.node) queryClient.setQueryData(queryKeys.systemNode, data.node);
+    if (data.models) queryClient.setQueryData(queryKeys.systemModels, data.models);
+  }, [data, queryClient]);
 
   React.useEffect(() => {
     const prefetch = async () => {
       try {
         const { getResearchLeaderboard, getResearchHybridStudy, getResearchReport } = await import('../services/apiService');
         const { queryKeys } = await import('../lib/queryKeys');
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchLeaderboard('All'), queryFn: () => getResearchLeaderboard(), staleTime: 5 * 60 * 1000 });
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchHybridStudy(), queryFn: () => getResearchHybridStudy(), staleTime: 5 * 60 * 1000 });
-        queryClient.prefetchQuery({ queryKey: queryKeys.researchReport(), queryFn: () => getResearchReport(), staleTime: 5 * 60 * 1000 });
+        const { BENCHMARK_SAMPLE_SIZE } = await import('../lib/benchmarkConfig');
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchLeaderboard('All', BENCHMARK_SAMPLE_SIZE),
+          queryFn: () => getResearchLeaderboard(BENCHMARK_SAMPLE_SIZE),
+          staleTime: 5 * 60 * 1000,
+        });
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchHybridStudy('vie', BENCHMARK_SAMPLE_SIZE),
+          queryFn: () => getResearchHybridStudy('vie', BENCHMARK_SAMPLE_SIZE),
+          staleTime: 5 * 60 * 1000,
+        });
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.researchReport('vie', BENCHMARK_SAMPLE_SIZE),
+          queryFn: () => getResearchReport('vie', BENCHMARK_SAMPLE_SIZE),
+          staleTime: 5 * 60 * 1000,
+        });
       } catch (err) { console.warn('Failed to prefetch background queries:', err); }
     };
     const timer = setTimeout(prefetch, 800);
     return () => clearTimeout(timer);
   }, [queryClient]);
 
-  const { health, metrics, dashboard } = data || {};
+  const { health, metrics, dashboard, gpu, node, models } = data || {};
   const loading = isLoading && !data;
   const chart = getChartTheme(isDark);
   const dLocale = dateLocale(locale);
   const dashMetrics = dashboard?.metrics || {};
+  const overview = dashboard?.overview || {};
   const timeseries = dashboard?.visualization?.timeseries || [];
-  const recentRuns = dashboard?.recent_runs || [];
-  const modelCount = useMemo(() => (metrics?.models_preloaded ? Object.keys(metrics.model_load_times || {}).length : 0), [metrics]);
-  const algorithmOutputs = dashMetrics.total_algorithm_outputs ?? 0;
+  const recentActivity = dashboard?.recent_activity || dashboard?.recent_runs || [];
+
+  const documentCount = overview.document_count ?? 0;
+  const datasetDocs = overview.dataset_total_documents;
+  const datasetVocab = overview.dataset_vocab_size;
+  const sessionCount = overview.chat_session_count ?? dashMetrics.total_runs ?? 0;
+  const modelCount = models?.loaded_count ?? (metrics?.models_preloaded ? Object.keys(metrics.model_load_times || {}).length : 0);
+  const algorithmOutputs = dashMetrics.total_algorithm_outputs ?? overview.algorithm_output_count ?? 0;
+  const avgLatency = dashMetrics.avg_processing_time_seconds ?? overview.avg_processing_time_seconds ?? 0;
+  const avgRougeL = dashMetrics.avg_rouge?.rougeL ?? overview.avg_rouge_l ?? 0;
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? t('morningGreeting') : hour < 18 ? t('afternoonGreeting') : t('eveningGreeting');
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Hero Section */}
+      {error && (
+        <div className="flex items-center justify-between gap-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            <span>{error.message || 'Không tải được dữ liệu dashboard'}</span>
+          </div>
+          <button type="button" onClick={() => refetch()} className="text-xs font-bold underline cursor-pointer">
+            Thử lại
+          </button>
+        </div>
+      )}
+
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -145,7 +184,9 @@ const Overview = () => {
               <span className="text-red-500">{t('overviewSubtitleError')}</span>
             )}
             <span className="text-[var(--text-faint)] hidden sm:inline">•</span>
-            <span className="text-[var(--text-muted)] font-medium">Node ID: cluster-v2-main</span>
+            <span className="text-[var(--text-muted)] font-medium">
+              Node: {node?.node_id || 'local'}
+            </span>
           </div>
         </div>
         <div className="absolute right-0 bottom-0 top-0 w-1/3 hidden lg:flex items-center justify-center opacity-10">
@@ -153,7 +194,6 @@ const Overview = () => {
         </div>
       </motion.div>
 
-      {/* KPI Stats Section */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <StatSkeleton key={i} />)
@@ -161,143 +201,79 @@ const Overview = () => {
           <>
             <StatCard
               title="Tổng Tài Liệu"
-              value="48"
-              subtext="Đã nạp vào vector index"
-              trend="+8.5%"
-              trendType="up"
+              value={documentCount}
+              subtext={datasetDocs != null ? `VietNews: ${datasetDocs.toLocaleString()} mẫu` : 'RAG + document index'}
               icon={FileText}
               color="#0284c7"
+              delay={0}
             />
             <StatCard
               title="Phiên Phân Tích"
               value={dashMetrics.total_runs ?? 0}
-              subtext={`Gồm ${algorithmOutputs} thuật toán`}
-              trend="+14.2%"
-              trendType="up"
+              subtext={`${overview.chat_session_count ?? 0} chat · ${algorithmOutputs} thuật toán`}
               icon={Activity}
               color="#10b981"
+              delay={0.04}
             />
             <StatCard
               title="Mô Hình Đã Nạp"
               value={modelCount}
-              subtext={metrics?.gpu_name ? "Preloaded in VRAM" : "CPU Fallback"}
-              trend="Ready"
-              trendType="up"
+              subtext={metrics?.gpu_name ? `VRAM: ${metrics.gpu_name}` : 'CPU Fallback'}
               icon={Cpu}
               color="#6366f1"
+              delay={0.08}
             />
             <StatCard
               title="ROUGE-L TB"
-              value={(dashMetrics.avg_rouge?.rougeL ?? 0).toFixed(3)}
-              subtext="So với tóm tắt tham chiếu"
-              trend="+1.2%"
-              trendType="up"
+              value={avgRougeL.toFixed(3)}
+              subtext="Từ benchmark đã lưu"
               icon={Bot}
               color="#3b82f6"
+              delay={0.12}
             />
             <StatCard
               title="Độ Trễ TB"
-              value="1.42s"
+              value={avgLatency > 0 ? `${avgLatency.toFixed(2)}s` : '—'}
               subtext="Thời gian suy luận trung bình"
-              trend="-8.3%"
-              trendType="up"
               icon={Clock}
               color="#fb7185"
+              delay={0.16}
             />
             <StatCard
               title="Lượt Gọi AI"
               value={algorithmOutputs}
-              subtext="API calls / model runs"
-              trend="+18%"
-              trendType="up"
+              subtext="Tổng output thuật toán"
               icon={Sparkles}
               color="#f59e0b"
+              delay={0.2}
             />
           </>
         )}
       </div>
 
-      {/* Quick Actions */}
       <div className="space-y-3">
         <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)]">Thao tác nhanh Workspace</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <QuickAction icon={Sparkles} label="Tóm tắt mới" description="So kè hiệu năng các thuật toán NLP" to="/summarize" color="#6366f1" />
           <QuickAction icon={MessageSquare} label="Chat tài liệu RAG" description="Trò chuyện ngữ nghĩa với file PDF" to="/chat" color="#0284c7" />
           <QuickAction icon={GitCompareArrows} label="So sánh mô hình" description="Thống kê BLEU, ROUGE, Latency" to="/compare" color="#10b981" />
-          <QuickAction icon={Activity} label="Xem báo cáo" description="Đánh giá chi tiết hiệu suất hệ thống" to="/analytics" color="#f59e0b" />
+          <QuickAction icon={BarChart3} label="Benchmark" description="Leaderboard 15 thuật toán" to="/benchmark" color="#a855f7" />
+          <QuickAction icon={BarChart3} label="Dataset Analytics" description={datasetVocab ? `${datasetVocab.toLocaleString()} từ vựng VietNews` : 'Thống kê VietNews thực'} to="/dataset-analytics" color="#0ea5e9" />
+          <QuickAction icon={TrendingUp} label="Xem báo cáo" description="Đánh giá chi tiết hiệu suất hệ thống" to="/analytics" color="#f59e0b" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* System Status Monitoring Panel */}
         <div className="ui-card p-5 lg:col-span-1 flex flex-col justify-between bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-4 flex items-center gap-2">
               <Server size={14} className="text-sky-500" />
               Giám Sát Hạ Tầng AI
             </h3>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-[var(--text-muted)] flex items-center gap-1.5">
-                    <Cpu size={14} className="text-indigo-500" />
-                    GPU Model (NVIDIA RTX 4090)
-                  </span>
-                  <span className="text-[var(--text-primary)]">24% Load</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-[var(--bg-inset)] overflow-hidden">
-                  <div className="h-full bg-indigo-500 rounded-full" style={{ width: '24%' }} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-[var(--text-muted)] flex items-center gap-1.5">
-                    <HardDrive size={14} className="text-sky-500" />
-                    GPU VRAM Usage
-                  </span>
-                  <span className="text-[var(--text-primary)]">8.4 GB / 24 GB</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-[var(--bg-inset)] overflow-hidden">
-                  <div className="h-full bg-sky-500 rounded-full" style={{ width: '35%' }} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-[var(--text-muted)] flex items-center gap-1.5">
-                    <Server size={14} className="text-emerald-500" />
-                    System RAM (DDR5)
-                  </span>
-                  <span className="text-[var(--text-primary)]">32.6 GB / 64 GB</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-[var(--bg-inset)] overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: '51%' }} />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-[var(--border)] space-y-2 text-xs font-medium text-[var(--text-secondary)]">
-                <div className="flex justify-between">
-                  <span>Mô hình đang tải</span>
-                  <span className="font-bold text-sky-600 dark:text-sky-400">BARTPho & ViT5-Base</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Trạng thái suy luận</span>
-                  <span className="font-bold text-emerald-500">Sẵn sàng (Idle)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>GPU Temperature</span>
-                  <span>65°C</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-[var(--border)] text-[10px] text-[var(--text-faint)] font-bold uppercase tracking-wider text-center">
-            Cluster status: Healthy & Synchronized
+            <GpuMonitor gpu={gpu} node={node} models={models} loading={loading} />
           </div>
         </div>
 
-        {/* Analytics Charts */}
         <div className="ui-card p-5 lg:col-span-2 bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -341,7 +317,6 @@ const Overview = () => {
         </div>
       </div>
 
-      {/* Recent Activity Timeline */}
       <div className="ui-card p-5 bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
         <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-faint)] mb-5">{t('recentActivity')}</h3>
         <div className="relative pl-6 border-l border-[var(--border)] ml-3 space-y-6">
@@ -351,41 +326,49 @@ const Overview = () => {
               <Skeleton className="h-12 w-full rounded-lg" />
               <Skeleton className="h-12 w-full rounded-lg" />
             </>
-          ) : recentRuns.length === 0 ? (
+          ) : recentActivity.length === 0 ? (
             <p className="text-sm text-[var(--text-faint)] font-medium pl-2">{t('emptyRecent')}</p>
           ) : (
-            recentRuns.map((run, i) => (
-              <motion.div
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
-                key={run.result_id || `run-${i}`}
-                className="relative group"
-              >
-                {/* Timeline Dot */}
-                <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-elevated)] bg-sky-500 group-hover:scale-125 transition-transform" />
-
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[var(--bg-muted)]/30 hover:bg-[var(--bg-muted)]/60 border border-[var(--border)]/40 rounded-xl p-3 transition-colors duration-150">
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-secondary)]">
-                      <span className="font-bold text-[var(--text-primary)]">
-                        {run.best_algorithm || t('runCompareLabel')}
-                      </span>
-                      <span className="text-[var(--text-faint)]">•</span>
-                      <span>{t('runAlgorithms', { count: run.algorithm_count })}</span>
-                      <span className="text-[var(--text-faint)]">•</span>
-                      <span className="font-semibold text-sky-600 dark:text-sky-400">{t('runTarget', { ratio: run.target_length_ratio })}</span>
+            recentActivity.map((item, i) => {
+              const Icon = ACTIVITY_ICONS[item.type] || Activity;
+              const title = item.title || item.best_algorithm || t('runCompareLabel');
+              const detail = item.detail || item.text_preview || '';
+              return (
+                <motion.div
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  key={item.id || item.result_id || `act-${i}`}
+                  className="relative group"
+                >
+                  <span className="absolute -left-[31px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--bg-elevated)] bg-sky-500 group-hover:scale-125 transition-transform" />
+                  <Link to={item.link || '/analytics'} className="block">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[var(--bg-muted)]/30 hover:bg-[var(--bg-muted)]/60 border border-[var(--border)]/40 rounded-xl p-3 transition-colors duration-150">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                          <Icon size={12} className="text-sky-500" />
+                          <span className="font-bold text-[var(--text-primary)]">{title}</span>
+                          {item.meta?.algorithm_count != null && (
+                            <>
+                              <span className="text-[var(--text-faint)]">•</span>
+                              <span>{t('runAlgorithms', { count: item.meta.algorithm_count })}</span>
+                            </>
+                          )}
+                        </div>
+                        {detail && (
+                          <p className="text-[11px] text-[var(--text-muted)] leading-relaxed line-clamp-1 italic font-medium">
+                            &quot;{detail}&quot;
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-[10px] font-bold text-[var(--text-faint)] shrink-0 sm:text-right">
+                        {item.created_at ? new Date(item.created_at).toLocaleString(dLocale) : ''}
+                      </div>
                     </div>
-                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed line-clamp-1 italic font-medium">
-                      "${run.text_preview}"
-                    </p>
-                  </div>
-                  <div className="text-[10px] font-bold text-[var(--text-faint)] shrink-0 sm:text-right">
-                    {run.created_at ? new Date(run.created_at).toLocaleString(dLocale) : ''}
-                  </div>
-                </div>
-              </motion.div>
-            ))
+                  </Link>
+                </motion.div>
+              );
+            })
           )}
           {!loading && health?.status === 'ok' && (
             <div className="relative group">

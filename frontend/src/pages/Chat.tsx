@@ -12,6 +12,9 @@ import * as ragApi from '../services/ragApi';
 import { useApp } from '../context/AppContext';
 import { RAGDocument, RAGMessage, RAGCitation, RAGChatRequest, PipelineStageId } from '../types/rag';
 import PipelineVisualization, { type AdaptiveContextMetrics } from '../components/PipelineVisualization';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import { throttle } from '../utils/throttle';
 
 const formatModelName = (name: string | null | undefined) => {
   if (!name) return "";
@@ -25,6 +28,8 @@ const formatModelName = (name: string | null | undefined) => {
   if (n.includes("extractive")) return "Trích xuất Fallback";
   return name;
 };
+
+const CITATIONS_VISIBLE_KEY = 'chat_citations_visible';
 
 const SUGGESTED_QUESTIONS = [
   "Tài liệu này đề cập đến các vấn đề chính nào?",
@@ -42,6 +47,8 @@ export default function Chat() {
   // Tab & search states
   const [leftTab, setLeftTab] = useState<'history' | 'documents'>('history');
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+  const reducedMotion = usePrefersReducedMotion();
   const [editingConvId, setEditingConvId] = useState<string | null>(null);
   const [editTitleVal, setEditTitleVal] = useState('');
 
@@ -79,25 +86,42 @@ export default function Chat() {
   
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [citationsVisible, setCitationsVisible] = useState(() => {
+    try {
+      const stored = localStorage.getItem(CITATIONS_VISIBLE_KEY);
+      return stored === null ? true : stored === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [isMobile, setIsMobile] = useState(false);
   const [pipelineStage, setPipelineStage] = useState<PipelineStageId | null>(null);
   const [contextMetrics, setContextMetrics] = useState<AdaptiveContextMetrics>({});
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    const handleResize = throttle(() => setIsMobile(window.innerWidth < 1024), 150);
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(CITATIONS_VISIBLE_KEY, String(citationsVisible));
+    } catch {
+      // ignore storage errors
+    }
+  }, [citationsVisible]);
+
   // --- React Query Integrations ---
   const { data: conversationsData = [], isLoading: isConvsLoading } = useQuery({
-    queryKey: ['conversations', searchQuery],
+    queryKey: ['conversations', debouncedSearch],
     queryFn: async () => {
-      if (searchQuery.trim()) return await ragApi.searchConversations(searchQuery.trim());
+      if (debouncedSearch.trim()) return await ragApi.searchConversations(debouncedSearch.trim());
       return await ragApi.listRagConversations();
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 30_000,
   });
 
   const { data: fetchedMessages } = useQuery({
@@ -173,8 +197,10 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, chatLoading]);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isStreamingRef.current || reducedMotion ? 'auto' : 'smooth',
+    });
+  }, [messages, chatLoading, reducedMotion]);
 
   const loadDocuments = async (selectNewId?: string) => {
     try {
@@ -372,7 +398,9 @@ export default function Chat() {
           updated[lastIdx] = {
             role: 'assistant',
             content: finalResult.answer,
-            confidence: finalResult.confidence,
+            confidence: finalResult.retrieval_confidence ?? finalResult.confidence,
+            faithfulness: finalResult.faithfulness ?? finalResult.evaluation?.faithfulness,
+            retrieval_confidence: finalResult.retrieval_confidence ?? finalResult.confidence,
             citations: finalResult.retrieved_context,
             model_used: finalResult.model_used,
             evaluation: finalResult.evaluation,
@@ -446,7 +474,7 @@ export default function Chat() {
                     whileTap={{ scale: 0.95 }}
                     onClick={() => handleCitationClick(cite)}
                     className="inline-flex items-center justify-center w-4.5 h-4.5 rounded-full bg-sky-105 dark:bg-sky-900 text-sky-700 dark:text-sky-300 text-[9px] font-bold mx-0.5 border border-sky-300 dark:border-sky-800 align-super cursor-pointer shadow-sm"
-                    title={`Nguồn: ${cite.filename}`}
+                    title={`${t('ragCitationSource')} ${cite.filename}`}
                   >
                     {num}
                   </motion.button>
@@ -465,24 +493,36 @@ export default function Chat() {
         </p>
         
         <div className="pt-2 border-t border-[var(--border)] opacity-95">
-          <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider mb-2 flex items-center gap-1">
-            <ShieldCheck size={12} className="text-emerald-500" /> Nguồn tham chiếu từ file:
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {msg.citations.map((cite: RAGCitation, i: number) => (
-              <motion.button
-                key={cite.chunk_id}
-                whileHover={{ scale: 1.02, borderColor: 'var(--accent)' }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => handleCitationClick(cite)}
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-250/30 dark:border-emerald-800/40 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/10 transition-all cursor-pointer"
-              >
-                <span className="font-mono">[{i + 1}]</span>
-                <span className="truncate max-w-[100px]">{cite.filename}</span>
-                {cite.page !== null && <span className="opacity-60">(Tr. {cite.page})</span>}
-              </motion.button>
-            ))}
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-[10px] font-bold text-[var(--text-faint)] uppercase tracking-wider flex items-center gap-1">
+              <ShieldCheck size={12} className="text-emerald-500" /> {t('ragCitationsTitle')}
+            </p>
+            <button
+              type="button"
+              onClick={() => setCitationsVisible(v => !v)}
+              className="text-[11px] font-medium leading-none text-[var(--text-faint)] hover:text-sky-600 dark:hover:text-sky-400 px-1 py-0.5 rounded underline-offset-2 hover:underline transition-colors cursor-pointer shrink-0"
+              aria-expanded={citationsVisible}
+            >
+              {citationsVisible ? t('ragCitationsHide') : t('ragCitationsShow')}
+            </button>
           </div>
+          {citationsVisible && (
+            <div className="flex flex-wrap gap-1.5">
+              {msg.citations.map((cite: RAGCitation, i: number) => (
+                <motion.button
+                  key={cite.chunk_id}
+                  whileHover={{ scale: 1.02, borderColor: 'var(--accent)' }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleCitationClick(cite)}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-250/30 dark:border-emerald-800/40 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/10 transition-all cursor-pointer"
+                >
+                  <span className="font-mono">[{i + 1}]</span>
+                  <span className="truncate max-w-[100px]">{cite.filename}</span>
+                  {cite.page !== null && <span className="opacity-60">(Tr. {cite.page})</span>}
+                </motion.button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -498,11 +538,12 @@ export default function Chat() {
         {showLeftPanel && (
           <motion.section
             key="left-panel"
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: isMobile ? '100%' : 300, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            initial={reducedMotion ? false : { opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reducedMotion ? undefined : { opacity: 0, x: -12 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm"
+            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm gpu-layer"
+            style={{ width: isMobile ? '100%' : 300 }}
           >
             {/* Tabs */}
             <div className="flex border-b border-[var(--border)] p-1 bg-[var(--bg-muted)]/50">
@@ -821,11 +862,24 @@ export default function Chat() {
                           {formatModelName(msg.model_used)}
                         </span>
                       )}
-                      {!isUser && msg.confidence !== undefined && msg.confidence !== null && (
-                        <span className="text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-200/20 dark:border-emerald-800/40">
-                          Độ tin cậy: {Math.round(msg.confidence * 100)}%
-                        </span>
-                      )}
+                      {!isUser && (() => {
+                        const faithfulness = msg.faithfulness ?? msg.evaluation?.faithfulness;
+                        const retrievalConf = msg.retrieval_confidence ?? msg.confidence;
+                        return (
+                          <>
+                            {faithfulness !== undefined && faithfulness !== null && (
+                              <span className="text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-200/20 dark:border-emerald-800/40">
+                                Faithfulness: {Math.round(faithfulness * 100)}%
+                              </span>
+                            )}
+                            {retrievalConf !== undefined && retrievalConf !== null && msg.citations && msg.citations.length > 0 && (
+                              <span className="text-[9px] font-bold bg-sky-50 dark:bg-sky-950/20 text-sky-600 dark:text-sky-400 px-1.5 py-0.5 rounded border border-sky-200/20 dark:border-sky-800/40">
+                                Độ khớp retrieval: {Math.round(retrievalConf * 100)}%
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     <div className={`p-4 rounded-2xl border ${
                       isUser
@@ -896,11 +950,12 @@ export default function Chat() {
         {showRightPanel && (
           <motion.section
             key="right-panel"
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: isMobile ? '100%' : 320, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            initial={reducedMotion ? false : { opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reducedMotion ? undefined : { opacity: 0, x: 12 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm"
+            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-sm gpu-layer"
+            style={{ width: isMobile ? '100%' : 320 }}
           >
             {/* Header citations tab */}
             <div className="flex border-b border-[var(--border)] p-1 bg-[var(--bg-muted)]/50 shrink-0">

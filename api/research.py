@@ -535,8 +535,11 @@ from statistics import mean
 from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-REAL_BENCHMARK_PATH = PROJECT_ROOT / "storage" / "results" / "benchmark_1000_real.json"
-REAL_LEADERBOARD_ONLY_PATH = PROJECT_ROOT / "storage" / "results" / "benchmark_leaderboard_only.json"
+from src import config as _app_config
+
+DEFAULT_BENCHMARK_SIZE = getattr(_app_config, "BENCHMARK_SAMPLE_SIZE", 5000)
+REAL_BENCHMARK_PATH = PROJECT_ROOT / "storage" / "results" / f"benchmark_{DEFAULT_BENCHMARK_SIZE}_real.json"
+REAL_LEADERBOARD_ONLY_PATH = PROJECT_ROOT / "storage" / "results" / f"benchmark_leaderboard_only_{DEFAULT_BENCHMARK_SIZE}.json"
 BENCHMARK_FILE_PATH = REAL_BENCHMARK_PATH if REAL_BENCHMARK_PATH.exists() else (PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json")
 
 FALLBACK_LEADERBOARD = {
@@ -753,7 +756,7 @@ _cached_benchmark_mtime = {}  # {size: mtime}
 _cached_leaderboard_only = {}  # {size: data}
 _cached_leaderboard_only_mtime = {}  # {size: mtime}
 
-def get_benchmark_paths(size: int = 1000):
+def get_benchmark_paths(size: int = DEFAULT_BENCHMARK_SIZE):
     if size != 1000:
         real_path = PROJECT_ROOT / "storage" / "results" / f"benchmark_{size}_real.json"
         leaderboard_path = PROJECT_ROOT / "storage" / "results" / f"benchmark_leaderboard_only_{size}.json"
@@ -764,7 +767,7 @@ def get_benchmark_paths(size: int = 1000):
     benchmark_file_path = real_path if real_path.exists() else (PROJECT_ROOT / "storage" / "results" / "leaderboard_benchmark.json")
     return real_path, leaderboard_path, benchmark_file_path
 
-def _load_leaderboard_only(size: int = 1000) -> dict:
+def _load_leaderboard_only(size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Tải dữ liệu bảng xếp hạng từ benchmark_leaderboard_only_{size}.json siêu nhẹ."""
     global _cached_leaderboard_only, _cached_leaderboard_only_mtime
     
@@ -809,7 +812,7 @@ def _load_leaderboard_only(size: int = 1000) -> dict:
             "leaderboard_by_category": {}
         }
 
-def _load_benchmark_data(size: int = 1000) -> dict:
+def _load_benchmark_data(size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Tải dữ liệu từ file benchmark_{size}_real.json, nếu không tồn tại hoặc lỗi thì dùng fallback data."""
     global _cached_benchmark_data, _cached_benchmark_mtime
     
@@ -862,7 +865,7 @@ def _load_benchmark_data(size: int = 1000) -> dict:
 
 
 @router.get("/benchmark/data")
-async def get_benchmark_data(size: int = 1000) -> dict:
+async def get_benchmark_data(size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Endpoint kế thừa tương thích ngược. Trả về thống kê tóm tắt so sánh."""
     data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]
@@ -891,7 +894,7 @@ async def get_benchmark_data(size: int = 1000) -> dict:
     }
 
 @router.get("/leaderboard")
-async def get_leaderboard(size: int = 1000) -> dict:
+async def get_leaderboard(size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Trả về bảng xếp hạng (Leaderboard) được tổng hợp đầy đủ từ dữ liệu thực tế."""
     data = _load_leaderboard_only(size)
     return {
@@ -900,7 +903,7 @@ async def get_leaderboard(size: int = 1000) -> dict:
     }
 
 @router.get("/leaderboard/by-category")
-async def get_leaderboard_by_category(category: str, size: int = 1000) -> dict:
+async def get_leaderboard_by_category(category: str, size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Returns model leaderboard aggregated specifically for a category (Short, Medium, Long, Very Long)."""
     # Try lightweight pre-calculated stats first
     data = _load_leaderboard_only(size)
@@ -999,7 +1002,7 @@ async def get_benchmark_samples(
     limit: int = 10,
     category: Optional[str] = None,
     search: Optional[str] = None,
-    size: int = 1000
+    size: int = DEFAULT_BENCHMARK_SIZE
 ) -> dict:
     """Trả về danh sách mẫu test phục vụ tính năng duyệt dữ liệu trực quan."""
     data = _load_benchmark_data(size)
@@ -1037,7 +1040,7 @@ async def get_benchmark_samples(
     }
 
 @router.get("/hybrid-study")
-async def get_hybrid_study(locale: str = "vie", size: int = 1000) -> dict:
+async def get_hybrid_study(locale: str = "vie", size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Phân tích so sánh 3 nhóm mô hình (Trích xuất, Sinh, Lai) trên bộ dữ liệu kiểm thử."""
     data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]
@@ -1083,7 +1086,7 @@ async def get_hybrid_study(locale: str = "vie", size: int = 1000) -> dict:
     }
 
 @router.get("/report")
-async def get_report(locale: str = "vie", size: int = 1000) -> dict:
+async def get_report(locale: str = "vie", size: int = DEFAULT_BENCHMARK_SIZE) -> dict:
     """Trả về báo cáo khoa học trình bày đầy đủ kết luận thực nghiệm dựa trên số liệu của 1000 mẫu test."""
     data = _load_leaderboard_only(size)
     leaderboard = data["leaderboard"]

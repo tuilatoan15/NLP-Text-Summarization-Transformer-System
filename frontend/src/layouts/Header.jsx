@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, memo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Search, Moon, Sun, Bell, CheckCircle2, AlertCircle, Info, X, Command,
@@ -271,4 +271,4 @@ const Header = () => {
   );
 };
 
-export default Header;
+export default memo(Header);

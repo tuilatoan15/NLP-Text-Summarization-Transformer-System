@@ -8,6 +8,7 @@ import DashboardLayout from './layouts/DashboardLayout';
 const Overview = lazy(() => import('./pages/Overview'));
 const Playground = lazy(() => import('./pages/Playground'));
 const Analytics = lazy(() => import('./pages/Analytics'));
+const DatasetAnalytics = lazy(() => import('./pages/DatasetAnalytics'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Compare = lazy(() => import('./pages/Compare'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -27,6 +28,7 @@ const App = () => {
             <Route path="/summarize" element={<Playground />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/dataset-analytics" element={<DatasetAnalytics />} />
 
             {/* AI features */}
             <Route path="/compare" element={<Compare />} />

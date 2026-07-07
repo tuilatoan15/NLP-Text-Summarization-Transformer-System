@@ -451,13 +451,13 @@ button, input, textarea, select {
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 @keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translate3d(8px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 .animate-fade-in {
@@ -466,6 +466,40 @@ button, input, textarea, select {
 
 .animate-slide-in {
   animation: slide-in-right 0.2s ease-out;
+}
+
+/* GPU-friendly layer promotion (dùng có chọn lọc) */
+.gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.gpu-bar-fill {
+  transform-origin: left center;
+  will-change: transform;
+}
+
+/* prefers-reduced-motion: tắt animation không thiết yếu */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .ui-skeleton,
+  .algo-card-running,
+  .algo-dot-pulse,
+  .algo-badge-pulse,
+  .algo-progress-bar {
+    animation: none !important;
+  }
 }
 
 /* ─── Playground/Algo animation (legacy compat) ─── */
@@ -514,7 +548,8 @@ button, input, textarea, select {
 
 /* ─── Composite Score & Radar Chart Styles ─── */
 .composite-score-bar {
-  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: left center;
+  transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .radar-chart-tooltip {

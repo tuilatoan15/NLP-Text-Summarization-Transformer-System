@@ -131,10 +131,18 @@ export function AppProvider({ children }) {
 
   const t = useCallback((key, vars) => translate(locale, key, vars), [locale]);
 
-  const pushBrowserNotification = useCallback((title, body) => {
+  const pushBrowserNotification = useCallback((title, body, link = null) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
-      new Notification(title, { body, icon: '/favicon.ico' });
+      const notification = new Notification(title, { body, icon: '/favicon.ico' });
+      if (link) {
+        notification.onclick = () => {
+          window.focus();
+          const target = link.startsWith('http') ? link : `${window.location.origin}${link}`;
+          window.location.assign(target);
+          notification.close();
+        };
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -155,7 +163,7 @@ export function AppProvider({ children }) {
       createdAt: Date.now(),
     };
     setNotifications(prev => [item, ...prev].slice(0, MAX_NOTIFICATIONS));
-    if (showBrowser) pushBrowserNotification(title, message);
+    if (showBrowser) pushBrowserNotification(title, message, link);
     return item.id;
   }, [pushBrowserNotification]);
 

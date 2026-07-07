@@ -1,0 +1,23 @@
+<mxfile host="app.diagrams.net" modified="2026-07-04T00:00:00.000Z" agent="NLP-Flowchart-Gen" version="22.1.0" type="device">
+  <diagram id="diag-16analyticsdashboard" name="GET /analytics/dashboard">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="16analyticsdashboard-start" value="1. GET /analytics/dashboard?time_range&amp;limit" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;ellipse;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="40" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-p1" value="2. get_dashboard_payload(time_range, history_limit)" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="130" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e1" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-start" target="16analyticsdashboard-p1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-p2" value="3. _load_all_results từ RESULT_DIR" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="220" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e2" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-p1" target="16analyticsdashboard-p2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-p3" value="4. _filter_by_range (7d/30d/90d/all)" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="310" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e3" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-p2" target="16analyticsdashboard-p3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-p4" value="5. Tổng hợp metrics, timeseries, recent_activity" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="400" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e4" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-p3" target="16analyticsdashboard-p4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-p5" value="6. Cache kết quả (nếu đã warm ở startup)" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;rounded=0;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="490" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e5" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-p4" target="16analyticsdashboard-p5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-end" value="7. Phản hồi HTTP 200 (JSON dashboard)" style="fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;ellipse;whiteSpace=wrap;html=1;fontSize=12" vertex="1" parent="1"><mxGeometry x="285" y="580" width="280" height="50" as="geometry" /></mxCell>
+        <mxCell id="16analyticsdashboard-e6" style="strokeColor=#000000;fontColor=#000000;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic" edge="1" parent="1" source="16analyticsdashboard-p5" target="16analyticsdashboard-end"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

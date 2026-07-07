@@ -26,6 +26,25 @@ from .context_compression import CompressedContext
 logger = logging.getLogger(__name__)
 
 
+def _append_uncovered_doc_note(answer: str, filenames: list[str] | None) -> str:
+    """Ghi log và gắn ghi chú nếu câu trả lời chưa nhắc tới file đã chọn."""
+    if not filenames or len(filenames) <= 1 or not answer:
+        return answer
+    answer_lower = answer.lower()
+    uncovered: list[str] = []
+    for name in filenames:
+        base = name.rsplit(".", 1)[0]
+        if name.lower() not in answer_lower and base.lower() not in answer_lower:
+            uncovered.append(name)
+    if not uncovered:
+        return answer
+    logger.warning("Multi-doc answer thiếu tài liệu: %s", uncovered)
+    return (
+        f"{answer}\n\n"
+        f"(Lưu ý: câu trả lời có thể chưa đề cập đầy đủ: {', '.join(uncovered)})"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +414,8 @@ class RAGTransformerSummarizer:
         max_context_chars: int = 3000,
         general_chat: bool = False,
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Trả lời câu hỏi dựa trên context đã retrieve hoặc CompressedContext.
@@ -443,6 +464,8 @@ class RAGTransformerSummarizer:
                 contexts,
                 chat_history=chat_history,
                 compressed_context=compressed_context,
+                selected_document_ids=selected_document_ids,
+                selected_filenames=selected_filenames,
             )
             full_context = compressed_context.effective_context_text() if use_compression else "\n\n".join(
                 f"[{i}] {chunk['text']}" for i, chunk in enumerate(contexts, start=1)
@@ -487,6 +510,9 @@ class RAGTransformerSummarizer:
         if confidence_source and confidence_source[0].get("rerank_score") is not None:
             confidence = min(0.99, confidence_source[0]["rerank_score"])
 
+        if not general_chat:
+            answer = _append_uncovered_doc_note(answer, selected_filenames)
+
         return {
             "answer": answer,
             "confidence": round(confidence, 4),
@@ -504,6 +530,8 @@ class RAGTransformerSummarizer:
         max_context_chars: int = 3000,
         general_chat: bool = False,
         compressed_context: CompressedContext | None = None,
+        selected_document_ids: list[str] | None = None,
+        selected_filenames: list[str] | None = None,
     ):
         """Generator token thật cho streaming SSE."""
         from .rag_config import RAG_GENERATOR_TYPE
@@ -543,6 +571,8 @@ class RAGTransformerSummarizer:
                 contexts,
                 chat_history=chat_history,
                 compressed_context=compressed_context,
+                selected_document_ids=selected_document_ids,
+                selected_filenames=selected_filenames,
             )
             full_context = (
                 compressed_context.effective_context_text()
@@ -556,10 +586,17 @@ class RAGTransformerSummarizer:
 
         if RAG_GENERATOR_TYPE in {"gemini", "openai", "ollama"}:
             yielded = False
+            collected: list[str] = []
             for token in _run_llm_api_stream(prompt, RAG_GENERATOR_TYPE):
                 yielded = True
+                collected.append(token)
                 yield token
             if yielded:
+                if not general_chat and selected_filenames:
+                    full = "".join(collected)
+                    note = _append_uncovered_doc_note(full, selected_filenames)
+                    if note != full and note.startswith(full):
+                        yield note[len(full):]
                 return
 
         model_key = _pick_available_model()

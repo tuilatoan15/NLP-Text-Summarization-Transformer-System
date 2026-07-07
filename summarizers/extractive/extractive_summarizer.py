@@ -163,8 +163,13 @@ def _details(summary: str, selected: list[dict], source_sentences: list[str], al
 
 # ─────────────────────────── Algorithm implementations ─────────────────────
 
-def _textrank_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -> dict:
-    sentences = _prepare_sentences(text)
+def _textrank_details(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    *,
+    sentences: list[str] | None = None,
+) -> dict:
+    sentences = sentences if sentences is not None else _prepare_sentences(text)
     if len(sentences) <= sentence_count:
         selected = [
             {"sentence": s, "sentence_index": i, "sentence_score": 1.0, "match_similarity": 1.0}
@@ -178,8 +183,13 @@ def _textrank_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -
     return _details(summary, selected, sentences, "TextRank")
 
 
-def _lexrank_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -> dict:
-    sentences = _prepare_sentences(text)
+def _lexrank_details(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    *,
+    sentences: list[str] | None = None,
+) -> dict:
+    sentences = sentences if sentences is not None else _prepare_sentences(text)
     if len(sentences) <= sentence_count:
         selected = [
             {"sentence": s, "sentence_index": i, "sentence_score": 1.0, "match_similarity": 1.0}
@@ -196,8 +206,13 @@ def _lexrank_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) ->
     return _details(summary, selected, sentences, "LexRank")
 
 
-def _tfidf_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -> dict:
-    sentences = _prepare_sentences(text)
+def _tfidf_details(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    *,
+    sentences: list[str] | None = None,
+) -> dict:
+    sentences = sentences if sentences is not None else _prepare_sentences(text)
     if len(sentences) <= sentence_count:
         selected = [
             {"sentence": s, "sentence_index": i, "sentence_score": 1.0, "match_similarity": 1.0}
@@ -215,8 +230,13 @@ def _tfidf_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -> d
     return _details(summary, selected, sentences, "TF-IDF")
 
 
-def _lsa_details(text: str, sentence_count: int = DEFAULT_SENTENCE_COUNT) -> dict:
-    sentences = _prepare_sentences(text)
+def _lsa_details(
+    text: str,
+    sentence_count: int = DEFAULT_SENTENCE_COUNT,
+    *,
+    sentences: list[str] | None = None,
+) -> dict:
+    sentences = sentences if sentences is not None else _prepare_sentences(text)
     if len(sentences) <= sentence_count:
         selected = [
             {"sentence": s, "sentence_index": i, "sentence_score": 1.0, "match_similarity": 1.0}
@@ -271,8 +291,11 @@ def summarize_extractive_parallel(
         return {}
 
     t0 = time.perf_counter()
+    shared_sentences = _prepare_sentences(text)
     futures = {
-        _EXTRACTIVE_POOL.submit(EXTRACTIVE_RUNNERS[key], text, sentence_count): key
+        _EXTRACTIVE_POOL.submit(
+            EXTRACTIVE_RUNNERS[key], text, sentence_count, sentences=shared_sentences,
+        ): key
         for key in keys
     }
     results: dict[str, dict] = {}
