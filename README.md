@@ -15,6 +15,8 @@ A multi-algorithm **Vietnamese text summarization** system with **Retrieval-Augm
 
 **API Version:** `3.2.0`
 
+📺 **Demo:** [Google Drive](https://drive.google.com/drive/folders/1vqYw1rEsb3PA5w8WEal_L_Yuf9LvM2zl?usp=sharing)
+
 ---
 
 ## Table of Contents
